@@ -10,7 +10,10 @@
     "test": "node --test test/*.test.js",
     "zoodle": "NODE_USE_ENV_PROXY=1 node scripts/zoodle.mjs",
     "devkit": "node scripts/build.mjs --devkit",
-    "sounds": "node scripts/make-sounds.mjs assets/sounds"
+    "sounds": "node scripts/make-sounds.mjs assets/sounds",
+    "p0": "NODE_USE_ENV_PROXY=1 node scripts/p0.mjs",
+    "lot": "node scripts/make-lot.mjs",
+    "devkit:check": "node scripts/devkit-check.mjs"
   },
   "dependencies": {
     "three": "0.186.1"

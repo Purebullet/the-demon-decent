@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lot builder</title>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+</head>
+<body>
+<!-- Driven by scripts/make-lot.mjs: builds the street-view LODs in a browser (canvas textures). -->
+<script type="module">
+  import { buildLot } from '../src/lot/buildLot.js';
+  window.buildLot = buildLot;
+  window.ready = true;
+</script>
+</body>
+</html>

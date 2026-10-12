@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOD viewer</title>
+<style>html,body{margin:0;background:#f2f2ef}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+</head>
+<body>
+<!-- Shows dist/lot's three LODs side by side on a white city floor (for checking renders). -->
+<script type="module">
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  const r = new THREE.WebGLRenderer({ antialias: true });
+  r.setSize(1200, 500);
+  r.toneMapping = THREE.ACESFilmicToneMapping;
+  document.body.appendChild(r.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf2f2ef);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbbb, 1.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(10, 20, 8);
+  scene.add(sun);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0xe8e8e4 }));
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+  const q = new URLSearchParams(location.search);
+  const W = +q.get('w') || 12;
+  const loader = new GLTFLoader();
+  const names = ['lod0', 'lod1', 'lod2'];
+  const gl = await Promise.all(names.map((n) => loader.loadAsync(`../dist/lot/${n}.glb`)));
+  gl.forEach((g, i) => {
+    g.scene.position.x = (i - 1) * (W + 4);
+    scene.add(g.scene);
+    const box = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(-W / 2, 0, -W / 2), new THREE.Vector3(W / 2, +q.get('h') || 19, W / 2)), 0x222222);
+    box.position.x = g.scene.position.x;
+    scene.add(box);
+  });
+  const cam = new THREE.PerspectiveCamera(40, 1200 / 500, 0.1, 500);
+  const angle = +q.get('a') || 0.6;
+  cam.position.set(Math.sin(angle) * 55, +q.get('y') || 22, Math.cos(angle) * 55);
+  cam.lookAt(0, 6, 0);
+  r.render(scene, cam);
+  window.done = true;
+</script>
+</body>
+</html>
