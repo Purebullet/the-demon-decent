@@ -6,6 +6,7 @@ import { rockTextures, emberVeinTexture, runeCircleTexture } from './Textures.js
 import { lavaMaterial, portalMaterial } from './Shaders.js';
 import { C, spawnFlame, burst } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
+import { Assets } from '../assets/AssetLibrary.js';
 
 // Builds one cavern floor from its hand-authored map and runs its hazards.
 // Visuals are instanced where possible; collision and navigation come
@@ -158,7 +159,19 @@ export class Level {
       wallMat[k].repeat.set(3, 3);
       wallMat[k].needsUpdate = true;
     }
-    const geos = [boulderGeometry(1), boulderGeometry(2), boulderGeometry(3)];
+    // A generated cave rock replaces the stand-in boulders when present.
+    let wallGeoMat = wallMat;
+    let geos = [boulderGeometry(1), boulderGeometry(2), boulderGeometry(3)];
+    const rock = Assets.propGeometry('rock');
+    if (rock) {
+      const g = rock.geometry.clone();
+      g.computeBoundingBox();
+      g.center();
+      const sz = g.boundingBox.getSize(new THREE.Vector3());
+      g.scale(2 / sz.x, 2 / sz.y, 2 / sz.z);
+      geos = [g];
+      wallGeoMat = rock.material;
+    }
     const buckets = geos.map(() => []);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -175,11 +188,11 @@ export class Level {
         const w = 1.3 + r() * 0.35;
         s.set(w, 1.5 + r() * 0.6, w * (0.9 + r() * 0.2));
         m.compose(p, q, s);
-        buckets[Math.floor(r() * 3)].push(m.clone());
+        buckets[Math.floor(r() * geos.length)].push(m.clone());
       }
     }
     geos.forEach((g, i) => {
-      const inst = new THREE.InstancedMesh(g, wallMat, buckets[i].length);
+      const inst = new THREE.InstancedMesh(g, wallGeoMat, buckets[i].length);
       buckets[i].forEach((mm, k) => inst.setMatrixAt(k, mm));
       inst.instanceMatrix.needsUpdate = true;
       this.group.add(inst);
@@ -210,7 +223,7 @@ export class Level {
     stalGeo.translate(0, -0.5, 0);
     const stalMesh = new THREE.InstancedMesh(stalGeo, wallMat, stal.length);
     stal.forEach((mm, k) => stalMesh.setMatrixAt(k, mm));
-    const debrisMesh = new THREE.InstancedMesh(geos[0], wallMat, debris.length);
+    const debrisMesh = new THREE.InstancedMesh(geos[0], wallGeoMat, debris.length);
     debris.forEach((mm, k) => debrisMesh.setMatrixAt(k, mm));
     this.group.add(stalMesh, debrisMesh);
 
@@ -225,10 +238,21 @@ export class Level {
     }
     pillarGeo.computeVertexNormals();
     for (const pl of d.pillars) {
-      const o = new THREE.Mesh(pillarGeo, wallMat);
-      o.position.set(pl.x, CEIL / 2, pl.z);
+      const o = Assets.instanceProp('pillar') || new THREE.Mesh(pillarGeo, wallMat);
+      o.position.set(pl.x, o.isMesh ? CEIL / 2 : 0, pl.z);
       o.rotation.y = r() * 6;
       this.group.add(o);
+    }
+
+    // Skull piles, only when a generated model exists.
+    if (Assets.hasProp('skulls')) {
+      for (const t of d.floorTiles) {
+        if (r() > 0.05 || this.lavaSet.has(t.r * d.cols + t.c)) continue;
+        const o = Assets.instanceProp('skulls');
+        o.position.set(t.x + (r() - 0.5) * 1.2, 0, t.z + (r() - 0.5) * 1.2);
+        o.rotation.y = r() * 6;
+        this.group.add(o);
+      }
     }
   }
 
@@ -238,7 +262,13 @@ export class Level {
     const coal = new THREE.MeshStandardMaterial({ color: 0x331008, emissive: 0xff4a10, emissiveIntensity: 1.6 });
     this.braziers = [];
     d.braziers.forEach((b, i) => {
+      const generated = Assets.instanceProp('brazier');
+      if (generated) {
+        generated.position.set(b.x, 0, b.z);
+        this.group.add(generated);
+      }
       const g = new THREE.Group();
+      g.visible = !generated;
       g.position.set(b.x, 0, b.z);
       const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.3, 0.35, 12, 1, true), iron);
       bowl.position.y = 1.15;

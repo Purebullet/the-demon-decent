@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { emberVeinTexture } from '../world/Textures.js';
+import { Assets } from '../assets/AssetLibrary.js';
 
 // Melee weapons. The player never has armour; these are all there is.
 //
@@ -151,6 +152,20 @@ const leather = () => new THREE.MeshStandardMaterial({ color: 0x24160f, roughnes
 
 // Builds the weapon with its grip at the origin and the head along +Y.
 export function buildWeaponMesh(weapon) {
+  // Generated weapon model; higher tiers smoulder.
+  if (Assets.hasProp(weapon.type)) {
+    const w = Assets.instanceProp(weapon.type, { own: weapon.tier >= 2 });
+    w.traverse((o) => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false;
+      if (weapon.tier >= 2 && o.material.emissive) {
+        o.material.emissive.setHex(weapon.tier === 3 ? 0xff2a10 : 0xff7a20);
+        o.material.emissiveIntensity = weapon.tier === 3 ? 0.5 : 0.3;
+      }
+    });
+    w.scale.multiplyScalar(1 + weapon.tier * 0.05);
+    return w;
+  }
   const g = new THREE.Group();
   const m = metal(weapon.tier);
   const add = (geo, mat, y, sx = 1, sy = 1, sz = 1, rz = 0) => {

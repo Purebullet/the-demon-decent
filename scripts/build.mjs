@@ -5,7 +5,7 @@
 //        http://localhost:5173 so edits show on reload.
 
 import { build } from 'esbuild';
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, readdir, copyFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 
@@ -25,9 +25,23 @@ async function bundle() {
   let html = await readFile(join(root, 'index.html'), 'utf8');
   html = html.replace(/<script type="importmap">[\s\S]*?<\/script>\s*/, '');
   html = html.replace('<script type="module" src="./src/main.js"></script>', () => `<script type="module">${js}</script>`);
-  await mkdir(join(root, 'dist'), { recursive: true });
+  await rm(join(root, 'dist'), { recursive: true, force: true });
+  await mkdir(join(root, 'dist/assets/models'), { recursive: true });
   await writeFile(join(root, 'dist/index.html'), html);
   console.log(`dist/index.html  ${(html.length / 1024).toFixed(0)} KB`);
+  // Generated models ship next to the page; index.json tells the game which exist.
+  const models = await listModels();
+  for (const f of models) await copyFile(join(root, 'assets/models', f), join(root, 'dist/assets/models', f));
+  await writeFile(join(root, 'dist/assets/models/index.json'), JSON.stringify(models));
+  console.log(`dist/assets/models  ${models.length} model file(s)`);
+}
+
+async function listModels() {
+  try {
+    return (await readdir(join(root, 'assets/models'))).filter((f) => f.endsWith('.glb')).sort();
+  } catch {
+    return [];
+  }
 }
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png' };
@@ -35,6 +49,11 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/ja
 function serve(port = 5173) {
   createServer(async (req, res) => {
     const url = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (url === '/assets/models/index.json') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(await listModels()));
+      return;
+    }
     let file = normalize(join(root, url === '/' ? 'index.html' : url));
     if (!file.startsWith(root)) {
       res.writeHead(403).end();

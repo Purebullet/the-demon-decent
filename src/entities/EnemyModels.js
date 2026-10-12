@@ -131,7 +131,7 @@ function makeMats(defs) {
   return mats;
 }
 
-const FLAMES = {
+export const FLAMES = {
   horn: (ps, p) => spawnFlame(ps, p, { size: 0.42, rise: 1.8, life: 0.55, spread: 0.12 }),
   hornBlue: (ps, p) => spawnFlame(ps, p, { core: C.fireBlue, edge: C.fireEdge, size: 0.24, rise: 1.3, life: 0.4 }),
   green: (ps, p) => spawnFlame(ps, p, { core: C.greenCore, edge: C.greenEdge, size: 0.34, rise: 1.6, life: 0.65, spread: 0.22 }),

@@ -4,6 +4,7 @@ import { rockTextures, runeCircleTexture } from './Textures.js';
 import { bloodMaterial, portalMaterial } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
+import { Assets } from '../assets/AssetLibrary.js';
 
 // The safe chamber between floors. No enemies, no healing: three altars, and
 // you may wake only one of them before the way down opens.
@@ -97,6 +98,13 @@ export class Sanctum {
     const blood = new THREE.Mesh(new THREE.CircleGeometry(1.0, 32), this.wellMat);
     blood.rotation.x = -Math.PI / 2;
     blood.position.y = 0.62;
+    const gen = Assets.instanceProp('well');
+    if (gen) {
+      n.group.add(gen, blood);
+      blood.position.y = 0.72;
+      blood.scale.setScalar(0.9);
+      return Object.assign(n, { emit: () => {} }, this._wellEmitter(n, x, z));
+    }
     n.group.add(rim, wall, blood);
     // Iron frame and chain.
     const iron = new THREE.MeshStandardMaterial({ color: 0x2a2626, metalness: 0.8, roughness: 0.5 });
@@ -109,10 +117,15 @@ export class Sanctum {
     bar.rotation.z = Math.PI / 2;
     bar.position.y = 2.55;
     n.group.add(bar);
-    n.emit = (ps, t) => {
-      if (Math.random() < 0.5) ps.emit({ x: x + (Math.random() - 0.5) * 1.6, y: 0.7, z: z + (Math.random() - 0.5) * 1.6, vy: 0.6 + Math.random(), life: 1.4, size: 0.1, color: C.blood, colorEnd: C.bloodDark, turbulence: 0.8 });
+    return Object.assign(n, this._wellEmitter(n, x, z));
+  }
+
+  _wellEmitter(n, x, z) {
+    return {
+      emit: (ps) => {
+        if (Math.random() < 0.5) ps.emit({ x: x + (Math.random() - 0.5) * 1.6, y: 0.7, z: z + (Math.random() - 0.5) * 1.6, vy: 0.6 + Math.random(), life: 1.4, size: 0.1, color: C.blood, colorEnd: C.bloodDark, turbulence: 0.8 });
+      },
     };
-    return n;
   }
 
   _magicCircle(x, z) {

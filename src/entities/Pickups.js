@@ -3,6 +3,7 @@ import { buildWeaponMesh, WEAPON_TYPES } from './Weapons.js';
 import { SPELLS, SPELL_IDS, MAX_SPELL_LEVEL } from './Spells.js';
 import { runeCircleTexture } from '../world/Textures.js';
 import { C, burst } from '../world/Particles.js';
+import { Assets } from '../assets/AssetLibrary.js';
 
 // Loot on the cavern floor. Potions and spell sigils are taken by walking
 // over them; weapons need E so a good blade is never swapped by accident.
@@ -32,6 +33,8 @@ export class Pickups {
   }
 
   addPotion(x, z) {
+    const gen = Assets.instanceProp('potion');
+    if (gen) return this._add('potion', x, z, gen);
     const g = new THREE.Group();
     const liquid = new THREE.MeshStandardMaterial({ color: 0x9a0010, emissive: 0xff1020, emissiveIntensity: 1.3, roughness: 0.2, transparent: true, opacity: 0.92 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x664444, roughness: 0.1, metalness: 0.3 });

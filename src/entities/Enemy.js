@@ -3,6 +3,8 @@ import { StrikeVolume } from '../physics/Hitbox.js';
 import { ENEMY_TYPES } from './EnemyTypes.js';
 import { C, burst, ring } from '../world/Particles.js';
 import { angleDelta, rand } from '../core/rng.js';
+import { Assets } from '../assets/AssetLibrary.js';
+import { buildGltfCharacter } from './GltfCharacter.js';
 
 const WHITE = new THREE.Color(1, 1, 1);
 const tmpV = new THREE.Vector3();
@@ -24,7 +26,8 @@ export class Enemy {
     this.typeKey = typeKey;
     this.type = type;
     this.tuning = tuning;
-    this.model = type.build(type.buildOptions);
+    // The AI-generated model when its GLB is present, else the stand-in.
+    this.model = type.asset && Assets.hasCharacter(type.asset) ? buildGltfCharacter(type.asset, type.scale || 1) : type.build(type.buildOptions);
     this.root = this.model.root;
     if (type.scale) this.root.scale.setScalar(type.scale);
     this.position = this.root.position;
@@ -453,7 +456,8 @@ export class Enemy {
   _updateDying(dt, ctx) {
     const k = Math.min(1, this.stateT / this.stateDur);
     const fall = Math.min(1, this.stateT / 0.45);
-    this.root.rotation.set(-fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
+    // Models with their own death clip fall by themselves.
+    this.root.rotation.set(this.model.ownDeath ? 0 : -fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
     this.root.position.y = -Math.max(0, (k - 0.55) / 0.45) * 1.5 * (this.type.scale || 1);
     for (const e of this.emitters) e.rate *= 1 - Math.min(1, dt * 3);
     this._applyKnockback(dt, ctx);

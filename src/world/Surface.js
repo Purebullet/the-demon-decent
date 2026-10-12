@@ -4,6 +4,7 @@ import { rockTextures, fogPuffTexture, textTexture, emberVeinTexture, softDotTex
 import { abyssMaterial } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
+import { Assets } from '../assets/AssetLibrary.js';
 
 // Lot #1738: a jagged hole to hell torn through a ring of dark-stone ruins.
 // Dense fog clings to the pit's edge, embers stream up out of it, and a red
@@ -227,11 +228,15 @@ export class Surface {
       if (Math.abs(Math.atan2(Math.sin(a - Math.PI / 2), Math.cos(a - Math.PI / 2))) < 0.28) continue;
       const rad = PIT_RADIUS + 0.3 + r() * 2.2;
       const h = 1.2 + r() * 3.8 * (rad < PIT_RADIUS + 1.2 ? 1.3 : 0.8);
-      const s = new THREE.Mesh(geo, this.darkStone);
-      s.scale.set(0.35 + r() * 0.6, h, 0.35 + r() * 0.5);
+      const gen = Assets.instanceProp('shard');
+      const s = gen || new THREE.Mesh(geo, this.darkStone);
+      const sx = 0.35 + r() * 0.6;
+      const sz = 0.35 + r() * 0.5;
+      if (gen) s.scale.multiplyScalar(h / 4);
+      else s.scale.set(sx, h, sz);
       const x = Math.cos(a) * rad;
       const z = Math.sin(a) * rad;
-      s.position.set(x, this.heightAt(x, z) + h * 0.35, z);
+      s.position.set(x, this.heightAt(x, z) + (gen ? -0.3 : h * 0.35), z);
       // Lean inward over the hole like broken teeth. 'ZXY' spins the shard
       // about its own axis first, then tilts it toward the centre.
       const lean = 0.25 + r() * 0.5;
@@ -241,6 +246,15 @@ export class Surface {
   }
 
   _column(x, z, h, broken = true) {
+    const gen = Assets.instanceProp('column');
+    if (gen) {
+      gen.scale.multiplyScalar(h / 5);
+      gen.position.set(x, this.heightAt(x, z) - 0.15, z);
+      gen.rotation.y = this.rand() * 6;
+      this.group.add(gen);
+      this.circles.push({ x, z, r: 0.8 });
+      return gen;
+    }
     const g = new THREE.Group();
     const shaftGeo = new THREE.CylinderGeometry(0.55, 0.62, h, 12, 4);
     if (broken) {
@@ -339,8 +353,10 @@ export class Surface {
       const x = (i % 2 ? 1 : -1) * (5 + r() * 9);
       const z = 15 + r() * 12;
       const h = 0.8 + r() * 0.6;
-      const g = new THREE.Mesh(new THREE.BoxGeometry(0.6, h, 0.18), this.darkStone);
-      g.position.set(x, this.heightAt(x, z) + h / 2 - 0.1, z);
+      const gen = Assets.instanceProp('gravestone');
+      const g = gen || new THREE.Mesh(new THREE.BoxGeometry(0.6, h, 0.18), this.darkStone);
+      if (gen) gen.scale.multiplyScalar(h / 1.2);
+      g.position.set(x, this.heightAt(x, z) + (gen ? -0.1 : h / 2 - 0.1), z);
       g.rotation.set((r() - 0.5) * 0.3, r() * 0.6 - 0.3, (r() - 0.5) * 0.3);
       this.group.add(g);
       this.circles.push({ x, z, r: 0.4 });
@@ -352,8 +368,17 @@ export class Surface {
     const r = this.rand;
     const spots = [[-12, 18], [14, 16], [-25, -4], [26, -6], [-9, -28], [19, 24]];
     for (const [x, z] of spots) {
-      const tree = new THREE.Group();
       const h = 4 + r() * 3;
+      const gen = Assets.instanceProp('tree');
+      if (gen) {
+        gen.scale.multiplyScalar(h / 6);
+        gen.position.set(x, this.heightAt(x, z) - 0.1, z);
+        gen.rotation.y = r() * 6;
+        this.group.add(gen);
+        this.circles.push({ x, z, r: 0.5 });
+        continue;
+      }
+      const tree = new THREE.Group();
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.35, h, 7), bark);
       trunk.position.y = h / 2;
       trunk.rotation.z = (r() - 0.5) * 0.2;
@@ -386,7 +411,11 @@ export class Surface {
       bowl.position.set(s * 4.6, 1.3 + this.heightAt(s * 4.6, z - 1), z - 1);
       const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 8), bowl.material);
       stand.position.set(s * 4.6, 0.6 + this.heightAt(s * 4.6, z - 1), z - 1);
-      this.group.add(bowl, stand);
+      const gen = Assets.instanceProp('brazier');
+      if (gen) {
+        gen.position.set(s * 4.6, this.heightAt(s * 4.6, z - 1), z - 1);
+        this.group.add(gen);
+      } else this.group.add(bowl, stand);
       this.circles.push({ x: s * 4.6, z: z - 1, r: 0.5 });
       this.braziers = this.braziers || [];
       this.braziers.push(new THREE.Vector3(s * 4.6, bowl.position.y + 0.15, z - 1));

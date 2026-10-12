@@ -19,6 +19,43 @@ export class Hurtbox {
   }
 }
 
+// A hurtbox that follows a bone's position but keeps the character's own
+// orientation. Rigs from different generators use different bone axes, so
+// orienting by the root keeps box sizes meaningful on any skeleton.
+// `offset` and `half` are in the frame's local units (scaled with it).
+export class AnchoredHurtbox {
+  constructor(anchor, frame, offset, half, { name = 'body', multiplier = 1 } = {}) {
+    this.anchor = anchor;
+    this.frame = frame;
+    this.offset = new Vector3().copy(offset);
+    this.localHalf = new Vector3().copy(half);
+    this.name = name;
+    this.multiplier = multiplier;
+    this.obb = new OBB();
+    this._axes = [new Vector3(), new Vector3(), new Vector3()];
+    this._p = new Vector3();
+    this._h = new Vector3();
+  }
+
+  update() {
+    const e = this.frame.matrixWorld.elements;
+    const [ax, ay, az] = this._axes;
+    ax.set(e[0], e[1], e[2]);
+    ay.set(e[4], e[5], e[6]);
+    az.set(e[8], e[9], e[10]);
+    const sx = ax.length() || 1;
+    const sy = ay.length() || 1;
+    const sz = az.length() || 1;
+    ax.divideScalar(sx);
+    ay.divideScalar(sy);
+    az.divideScalar(sz);
+    this.anchor.getWorldPosition(this._p);
+    this._p.addScaledVector(ax, this.offset.x * sx).addScaledVector(ay, this.offset.y * sy).addScaledVector(az, this.offset.z * sz);
+    this._h.set(this.localHalf.x * sx, this.localHalf.y * sy, this.localHalf.z * sz);
+    this.obb.set(this._p, ax, ay, az, this._h);
+  }
+}
+
 // An attack volume defined in an attacker's local space (e.g. the sweep of a
 // claw in front of a ghoul). Active only during strike frames.
 export class StrikeVolume {

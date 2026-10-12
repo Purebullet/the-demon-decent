@@ -14,6 +14,7 @@ import { C, burst, ring } from '../world/Particles.js';
 export const BOSS_TYPES = {
   gorvath: {
     name: 'Gorvath, the Flame-Horned',
+    asset: 'gorvath',
     build: buildBrute,
     buildOptions: { boss: true },
     scale: 1.9,
@@ -41,6 +42,7 @@ export const BOSS_TYPES = {
   },
   azrakel: {
     name: 'Azrakel, the Winged Archfiend',
+    asset: 'azrakel',
     build: buildArchfiend,
     scale: 1.45,
     hp: 3600,

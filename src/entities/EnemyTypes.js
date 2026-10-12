@@ -10,6 +10,7 @@ import { buildGhoul, buildFiend, buildBrute } from './EnemyModels.js';
 export const ENEMY_TYPES = {
   ghoul: {
     name: 'Husk Ghoul',
+    asset: 'ghoul',
     build: buildGhoul,
     hp: 38,
     dmg: 8,
@@ -30,6 +31,7 @@ export const ENEMY_TYPES = {
   },
   fiend: {
     name: 'Chain Fiend',
+    asset: 'fiend',
     build: buildFiend,
     hp: 72,
     dmg: 13,
@@ -49,6 +51,7 @@ export const ENEMY_TYPES = {
   },
   brute: {
     name: 'Flame-Horned Brute',
+    asset: 'brute',
     build: buildBrute,
     hp: 170,
     dmg: 22,
