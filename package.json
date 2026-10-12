@@ -1,0 +1,19 @@
+{
+  "name": "the-demon-descent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A brutal dark-fantasy first-person roguelike descent into hell. Project 0 lot #1738.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build.mjs --serve",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  },
+  "license": "MIT"
+}
