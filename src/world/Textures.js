@@ -11,10 +11,19 @@ function cached(key, make) {
   return cache.get(key);
 }
 
+// A 2D canvas in a page, or an OffscreenCanvas inside Project 0's worker.
+export function makeCanvas(w, h = w) {
+  if (typeof document !== 'undefined') {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    return c;
+  }
+  return new OffscreenCanvas(w, h);
+}
+
 function canvas(size) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  return c;
+  return makeCanvas(size);
 }
 
 // Value noise whose lattice wraps at `period`, so the textures tile.
@@ -229,9 +238,7 @@ export function runeCircleTexture(color = '#b04dff') {
 
 // Text panel (obelisk inscription). Not cached: content changes.
 export function textTexture(lines, { width = 512, height = 512, color = '#ff5a2a', bg = '#120808' } = {}) {
-  const c = document.createElement('canvas');
-  c.width = width;
-  c.height = height;
+  const c = makeCanvas(width, height);
   const ctx = c.getContext('2d');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);

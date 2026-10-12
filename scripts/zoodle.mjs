@@ -4,7 +4,8 @@
 //
 //   node scripts/zoodle.mjs status                 what is generated, what is missing
 //   node scripts/zoodle.mjs list                   your finished Zoodle creations
-//   node scripts/zoodle.mjs pull ghoul=<id> ...    download existing creations into slots (free)
+//   node scripts/zoodle.mjs pull ghoul=<id> ...    download existing creations into slots (free);
+//                                                   a character's Zoodle animations come too
 //   node scripts/zoodle.mjs pull                   re-download every slot recorded in assets/zoodle.json
 //   node scripts/zoodle.mjs objects [slot ...]     generate props from their text prompts
 //   node scripts/zoodle.mjs batch [slot ...]       generate characters from the reference art
@@ -15,7 +16,9 @@
 // assets/zoodle.json so models can be re-downloaded without paying again.
 //
 // The key is read from the ZOODLE_API_KEY environment variable (an
-// environment secret in Claude Code on the web).
+// environment secret in Claude Code on the web). Behind an HTTPS proxy, run
+// with NODE_USE_ENV_PROXY=1 (`npm run zoodle` does) so fetch uses it.
+// API reference: https://zoodle3d.com/api/v1/docs
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -26,9 +29,9 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const RECORD = join(ROOT, 'assets/zoodle.json');
 const BATCH_ITEM_COST = 30;
 
-// Batch API routes. The documented flow is: create a job, add items
-// (imageBase64 + unique clientRef), close it, poll it. Check these against
-// https://zoodle3d.com/api/v1/docs before the first paid run.
+// Batch image-to-3D: create a job (free), submit one image per request
+// (30 Z-Coins each; a repeated clientRef in the same job is not charged
+// again), close the job, poll it every 5-10 s.
 const BATCH = {
   create: () => '/api/v1/batch/jobs',
   addItem: (job) => `/api/v1/batch/jobs/${job}/items`,
@@ -41,6 +44,17 @@ const command = args[0] || 'status';
 const spend = args.includes('--spend');
 const names = args.slice(1).filter((a) => !a.startsWith('--'));
 const SLOTS = { ...CHARACTERS, ...PROPS };
+
+// Zoodle animation names -> the clip slots the game plays.
+const CLIP_SLOTS = {
+  idle: /idle|breath|stand/i,
+  walk: /walk|stride|prowl|creep/i,
+  run: /run|sprint|charge|dash/i,
+  attack: /attack|slash|swing|strike|punch|claw|smash|lunge|bite/i,
+  hit: /hit|hurt|react|flinch|stagger/i,
+  death: /death|die|dying|collapse|fall/i,
+};
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
 
 function key() {
   const k = process.env.ZOODLE_API_KEY;
@@ -92,12 +106,14 @@ async function exists(p) {
   }
 }
 
-async function save(slot, glb) {
-  const path = join(ROOT, SLOTS[slot].model);
+async function saveFile(rel, data) {
+  const path = join(ROOT, rel);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, glb);
-  console.log(`  saved ${SLOTS[slot].model} (${(glb.length / 1024).toFixed(0)} KB)`);
+  await writeFile(path, data);
+  console.log(`  saved ${rel} (${(data.length / 1024).toFixed(0)} KB)`);
 }
+
+const save = (slot, glb) => saveFile(SLOTS[slot].model, glb);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pick = (o, ...keys) => keys.map((k) => k.split('.').reduce((v, p) => v?.[p], o)).find((v) => v !== undefined);
@@ -133,10 +149,34 @@ async function pull() {
   for (const [slot, id] of pairs) {
     if (!SLOTS[slot] || !id) throw new Error(`Use slot=<id>; slots: ${Object.keys(SLOTS).join(', ')}`);
     console.log(`${slot} <- ${id}`);
-    await save(slot, await api(`/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
+    const clips = CHARACTERS[slot] ? await pullAnimations(slot, id) : 0;
+    // A rigged animation GLB carries the mesh too; without one, the static game model.
+    if (!clips) await save(slot, await api(`/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
     rec.slots[slot] = { ...rec.slots[slot], id };
     await saveRecord(rec);
   }
+}
+
+// Saves a character's finished Zoodle animations as <slot>-<clip>.glb, and
+// the first one also as the rigged base model <slot>.glb.
+async function pullAnimations(slot, id) {
+  const { animations = [] } = await api(`/api/v1/characters/${encodeURIComponent(id)}/animations`);
+  const taken = new Set();
+  let base = false;
+  for (const a of animations) {
+    const text = `${a.name || ''} ${a.prompt || ''}`;
+    const clip = Object.keys(CLIP_SLOTS).find((c) => !taken.has(c) && CLIP_SLOTS[c].test(text));
+    if (!clip) continue;
+    taken.add(clip);
+    const glb = await api(a.glbUrl, { raw: true });
+    await saveFile(`assets/models/${slot}-${clip}.glb`, glb);
+    if (!base) {
+      await save(slot, glb);
+      base = true;
+    }
+  }
+  if (taken.size) console.log(`  clips: ${[...taken].join(', ')}`);
+  return taken.size;
 }
 
 async function objects() {
@@ -153,7 +193,9 @@ async function objects() {
   }
   for (const s of todo) {
     console.log(`${s}: generating`);
-    const made = await api('/api/v1/objects', { method: 'POST', body: { prompt: SLOTS[s].prompt } });
+    // Prompts are 3-500 characters; at most 5 creations a minute.
+    const made = await api('/api/v1/objects', { method: 'POST', body: { prompt: SLOTS[s].prompt.slice(0, 500), name: s, faceLimit: 10000 } });
+    console.log(`  cost ${made.cost ?? '?'}, balance ${made.balance ?? '?'}`);
     const id = pick(made, 'id', 'object.id', 'objectId');
     if (!id) throw new Error(`No object id in response: ${JSON.stringify(made).slice(0, 300)}`);
     rec.slots[s] = { id, source: 'objects', status: 'pending' };
@@ -173,6 +215,7 @@ async function objects() {
     await save(s, await api(modelPath, { raw: true }));
     rec.slots[s].status = 'done';
     await saveRecord(rec);
+    await sleep(13000);
   }
 }
 
@@ -188,8 +231,8 @@ async function batch() {
     return;
   }
   const rec = await loadRecord();
-  const job = await api(BATCH.create(), { method: 'POST', body: {} });
-  const jobId = pick(job, 'id', 'jobId', 'job.id');
+  const job = await api(BATCH.create(), { method: 'POST', body: { label: 'The Demon Descent characters' } });
+  const jobId = pick(job, 'jobId', 'id', 'job.id');
   if (!jobId) throw new Error(`No job id in response: ${JSON.stringify(job).slice(0, 300)}`);
   console.log(`batch job ${jobId}`);
   const run = Date.now().toString(36);
@@ -197,8 +240,10 @@ async function batch() {
   for (const s of todo) {
     const clientRef = `demon-descent-${s}-${run}`;
     refs[clientRef] = s;
-    const imageBase64 = (await readFile(join(ROOT, SLOTS[s].reference))).toString('base64');
-    await api(BATCH.addItem(jobId), { method: 'POST', body: { imageBase64, clientRef } });
+    const ref = SLOTS[s].reference;
+    const mime = MIME[ref.split('.').pop().toLowerCase()];
+    const imageBase64 = `data:${mime};base64,${(await readFile(join(ROOT, ref))).toString('base64')}`;
+    await api(BATCH.addItem(jobId), { method: 'POST', body: { imageBase64, clientRef, style: 'realistic' } });
     rec.slots[s] = { source: 'batch', job: jobId, clientRef, status: 'pending' };
     await saveRecord(rec);
     console.log(`  queued ${s}`);
@@ -209,11 +254,15 @@ async function batch() {
     if (i > 360) throw new Error(`Timed out; job ${jobId} is recorded in assets/zoodle.json`);
     await sleep(5000);
     const state = await api(BATCH.poll(jobId));
-    for (const item of pick(state, 'items', 'job.items') || []) {
+    const items = pick(state, 'items', 'job.items') || [];
+    if (pick(state, 'done', 'job.done') && !items.some((it) => refs[it.clientRef] && !done.has(refs[it.clientRef]) && ['completed', 'failed'].includes(it.status))) {
+      for (const s of todo) if (!done.has(s)) done.add(s);
+    }
+    for (const item of items) {
       const s = refs[item.clientRef];
       if (!s || done.has(s)) continue;
       if (item.status === 'completed') {
-        const id = pick(item, 'characterId', 'id');
+        const id = pick(item, 'characterId', 'itemId', 'id');
         await save(s, await api(item.gameModelUrl || `/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
         rec.slots[s] = { ...rec.slots[s], id, status: 'done' };
         done.add(s);

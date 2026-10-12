@@ -1,5 +1,9 @@
 import { Game } from './game/Game.js';
 import { Assets } from './assets/AssetLibrary.js';
+import { createBrowserHost } from './platform/browserhost.js';
+
+// Entry for a plain web page (`npm run dev`, or the game on its own site).
+// Project 0 uses src/experience.js instead.
 
 function webglAvailable() {
   try {
@@ -10,22 +14,21 @@ function webglAvailable() {
   }
 }
 
+const status = document.getElementById('status');
 if (!webglAvailable()) {
-  document.getElementById('title').style.display = 'none';
-  document.getElementById('nogl').style.display = 'flex';
+  status.textContent = 'WebGL is required. Try a recent desktop browser.';
 } else {
-  // Load whatever AI-generated models exist before the lot is built.
-  const status = document.getElementById('titleBest');
-  status.textContent = 'Summoning\u2026';
+  const host = createBrowserHost(document.getElementById('game'));
+  const params = new URLSearchParams(location.search);
+  const devFloor = Math.min(20, Math.max(0, parseInt(params.get('floor') || '0', 10) || 0));
   Assets.preload((done, total) => {
-    status.textContent = `Summoning\u2026 ${done}/${total}`;
-  }).then((loaded) => {
+    status.textContent = `Summoning… ${done}/${total}`;
+  }).then(async (loaded) => {
     if (loaded.length) console.info(`Loaded ${loaded.length} generated models`, loaded);
-    const game = new Game(document.getElementById('game'));
+    const game = new Game(host, { lotLabel: 'Lot #265', devFloor });
+    await game.ready();
     // Handy for debugging from the console.
     window.__demonDescent = game;
-    requestAnimationFrame(() => {
-      document.getElementById('fade').style.opacity = '0';
-    });
+    status.remove();
   });
 }

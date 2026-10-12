@@ -8,10 +8,12 @@
     "dev": "node scripts/build.mjs --serve",
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.js",
-    "zoodle": "node scripts/zoodle.mjs"
+    "zoodle": "NODE_USE_ENV_PROXY=1 node scripts/zoodle.mjs",
+    "devkit": "node scripts/build.mjs --devkit",
+    "sounds": "node scripts/make-sounds.mjs assets/sounds"
   },
   "dependencies": {
-    "three": "0.170.0"
+    "three": "0.186.1"
   },
   "devDependencies": {
     "esbuild": "0.25.12"

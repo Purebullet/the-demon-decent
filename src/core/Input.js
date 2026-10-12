@@ -1,50 +1,71 @@
-// Keyboard + pointer-lock mouse input.
-// Held state is queried with isDown(); one-shot presses with wasPressed(),
-// which are cleared at the end of every frame by endFrame().
+// Keyboard + mouse/touch input from the host (Project 0's sandbox or a web
+// page). Held state is queried with isDown(); one-shot presses with
+// wasPressed(), cleared every frame by endFrame().
+//
+// Looking around: mouse movement while the pointer is locked, or a drag when
+// it is not (pointer lock can be refused, and phones have none). On a touch
+// screen a short tap is a click.
 
 export class Input {
-  constructor(dom) {
-    this.dom = dom;
+  constructor(host) {
+    this.host = host;
     this.keys = new Set();
     this.pressed = new Set();
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.mouseDown = [false, false, false];
     this.mouseClicked = [false, false, false];
-    this.locked = false;
+    this.taps = [];
+    this.pointer = { x: 0, y: 0 };
+    this.touch = false;
     this.sensitivity = 0.0022;
+    this.dragSensitivity = 0.005;
     this.onLockChange = null;
+    this._down = null;
 
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
-      if (!e.repeat) this.pressed.add(e.code);
+    host.on('keydown', (e) => {
+      if (!e.code || e.repeat) return;
+      this.pressed.add(e.code);
       this.keys.add(e.code);
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => {
-      this.keys.clear();
-      this.mouseDown.fill(false);
+    host.on('keyup', (e) => this.keys.delete(e.code));
+    host.on('pointerdown', (e) => {
+      this.pointer.x = e.x;
+      this.pointer.y = e.y;
+      this.touch = !!e.touch;
+      this._down = { x: e.x, y: e.y, t: performance.now(), moved: 0, button: e.button ?? 0 };
+      if (this.locked || !e.touch) {
+        const b = Math.max(0, e.button ?? 0);
+        this.mouseDown[b] = true;
+        this.mouseClicked[b] = true;
+      }
+      this.taps.push({ x: e.x, y: e.y, touch: !!e.touch });
     });
-
-    document.addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
-      // Some browsers report huge spikes on lock; drop them.
-      if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
-      this.mouseDX += e.movementX;
-      this.mouseDY += e.movementY;
+    host.on('pointerup', (e) => {
+      const b = Math.max(0, e.button ?? 0);
+      this.mouseDown[b] = false;
+      // A short touch with little movement is a tap = attack.
+      const d = this._down;
+      if (d && e.touch && d.moved < 12 && performance.now() - d.t < 300) this.mouseClicked[0] = true;
+      this._down = null;
     });
-    dom.addEventListener('mousedown', (e) => {
-      if (!this.locked) return;
-      this.mouseDown[e.button] = true;
-      this.mouseClicked[e.button] = true;
+    host.on('pointermove', (e) => {
+      this.pointer.x = e.x;
+      this.pointer.y = e.y;
+      const dx = e.dx || 0;
+      const dy = e.dy || 0;
+      if (this.locked) {
+        if (Math.abs(dx) < 300 && Math.abs(dy) < 300) {
+          this.mouseDX += dx * this.sensitivity;
+          this.mouseDY += dy * this.sensitivity;
+        }
+      } else if (this._down) {
+        this._down.moved += Math.abs(dx) + Math.abs(dy);
+        this.mouseDX += dx * this.dragSensitivity;
+        this.mouseDY += dy * this.dragSensitivity;
+      }
     });
-    window.addEventListener('mouseup', (e) => {
-      this.mouseDown[e.button] = false;
-    });
-    dom.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === this.dom;
+    host.on('pointerlock', () => {
       if (!this.locked) {
         this.keys.clear();
         this.mouseDown.fill(false);
@@ -53,19 +74,16 @@ export class Input {
     });
   }
 
-  requestLock() {
-    if (this.locked) return;
-    const req = this.dom.requestPointerLock?.();
-    // Chrome returns a promise that rejects if the user exits lock too quickly.
-    req?.catch?.(() => {});
+  get locked() {
+    return this.host.pointerLocked;
   }
 
-  exitLock() {
-    if (document.pointerLockElement) document.exitPointerLock();
+  requestLock() {
+    if (!this.locked && !this.touch) this.host.lockPointer();
   }
 
   isDown(code) {
-    return this.keys.has(code);
+    return this.keys.has(code) || this.host.isDown?.(code);
   }
 
   wasPressed(code) {
@@ -80,15 +98,23 @@ export class Input {
   }
 
   consumeMouse() {
-    const dx = this.mouseDX * this.sensitivity;
-    const dy = this.mouseDY * this.sensitivity;
+    const dx = this.mouseDX;
+    const dy = this.mouseDY;
     this.mouseDX = 0;
     this.mouseDY = 0;
     return { dx, dy };
   }
 
+  // A tap that hit an on-screen button: it should not also attack or look.
+  claimTap() {
+    this._down = null;
+    this.mouseClicked[0] = false;
+    this.mouseDown[0] = false;
+  }
+
   endFrame() {
     this.pressed.clear();
     this.mouseClicked.fill(false);
+    this.taps.length = 0;
   }
 }

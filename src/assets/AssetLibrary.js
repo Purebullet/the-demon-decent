@@ -70,9 +70,12 @@ const _box = new THREE.Box3();
 const _v = new THREE.Vector3();
 const _c = new THREE.Vector3();
 
+// Package paths -> URLs (Project 0's p0.asset(); a page uses them as-is).
+let resolveUrl = (p) => p;
+
 async function loadIndex() {
   try {
-    const res = await fetch('assets/models/index.json', { cache: 'no-store' });
+    const res = await fetch(resolveUrl('assets/models/index.json'), { cache: 'no-store' });
     if (!res.ok) return new Set();
     const list = await res.json();
     return new Set(list.map((f) => `assets/models/${f}`));
@@ -84,7 +87,7 @@ async function loadIndex() {
 async function load(url, available) {
   if (!url || !available.has(url)) return null;
   try {
-    return await loader.loadAsync(url);
+    return await loader.loadAsync(resolveUrl(url));
   } catch (e) {
     console.warn(`Could not load ${url}: ${e.message}`);
     return null;
@@ -122,7 +125,8 @@ export const Assets = {
   props: new Map(),
   loaded: [],
 
-  async preload(onProgress) {
+  async preload(onProgress, resolve = null) {
+    if (resolve) resolveUrl = resolve;
     const available = await loadIndex();
     const jobs = [
       ...Object.entries(CHARACTERS).map(([id, e]) => () => this._loadCharacter(id, e, available)),
@@ -154,7 +158,11 @@ export const Assets = {
     const gltf = await load(entry.model, available);
     if (!gltf) return;
     const extra = {};
-    for (const [slot, url] of Object.entries(entry.animations || {})) {
+    // Clips saved as <id>-<clip>.glb (e.g. by `npm run zoodle -- pull`), plus
+    // any the manifest names.
+    const clipFiles = {};
+    for (const slot of Object.keys(CLIP_PATTERNS)) clipFiles[slot] = `assets/models/${id}-${slot}.glb`;
+    for (const [slot, url] of Object.entries({ ...clipFiles, ...(entry.animations || {}) })) {
       const a = await load(url, available);
       if (a?.animations.length) {
         extra[slot] = a.animations[0].clone();

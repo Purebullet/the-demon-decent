@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
-import { rockTextures, fogPuffTexture, textTexture, emberVeinTexture, softDotTexture } from './Textures.js';
+import { rockTextures, fogPuffTexture, textTexture, emberVeinTexture, softDotTexture, makeCanvas } from './Textures.js';
 import { abyssMaterial } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
@@ -154,9 +154,7 @@ export class Surface {
     }
     g.computeVertexNormals();
     // Glow climbs the walls from the bottom.
-    const grad = document.createElement('canvas');
-    grad.width = 4;
-    grad.height = 256;
+    const grad = makeCanvas(4, 256);
     const ctx = grad.getContext('2d');
     const lg = ctx.createLinearGradient(0, 0, 0, 256);
     lg.addColorStop(0, '#000000');
@@ -445,13 +443,15 @@ export class Surface {
     this.circles.push({ x, z, r: 1.1 });
   }
 
-  setScores(scores) {
+  // The obelisk carries the week's deepest descent and your own.
+  setScores({ best = 0, last = 0, top = null } = {}) {
     const old = this.plaque.material.map;
     this.plaque.material.map = textTexture([
-      { text: 'DEEPEST DESCENT', size: 40 },
-      { text: scores.best ? `Floor ${scores.best}` : '—', size: 92, gap: 100 },
-      { text: scores.conquered ? `Hell conquered ×${scores.conquered}` : `${scores.runs} souls lost`, size: 34 },
-      { text: `Last run: floor ${scores.last || 0}`, size: 34 },
+      { text: "THIS WEEK'S DEEPEST", size: 36 },
+      { text: top ? `Floor ${top.score}` : '—', size: 92, gap: 82 },
+      { text: top ? String(top.name).slice(0, 18) : 'no soul yet', size: 34, gap: 64 },
+      { text: `Your best: ${best ? `floor ${best}` : '—'}`, size: 32 },
+      { text: last ? `Last run: floor ${last}` : '', size: 30 },
     ]);
     this.plaque.material.needsUpdate = true;
     old?.dispose();

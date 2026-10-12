@@ -63,32 +63,9 @@ export const NODES = {
   },
 };
 
-// High score: the deepest floor reached. Stored per browser.
-const KEY = 'demonDescent.v1';
-
-export const HighScore = {
-  load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      const d = raw ? JSON.parse(raw) : null;
-      return { best: 0, conquered: 0, runs: 0, last: 0, ...(d || {}) };
-    } catch {
-      return { best: 0, conquered: 0, runs: 0, last: 0 };
-    }
-  },
-  save(data) {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(data));
-    } catch {
-      // Private mode or storage disabled: the score lives for this session.
-    }
-  },
-};
-
 // Records a reached floor; returns true if it is a new record.
 export function recordDepth(scores, floor) {
   if (floor <= scores.best) return false;
   scores.best = floor;
-  HighScore.save(scores);
   return true;
 }

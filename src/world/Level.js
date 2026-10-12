@@ -38,7 +38,10 @@ function boulderGeometry(seed) {
 }
 
 export class Level {
-  constructor(floorNumber, def) {
+  // `light`: fewer dynamic lights, for slow machines and software rendering.
+  constructor(floorNumber, def, { light = false } = {}) {
+    this.maxLights = light ? 2 : 7;
+    this.maxBrazierLights = light ? 1 : 4;
     this.floor = floorNumber;
     this.def = def;
     this.data = parseLevel(def);
@@ -286,7 +289,7 @@ export class Level {
       this.group.add(g);
       const anchor = new THREE.Vector3(b.x, 1.3, b.z);
       this.braziers.push({ pos: anchor });
-      if (i < 4) {
+      if (i < this.maxBrazierLights) {
         const l = new THREE.PointLight(0xff6a20, 18, 14, 1.6);
         l.position.set(b.x, 2.2, b.z);
         this.group.add(l);
@@ -310,7 +313,7 @@ export class Level {
       this.group.add(new THREE.Mesh(merged, this.lavaMat));
       // A few lights over the largest pools.
       const step = Math.max(1, Math.floor(d.lava.length / 3));
-      for (let i = 0; i < d.lava.length && this.lights.length < 7; i += step) {
+      for (let i = 0; i < d.lava.length && this.lights.length < this.maxLights; i += step) {
         const l = new THREE.PointLight(0xff4a10, 14, 12, 1.5);
         l.position.set(d.lava[i].x, 1.2, d.lava[i].z);
         this.group.add(l);
