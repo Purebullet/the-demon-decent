@@ -16,9 +16,10 @@ import { SwingTrail, trailStyle } from '../combat/SwingTrail.js';
 // First-person demon hunter. WASD + mouse look.
 //
 // Left button: a tap is a light attack, holding draws back a heavy one that
-// lands when you let go. Right button blocks. E drinks a potion, 1/2/3 cast
-// demon spells, and once learned, Phantom Step dodges on a double tap of
-// A, D or S (or Space). No armour, no stamina, no regeneration.
+// lands when you let go. Right button blocks (3 s at most), Shift sprints
+// (2 s, refilling in 4). E drinks a potion, 1/2/3 cast demon spells, and
+// once learned, Phantom Step dodges on a double tap of A, D or S (or
+// Space). No armour, no regeneration.
 //
 // The fight runs on rhythm (combat/Rhythm.js): press again as an arc
 // completes to flow into a Perfect Chain; press any earlier and the swing
@@ -54,6 +55,22 @@ const BLOCK_TAKEN = 0.2; // share of a blocked blow that still lands
 // caster). Not again until the block has been down a moment.
 const PARRY_WINDOW = 0.2;
 const PARRY_REARM = 0.35;
+// A block holds for 3 s at most, then the arm gives: let go and raise it
+// again once it has some strength back (it refills in 1.5 s).
+const GUARD_TIME = 3;
+const GUARD_REFILL = 1.5;
+const GUARD_RAISE = 0.25;
+// Shift sprints, for 2 s at most; it refills in 4 s (and once run dry, it
+// has to refill completely before it works again).
+const SPRINT = 1.6;
+const SPRINT_TIME = 2;
+const SPRINT_REFILL = 4;
+// Slime from a smashed urn coats the blade for this long; raise the block
+// while it is coated and it catches: a flaming blade for what is left of
+// it (harder blows that set demons burning, and the light reaches further).
+const COAT_TIME = 12;
+const FLAME_DAMAGE = 1.25;
+const FLAME_LIGHT = 1.45;
 // Heavy attack: a press held longer than HOLD draws back; full power after CHARGE_FULL.
 const HOLD = 0.2;
 const CHARGE_FULL = 0.75;
@@ -133,6 +150,7 @@ export class Player {
     viewRoot.add(this.trail.mesh);
     this.torch = this._buildTorch();
     viewRoot.add(this.torch);
+    this.bladeFx = this._buildBladeFx();
     this.torchLight = new THREE.PointLight(0xffb070, 30, 16, 1.7);
     this.prevTorch = new THREE.Vector3();
     this.flashFx = { color: new THREE.Color(), base: 0, t: 0, dur: 1 };
@@ -184,6 +202,13 @@ export class Player {
     this.blockHeld = 0;
     this.parryOpen = false;
     this.parryCd = 0;
+    this.guard = 1;
+    this.guardSpent = false;
+    this.coatT = 0;
+    this.flameT = 0;
+    this.sprint = 1;
+    this.sprinting = false;
+    this.sprintSpent = false;
     this.burnT = 0;
     this.burnDps = 0;
     this.burnTick = 0;
@@ -213,6 +238,7 @@ export class Player {
     this.shakeT = 0;
     this.jolt = 0;
     this.bobT = 0;
+    this.stepN = 0;
     this.lavaT = 0;
     this.knock.set(0, 0, 0);
     this.vel.set(0, 0, 0);
@@ -241,8 +267,19 @@ export class Player {
     this.weaponMesh = buildWeaponMesh(weapon, { own: true });
     this.weaponPivot.add(this.weaponMesh);
     this.weaponMats = [];
+    const [b0, b1] = this.weaponDef.blade;
+    this.weaponPivot.updateMatrixWorld(true);
+    const fromPivot = new THREE.Matrix4().copy(this.weaponPivot.matrixWorld).invert();
     this.weaponMesh.traverse((o) => {
-      if (o.isMesh && o.material.emissive) this.weaponMats.push({ m: o.material, c: o.material.emissive.clone(), i: o.material.emissiveIntensity });
+      if (o.isMesh && o.material.emissive) {
+        const u = bladeMask(o.material, new THREE.Matrix4().multiplyMatrices(fromPivot, o.matrixWorld), this.weaponDef.steel ?? b0);
+        this.weaponMats.push({ m: o.material, c: o.material.emissive.clone(), i: o.material.emissiveIntensity, u });
+      }
+    });
+    // Flames ride up the blade (or the head of an axe or mace).
+    this.bladeFx.fires.forEach((f, k) => {
+      f.group.position.set(0, b0 + (b1 - b0) * (0.18 + k * 0.27), 0);
+      this.weaponPivot.add(f.group);
     });
     this.swing = null;
     this.momentum = 0;
@@ -298,6 +335,11 @@ export class Player {
     this.siphonT = Math.max(0, this.siphonT - dt);
     this.staggerT = Math.max(0, this.staggerT - dt);
     this.wrathT = Math.max(0, this.wrathT - dt);
+    this.coatT = Math.max(0, this.coatT - dt);
+    if (this.flameT > 0) {
+      this.flameT = Math.max(0, this.flameT - dt);
+      if (this.flameT === 0) this._extinguish(ctx);
+    }
     for (const id of SPELL_IDS) {
       this.spellCd[id] = Math.max(0, this.spellCd[id] - dt);
       this.spellCast[id] = Math.max(0, this.spellCast[id] - dt);
@@ -337,6 +379,7 @@ export class Player {
     this._move(real, ctx);
     this._updateCamera(real);
     this._updateWeapon(dt, ctx);
+    this._updateBladeFx(real);
     this._updateTorch(real, ctx);
     this.trail.update(dt);
     this.prevCamQ.copy(this.camera.quaternion);
@@ -346,6 +389,19 @@ export class Player {
   _move(dt, ctx) {
     const dir = this.moveDirection(_dir);
     let speed = WALK;
+    // Sprint: Shift while moving freely (not striking, blocking, drawing a
+    // heavy blow, drinking or reeling).
+    const want = !!(this.input?.isDown('ShiftLeft') || this.input?.isDown('ShiftRight'));
+    const free = dir.lengthSq() > 0 && !this.swing && !this.charge && !this.blocking && this.staggerT <= 0 && this.drinkT <= 0 && this.wake >= 1;
+    this.sprinting = want && free && !this.sprintSpent && this.sprint > 0;
+    if (this.sprinting) {
+      this.sprint = Math.max(0, this.sprint - dt / SPRINT_TIME);
+      if (this.sprint <= 0) this.sprintSpent = true;
+      speed *= SPRINT;
+    } else {
+      this.sprint = Math.min(1, this.sprint + dt / SPRINT_REFILL);
+      if (this.sprint >= 1) this.sprintSpent = false;
+    }
     // Light swings let you keep moving; a heavy blow roots you.
     const s = this.swing;
     if (s) speed *= s.heavy ? 0 : s.bounced ? 0.3 : s.sluggish ? 0.5 : 0.72;
@@ -380,6 +436,13 @@ export class Player {
     const sp = Math.hypot(this.vel.x, this.vel.z);
     this.bobT += sp * dt * 1.9;
     this.speedNow = sp;
+    // A footfall at the bottom of each dip of the head, sounding of the
+    // ground underfoot.
+    const step = Math.floor((this.bobT * 2 + Math.PI / 2) / (2 * Math.PI));
+    if (step !== this.stepN) {
+      this.stepN = step;
+      if (sp > 1.5 && this.dodgeT <= 0 && !this.dash) ctx.audio?.footstep?.(ctx.ground, sp / WALK);
+    }
   }
 
   _dashCut(ctx) {
@@ -446,7 +509,7 @@ export class Player {
   // ------------------------------------------------------------ dodge ---
 
   // Phantom Step (a learned skill): a double tap of A or D sidesteps, of S
-  // steps back; Space or Shift dodges the way you are moving.
+  // steps back; Space dodges the way you are moving.
   _dodgeInput(ctx) {
     if (!this.run.skills?.phantomStep) return;
     const now = performance.now() / 1000;
@@ -458,7 +521,7 @@ export class Player {
         this.taps[code] = -9;
       } else this.taps[code] = now;
     }
-    if (!dir && (ctx.input.wasPressed('Space') || ctx.input.wasPressed('ShiftLeft') || ctx.input.wasPressed('ShiftRight'))) {
+    if (!dir && ctx.input.wasPressed('Space')) {
       dir = this.moveDirection(_v);
       if (dir.lengthSq() < 0.01) this._local(0, -1, dir);
     }
@@ -528,7 +591,20 @@ export class Player {
     const s = this.swing;
     const locked = s && (s.heavy || s.bounced || s.t < s.W + s.A);
     const was = this.blocking;
-    this.blocking = !!input.mouseDown[2] && !locked && !this.charge && !this.press && this.staggerT <= 0 && this.drinkT <= 0 && this.dodgeT <= 0;
+    // The guard gives after GUARD_TIME held (it only recovers once the button
+    // is let go, so a blow knocking it down for a moment buys no time); it can
+    // go up again once it has some strength back.
+    if (!input.mouseDown[2] && this.guard >= GUARD_RAISE) this.guardSpent = false;
+    this.blocking = !!input.mouseDown[2] && !this.guardSpent && !locked && !this.charge && !this.press && this.staggerT <= 0 && this.drinkT <= 0 && this.dodgeT <= 0;
+    if (this.blocking) {
+      this.guard = Math.max(0, this.guard - dt / GUARD_TIME);
+      if (this.guard <= 0) {
+        this.guardSpent = true;
+        this.blocking = false;
+        ctx.onCombat?.('guardSpent');
+        ctx.audio?.guardDrop?.();
+      }
+    } else if (!input.mouseDown[2]) this.guard = Math.min(1, this.guard + dt / GUARD_REFILL);
     if (this.blocking && s) this._endSwing();
     // The parry window opens as a block goes up (if it has been down long
     // enough to re-arm).
@@ -536,6 +612,7 @@ export class Player {
     if (this.blocking && !was) {
       this.blockHeld = 0;
       this.parryOpen = this.parryCd <= 0;
+      if (this.coatT > 0) this._ignite(ctx);
     } else if (this.blocking) this.blockHeld += dt;
     else if (was) this.parryCd = PARRY_REARM;
   }
@@ -721,7 +798,7 @@ export class Player {
     } else if (s.t < W + A) {
       if (!s.sounded) {
         s.sounded = true;
-        ctx.audio?.swing(s.heavy ? 'heavy' : this.run.weapon.type, { perfect: s.perfect, chain: s.chain, sluggish: s.sluggish });
+        ctx.audio?.swing(s.heavy ? 'heavy' : this.run.weapon.type, { perfect: s.perfect, chain: s.chain, sluggish: s.sluggish, flame: this.flameT > 0 });
       }
       const k = smooth((s.t - W) / A);
       this._sweep(s, s.prevK, k, ctx);
@@ -756,14 +833,118 @@ export class Player {
   // Momentum shows in the blade: it heats as the dance builds.
   _weaponGlow(dt) {
     const m = this.weaponDef === WEAPON_TYPES.sword ? this.momentum / MOMENTUM_MAX : 0;
-    const want = Math.max(m, this.wrathT > 0 ? 0.7 : 0);
+    const flame = this.flameT > 0;
+    const slime = !flame && this.coatT > 0;
+    const want = flame ? 0.32 : slime ? 0.25 : Math.max(m, this.wrathT > 0 ? 0.7 : 0);
+    const col = flame ? _flameCol : slime ? _slimeCol : this.wrathT > 0 ? _wrathCol : _heatCol;
+    // The slime itself: the blade goes green while it is coated.
+    this._coat = (this._coat ?? 0) + ((slime ? 1 : 0) - (this._coat ?? 0)) * Math.min(1, dt * 8);
     this._glow = (this._glow ?? 0) + (want - (this._glow ?? 0)) * Math.min(1, dt * 6);
-    if (Math.abs(this._glow - (this._glowSet ?? 0)) < 0.01) return;
-    this._glowSet = this._glow;
+    const key = `${col.getHex()}|${this._glow.toFixed(2)}|${this._coat.toFixed(2)}`;
+    if (key === this._glowKey) return;
+    this._glowKey = key;
     for (const w of this.weaponMats) {
-      w.m.emissive.copy(w.c).lerp(this.wrathT > 0 ? _wrathCol : _heatCol, Math.min(1, this._glow));
+      w.m.emissive.copy(w.c).lerp(col, Math.min(1, this._glow));
       w.m.emissiveIntensity = w.i + this._glow * 0.9;
+      w.u.uSlime.value = this._coat * 0.8;
     }
+  }
+
+  // ------------------------------------------------- slime & flame ---
+
+  // The flames along the blade (shown while it burns) and the slime that
+  // drips off it (while it is coated), drawn with the viewmodel.
+  _buildBladeFx() {
+    const fires = [0, 1, 2, 3].map((k) => new TorchFire({ height: 0.2 - k * 0.02, width: 0.05, seed: 3.1 + k * 1.7, embers: 6, intensity: 1.1 }));
+    for (const f of fires) f.setIntensity(0);
+    const N = 18;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const drips = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.014, color: 0x7cf03a, transparent: true, opacity: 0.9, depthWrite: false }));
+    drips.frustumCulled = false;
+    drips.renderOrder = 7;
+    drips.visible = false;
+    this.viewRoot.add(drips);
+    return { fires, drips, pos, drops: Array.from({ length: N }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0 })), heat: 0 };
+  }
+
+  // A smashed urn's slime: coats the blade (or feeds a fire already lit).
+  coat(ctx) {
+    if (this.flameT > 0) this.flameT = COAT_TIME;
+    else this.coatT = COAT_TIME;
+    ctx.audio?.slime?.();
+    ctx.onCombat?.(this.flameT > 0 ? 'refuel' : 'coated');
+  }
+
+  _ignite(ctx) {
+    this.flameT = this.coatT;
+    this.coatT = 0;
+    ctx.audio?.ignite?.();
+    this.flash(0xff8a2a, 40, 0.4);
+    const at = this.camera.localToWorld(_v.set(0.3, -0.25, -0.8));
+    burst(ctx.fx.add, at, { count: 40, speed: 3.5, color: C.fireCore, colorEnd: C.fireEdge, size: 0.12, life: 0.5, up: 1.5 });
+    ctx.onCombat?.('ignite');
+  }
+
+  _extinguish(ctx) {
+    const at = this.camera.localToWorld(_v.set(0.3, -0.25, -0.8));
+    burst(ctx.fx.alpha, at, { count: 18, speed: 1.2, color: C.smoke, colorEnd: C.smoke, size: 0.25, life: 1, gravity: -1.5 });
+    ctx.audio?.extinguish?.();
+    ctx.onCombat?.('extinguish');
+  }
+
+  _updateBladeFx(dt) {
+    const fx = this.bladeFx;
+    const t = performance.now() * 0.001;
+    // Flames: grow in, gutter in the last two seconds, out.
+    const want = this.flameT > 0 ? Math.min(1, this.flameT / 2) * (0.9 + 0.1 * Math.sin(t * 17)) : 0;
+    fx.heat += (want - fx.heat) * Math.min(1, dt * 8);
+    this.weaponPivot.updateMatrixWorld(true);
+    for (const f of fx.fires) {
+      f.setIntensity(fx.heat);
+      if (fx.heat <= 0.01) continue;
+      // Like the torch: the flame trails its own motion and rises skyward.
+      f.group.getWorldPosition(_v);
+      f.group.getWorldQuaternion(_wq).invert();
+      if (f.prev && dt > 0) {
+        _v2.subVectors(_v, f.prev).divideScalar(dt);
+        if (_v2.lengthSq() > 900) _v2.set(0, 0, 0);
+        _v2.negate().applyQuaternion(_wq);
+      } else _v2.set(0, 0, 0);
+      (f.prev ||= new THREE.Vector3()).copy(_v);
+      _up.set(0, 1, 0).applyQuaternion(_wq);
+      f.update(dt, t, _v2, _up);
+    }
+    // Slime: drops gather on the blade and fall away.
+    const coated = this.coatT > 0 && this.flameT <= 0;
+    fx.drips.visible = coated || fx.drops.some((d) => d.life > 0);
+    if (!fx.drips.visible) return;
+    const [b0, b1] = this.weaponDef.blade;
+    this.viewRoot.updateMatrixWorld(true);
+    _q2.copy(this.viewRoot.quaternion).invert();
+    const down = _v2.set(0, -1, 0).applyQuaternion(_q2);
+    fx.drops.forEach((d, i) => {
+      d.life -= dt;
+      if (d.life <= 0) {
+        if (!coated || Math.random() > dt * 9) {
+          fx.pos[i * 3 + 1] = -99;
+          return;
+        }
+        d.life = 0.5 + Math.random() * 0.5;
+        _v.set((Math.random() - 0.5) * 0.03, b0 + (b1 - b0) * Math.random(), 0);
+        this.weaponPivot.localToWorld(_v);
+        this.viewRoot.worldToLocal(_v);
+        d.p.copy(_v);
+        d.v.set(0, 0, 0);
+      }
+      d.v.addScaledVector(down, dt * 4);
+      d.p.addScaledVector(d.v, dt);
+      fx.pos[i * 3] = d.p.x;
+      fx.pos[i * 3 + 1] = d.p.y;
+      fx.pos[i * 3 + 2] = d.p.z;
+    });
+    fx.drips.geometry.attributes.position.needsUpdate = true;
   }
 
   // Sweep the blade from arc fraction k0 to k1, sub-stepping both the arc
@@ -924,6 +1105,7 @@ export class Player {
       if (s.sluggish) amount *= 0.85;
       if (counter) amount *= heavy ? 2.5 : 2;
       if (guard === 'crash') amount *= 0.6;
+      if (this.flameT > 0) amount *= FLAME_DAMAGE;
       const force = (heavy ? 1 + s.power * 0.8 : 0.55) * (counter ? 1.5 : 1) * (w.type === 'mace' ? 1.3 : 1);
       const dealt = e.takeHit(amount, dir, def.knockback * (heavy ? 1.8 : 1) * (counter ? 1.4 : 1), def.stagger * (heavy ? 2.5 : 1), ctx, { heavy, contact: h.point, sweep: s.travel, force });
       total += dealt;
@@ -937,6 +1119,9 @@ export class Player {
         if (w.type === 'axe') e.applySunder?.(heavy ? 2 : 1, ctx);
         if (w.type === 'mace' && guard !== 'crash' && (!e.isBoss || heavy) && !armored) e.stumble?.(ctx, heavy ? STUMBLE.heavy : STUMBLE.light, dir);
         if (counter && e.state !== 'stagger' && (!e.isBoss || heavy) && !armored) e.interrupt?.(ctx, 0.9);
+        // Struck first: a blow already falling but not yet landed is knocked
+        // aside (not an armoured one, nor a boss's but by a heavy blow).
+        else if (e.state === 'strike' && !e.hitPlayer && (!e.isBoss || heavy) && !armored) e.interrupt?.(ctx, 0.45);
       }
 
       // Blood thrown along the blade's travel, sparks at the contact.
@@ -946,6 +1131,11 @@ export class Player {
         ctx.fx.alpha.emit({ x: h.point.x, y: h.point.y, z: h.point.z, vx: tv.x * sp + (Math.random() - 0.5) * 2, vy: tv.y * sp + Math.random() * 2, vz: tv.z * sp + (Math.random() - 0.5) * 2, life: 0.5 + Math.random() * 0.5, size: 0.1, sizeEnd: 0.03, color: C.blood, colorEnd: C.bloodDark, gravity: -9, drag: 1.2 });
       }
       burst(ctx.fx.add, h.point, { count: counter ? 22 : 8, speed: counter ? 7 : 5, size: 0.06, life: 0.25 });
+      // A burning blade sets them alight.
+      if (this.flameT > 0 && e.alive) {
+        e.addStatus?.('burn', { dps: w.damage * run.dmgMul * 0.18, dur: 3 });
+        burst(ctx.fx.add, h.point, { count: 18, speed: 3, color: C.fireCore, colorEnd: C.fireEdge, size: 0.14, life: 0.45, up: 1.5 });
+      }
 
       // Procs: what this hit earned.
       const triggers = new Set(['hit']);
@@ -1022,8 +1212,9 @@ export class Player {
     // World light rides with the torch.
     this.torch.getWorldPosition(_v);
     this.torchLight.position.copy(_v).add(_v2.set(0, this.flameY + 0.1, 0));
-    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit;
-    this.torchLight.distance = (ctx.torchRange ?? 16) * (relicPassive(this.run || { relics: {} }, 'light') ?? 1);
+    const burning = this.bladeFx.heat;
+    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit * (1 + 0.25 * burning);
+    this.torchLight.distance = (ctx.torchRange ?? 16) * (relicPassive(this.run || { relics: {} }, 'light') ?? 1) * (1 + (FLAME_LIGHT - 1) * burning);
     const fl = this.flashFx;
     const k = fl.t > 0 ? fl.t / fl.dur : 0;
     fl.t = Math.max(0, fl.t - dt);
@@ -1224,8 +1415,33 @@ export class Player {
 }
 
 const _heatCol = new THREE.Color(1, 0.45, 0.1);
+const _flameCol = new THREE.Color(1, 0.42, 0.1);
+const _slimeCol = new THREE.Color(0.35, 1, 0.15);
+const _slimeBody = new THREE.Color(0.32, 0.75, 0.16);
+const _q2 = new THREE.Quaternion();
 const _torchCol = new THREE.Color(0xffb070);
 const _wrathCol = new THREE.Color(1, 0.12, 0.04);
 const easeOut = (k) => 1 - (1 - k) * (1 - k);
 const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
 const smooth = (k) => k * k * (3 - 2 * k);
+
+// Keep a weapon's glow (momentum, wrath, flame) and its slime to the blade,
+// or the head of an axe or mace, not the grip: a mask from how far along the
+// weapon (in the pivot's space, where `from` is where the blade starts) each
+// point lies.
+function bladeMask(m, toPivot, from) {
+  const u = { uToPivot: { value: toPivot }, uBladeFrom: { value: from }, uSlime: { value: 0 }, uSlimeCol: { value: _slimeBody } };
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform mat4 uToPivot;\nuniform float uBladeFrom;\nvarying float vBlade;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBlade = smoothstep(uBladeFrom - 0.03, uBladeFrom + 0.1, (uToPivot * vec4(position, 1.0)).y);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uSlime;\nuniform vec3 uSlimeCol;\nvarying float vBlade;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uSlimeCol, uSlime * vBlade);')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vBlade;');
+  };
+  m.customProgramCacheKey = () => 'bladeMask';
+  m.needsUpdate = true;
+  return u;
+}

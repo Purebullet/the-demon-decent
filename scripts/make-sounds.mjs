@@ -7,6 +7,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { INTRO_SECONDS } from '../src/core/soundFormat.js';
 
 const RATE = 22050;
 
@@ -99,14 +100,65 @@ function noise(out, { freq = 800, freqEnd = freq, q = 1, type = 'bandpass', atta
   }
 }
 
+// A blade cutting the air: noise through a resonant band that sweeps up as
+// the blade comes through and falls away after it (the swing's Doppler),
+// under a bell of an envelope; a low push of the air shoved aside, and the
+// hiss off the edge at the top of the sweep.
+function swish(o, { dur = 0.22, f0 = 600, f1 = 2800, f2 = 900, peak = 0.55, q = 1.8, gain = 0.6, delay = 0, low = 0.5, edge = 0.25 }) {
+  const start = Math.floor(delay * RATE);
+  const n = Math.floor(dur * RATE);
+  const bp = biquad('bandpass', q);
+  const bp2 = biquad('bandpass', q * 1.5);
+  const lp = biquad('lowpass', 0.8);
+  const hp = biquad('highpass', 0.7);
+  for (let i = 0; i < n && start + i < o.length; i++) {
+    const k = i / n;
+    const f = k < peak ? sweep(f0, f1, k / peak) : sweep(f1, f2, (k - peak) / (1 - peak));
+    const e = k < peak ? Math.pow(k / peak, 1.6) : Math.pow(1 - (k - peak) / (1 - peak), 2);
+    const x = rnd() * 2 - 1;
+    const v = bp(x, f) * 2.4 + bp2(x, f * 1.6) * 1.2 + lp(x, 220 + 420 * e) * low + hp(x, 5200) * edge * e;
+    o[start + i] += v * e * gain;
+  }
+}
+
+// Saturate a whole sound: louder, denser, punchier.
+function punch(o, drive = 2.2) {
+  const t = Math.tanh(drive);
+  for (let i = 0; i < o.length; i++) o[i] = Math.tanh(o[i] * drive) / t;
+}
+
+// The ring of steel as the blade turns through its cut.
+function shing(o, { delay = 0.05, gain = 0.05, f = 2900 } = {}) {
+  tone(o, { type: 'triangle', freq: f, freqEnd: f * 0.985, attack: 0.004, decay: 0.24, gain, delay });
+  tone(o, { type: 'triangle', freq: f * 1.51, freqEnd: f * 1.49, attack: 0.004, decay: 0.16, gain: gain * 0.5, delay });
+}
+
+function lightSwing(o, k) {
+  noise(o, { type: 'highpass', freq: 3000, decay: 0.008, gain: 0.25 });
+  swish(o, { dur: 0.2 + 0.03 * k, f0: 450 + 100 * k, f1: 2600 + 500 * k, f2: 800, peak: 0.4, q: 4, gain: 0.8, low: 0.7, edge: 0.15 });
+  shing(o, { delay: 0.06, gain: 0.05, f: 2700 + 300 * k });
+  punch(o, 1.7);
+}
+
+function heavySwing(o, k) {
+  swish(o, { dur: 0.34 + 0.04 * k, f0: 220, f1: 1200 + 200 * k, f2: 320, peak: 0.48, q: 3, gain: 0.9, low: 1.2, edge: 0.08 });
+  tone(o, { freq: 80, freqEnd: 40, attack: 0.02, decay: 0.24, gain: 0.4, delay: 0.1 });
+  punch(o, 1.9);
+}
+
 const SOUNDS = {
-  swing_light: (o) => noise(o, { freq: 600, freqEnd: 2400, q: 1.4, attack: 0.04, decay: 0.15, gain: 0.4 }),
-  // A Perfect Chain swing: a deeper, fuller cut with a ringing tail (played
-  // lower with every link of the chain).
+  // Light swings: three takes, so a flurry never repeats itself.
+  swing_light_1: (o) => lightSwing(o, 0),
+  swing_light_2: (o) => lightSwing(o, 0.5),
+  swing_light_3: (o) => lightSwing(o, 1),
+  // A Perfect Chain swing: a sharper, brighter cut, a crack at its start and
+  // steel that rings on (played lower with every link of the chain).
   swing_perfect: (o) => {
-    noise(o, { freq: 380, freqEnd: 1700, q: 1.2, attack: 0.03, decay: 0.2, gain: 0.5 });
-    noise(o, { type: 'lowpass', freq: 500, freqEnd: 160, attack: 0.02, decay: 0.22, gain: 0.35 });
-    tone(o, { type: 'triangle', freq: 660, freqEnd: 640, attack: 0.01, decay: 0.45, gain: 0.07, delay: 0.04 });
+    noise(o, { type: 'highpass', freq: 3500, decay: 0.012, gain: 0.45 });
+    swish(o, { dur: 0.21, f0: 600, f1: 3600, f2: 1100, peak: 0.38, q: 4.5, gain: 0.85, low: 0.8, edge: 0.25 });
+    shing(o, { delay: 0.05, gain: 0.08, f: 3100 });
+    tone(o, { type: 'triangle', freq: 660, freqEnd: 640, attack: 0.01, decay: 0.45, gain: 0.06, delay: 0.04 });
+    punch(o, 1.8);
   },
   // The chime of the timing itself, the moment a chain links.
   chain: (o) => {
@@ -192,7 +244,8 @@ const SOUNDS = {
     noise(o, { freq: 5000, freqEnd: 7000, q: 2, attack: 0.2, decay: 0.6, gain: 0.08 });
     tone(o, { freq: 98, decay: 1, gain: 0.2 });
   },
-  swing_heavy: (o) => noise(o, { freq: 300, freqEnd: 1100, q: 1.4, attack: 0.05, decay: 0.24, gain: 0.45 }),
+  swing_heavy_1: (o) => heavySwing(o, 0),
+  swing_heavy_2: (o) => heavySwing(o, 1),
   hit_sword: (o) => {
     tone(o, { freq: 160, freqEnd: 40, decay: 0.18, gain: 0.55 });
     noise(o, { type: 'lowpass', freq: 3500, freqEnd: 300, decay: 0.12, gain: 0.5 });
@@ -345,7 +398,68 @@ const SOUNDS = {
     tone(o, { type: 'sawtooth', freq: 220, freqEnd: 55, attack: 0.05, decay: 0.35, gain: 0.18, lp: 900 });
     tone(o, { freq: 660, freqEnd: 110, attack: 0.02, decay: 0.3, gain: 0.08 });
   },
+  // Slime bursting out of an urn and slopping over the blade.
+  slime: (o) => {
+    squelch(o, { dur: 0.35, gain: 0.7, freq: 500 });
+    squelch(o, { delay: 0.12, dur: 0.3, gain: 0.45, freq: 800 });
+    noise(o, { type: 'lowpass', freq: 600, freqEnd: 150, decay: 0.2, gain: 0.4 });
+  },
+  // A burning blade guttering out: a hiss and a puff.
+  extinguish: (o) => {
+    noise(o, { type: 'highpass', freq: 2500, attack: 0.02, decay: 0.5, gain: 0.35 });
+    noise(o, { type: 'lowpass', freq: 500, freqEnd: 120, decay: 0.25, gain: 0.3 });
+  },
+  // The arm giving way under a block held too long.
+  guard_drop: (o) => {
+    tone(o, { type: 'triangle', freq: 700, freqEnd: 380, decay: 0.25, gain: 0.45 });
+    noise(o, { type: 'lowpass', freq: 900, freqEnd: 200, decay: 0.15, gain: 1.1 });
+  },
+  // A burning blade through the air: a low roar of flame swept past.
+  flame_swing: (o) => {
+    swish(o, { dur: 0.32, f0: 200, f1: 900, f2: 300, peak: 0.45, q: 1.2, gain: 0.5, low: 1.2, edge: 0.05 });
+    for (let i = 0; i < 6; i++) noise(o, { type: 'highpass', freq: 2500, decay: 0.01, gain: 0.12, delay: 0.05 + rnd() * 0.2 });
+    punch(o, 1.8);
+  },
+  // Footsteps, three takes of each ground.
+  ...steps('stone', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 420 + 80 * k, freqEnd: 140, decay: 0.07, gain: 0.7 });
+    noise(o, { freq: 1700 + 400 * k, q: 1.3, decay: 0.045, gain: 0.18, delay: 0.005 });
+    noise(o, { type: 'highpass', freq: 3500, decay: 0.006, gain: 0.12 });
+  }),
+  ...steps('gravel', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 380, freqEnd: 120, decay: 0.06, gain: 0.55 });
+    for (let i = 0; i < 7; i++) noise(o, { freq: 1800 + rnd() * 2600, q: 3, decay: 0.012 + rnd() * 0.015, gain: 0.22, delay: 0.004 + rnd() * 0.09 + k * 0.004 });
+  }),
+  ...steps('wet', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 380, freqEnd: 130, decay: 0.06, gain: 0.5 });
+    squelch(o, { dur: 0.14 + 0.03 * k, gain: 0.4, freq: 700 + 150 * k });
+    noise(o, { freq: 1400 + 200 * k, freqEnd: 700, q: 1.2, attack: 0.01, decay: 0.12, gain: 0.25, delay: 0.02 });
+  }),
+  ...steps('bone', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 350, freqEnd: 120, decay: 0.05, gain: 0.45 });
+    for (let i = 0; i < 3; i++) tone(o, { type: 'triangle', freq: 900 + rnd() * 900 + 120 * k, freqEnd: 700, decay: 0.03 + rnd() * 0.03, gain: 0.14, delay: i * (0.018 + rnd() * 0.02) });
+    noise(o, { freq: 2600, q: 2, decay: 0.03, gain: 0.15, delay: 0.01 });
+  }),
+  ...steps('ash', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 1100 + 200 * k, freqEnd: 300, attack: 0.008, decay: 0.11, gain: 0.45 });
+    for (let i = 0; i < 4; i++) noise(o, { freq: 1500 + rnd() * 1500, q: 2, decay: 0.02, gain: 0.08, delay: 0.01 + rnd() * 0.07 });
+  }),
+  ...steps('flesh', (o, k) => {
+    noise(o, { type: 'lowpass', freq: 300, freqEnd: 100, decay: 0.08, gain: 0.55 });
+    squelch(o, { dur: 0.18 + 0.03 * k, gain: 0.5, freq: 450 + 100 * k });
+  }),
 };
+
+// Three takes of a footstep, all brought to the same level.
+function steps(name, make) {
+  const take = (k) => (o) => {
+    make(o, k);
+    let m = 0;
+    for (const v of o) m = Math.max(m, Math.abs(v));
+    for (let i = 0; i < o.length; i++) o[i] *= 0.7 / m;
+  };
+  return Object.fromEntries([0, 1, 2].map((k) => [`step_${name}_${k + 1}`, take(k)]));
+}
 
 function squelch(o, { delay = 0, dur = 0.2, gain = 0.5, freq = 900 }) {
   const start = Math.floor(delay * RATE);
@@ -410,6 +524,104 @@ function drone() {
   return o.subarray(0, n - fade);
 }
 
+// ---- The intro song ------------------------------------------------------
+//
+// For the title and the surface, until you jump: the earth itself groaning
+// (a low drone, a rumble and a throat-sung vowel slowly shifting over it),
+// then a war drum, far apart at first, beating quicker and quicker, a
+// higher drum and rattles joining it, until it runs into a driving loop
+// (intro_loop) that plays on at that pace.
+
+const SONG_BUILD = INTRO_SECONDS;
+const BEAT_START = 1.5;
+const BEAT_END = 0.25;
+const LOOP = 8;
+
+// The groaning earth: E1, its octave, a rumble, a vowel. Whole cycles in
+// LOOP seconds, so the loop's copy of it loops seamlessly.
+function earth(o, from, secs, swell = () => 1) {
+  const f = 41.25;
+  const n = Math.floor(secs * RATE);
+  const lp = biquad('lowpass', 0.7);
+  const rum = biquad('lowpass', 0.6);
+  const vowel = biquad('bandpass', 4);
+  let p1 = 0;
+  let p2 = 0;
+  let p3 = 0;
+  for (let i = 0; i < n; i++) {
+    const t = from + i / RATE;
+    p1 = (p1 + f / RATE) % 1;
+    p2 = (p2 + (f * 2.004) / RATE) % 1;
+    p3 = (p3 + (f * 2) / RATE) % 1;
+    const saw = (2 * p1 - 1) * 0.6 + (2 * p2 - 1) * 0.4;
+    let v = lp(saw, 140 + 90 * (0.5 + 0.5 * Math.sin((2 * Math.PI * t) / LOOP))) * 0.55;
+    v += Math.sin(2 * Math.PI * f * t) * 0.35;
+    v += rum(rnd() * 2 - 1, 90) * 1.6;
+    const throat = (2 * p3 - 1) * 0.5;
+    v += vowel(throat, 380 + 260 * (0.5 + 0.5 * Math.sin((2 * Math.PI * t) / LOOP + 1))) * 0.35;
+    o[i] += v * swell(t);
+  }
+}
+
+// A war drum: a deep skin whose pitch drops as it rings, a slap of the
+// stick, and air.
+function drum(o, at, { f0 = 95, f1 = 44, decay = 0.65, gain = 0.9, slap = 0.35 } = {}) {
+  const start = Math.floor(at * RATE);
+  const n = Math.floor((decay + 0.05) * RATE);
+  const lp = biquad('lowpass', 0.7);
+  let ph = 0;
+  for (let i = 0; i < n && start + i < o.length; i++) {
+    if (start + i < 0) continue;
+    const t = i / RATE;
+    const f = f1 + (f0 - f1) * Math.exp(-t / 0.05);
+    ph += f / RATE;
+    const env = Math.exp(-t / (decay * 0.35));
+    o[start + i] += (Math.sin(2 * Math.PI * ph) * env + lp(rnd() * 2 - 1, 900) * Math.exp(-t / 0.02) * slap) * gain;
+  }
+}
+const hiDrum = (o, at, gain = 0.4) => drum(o, at, { f0: 240, f1: 170, decay: 0.18, gain, slap: 0.6 });
+function rattle(o, at, gain = 0.12) {
+  noise(o, { type: 'highpass', freq: 5000, attack: 0.006, decay: 0.05, gain, delay: at });
+}
+
+function song() {
+  // The build: the drum's beat shrinks from BEAT_START to BEAT_END seconds.
+  const intro = track(SONG_BUILD + 1.5);
+  earth(intro, 0, SONG_BUILD + 1.5, (t) => Math.min(1, t / 5) * (0.8 + 0.2 * Math.min(1, t / SONG_BUILD)));
+  const lead = 6;
+  const span = SONG_BUILD - lead;
+  let t = lead;
+  let k = 0;
+  while (t < SONG_BUILD - 0.01) {
+    const u = (t - lead) / span;
+    const beat = BEAT_START * Math.pow(BEAT_END / BEAT_START, u);
+    const accent = k % 4 === 0;
+    drum(intro, t, { gain: (accent ? 0.95 : 0.7) * (0.6 + 0.4 * u), f0: accent ? 90 : 105, decay: accent ? 0.75 : 0.5 });
+    if (u > 0.35) hiDrum(intro, t + beat / 2, 0.22 + 0.25 * u);
+    if (u > 0.65) {
+      rattle(intro, t + beat / 4, 0.06 + 0.1 * u);
+      rattle(intro, t + (beat * 3) / 4, 0.06 + 0.1 * u);
+    }
+    t += beat;
+    k++;
+  }
+  // The loop: the same earth and drums at the final pace, LOOP seconds that
+  // join end to start (rendered with a second either side, then cut).
+  const pad = 1;
+  const whole = track(LOOP + 2 * pad);
+  earth(whole, -pad, LOOP + 2 * pad);
+  for (let b = -8; b < (LOOP + 2 * pad) / BEAT_END + 8; b++) {
+    const at = pad + b * BEAT_END;
+    const accent = ((b % 4) + 4) % 4 === 0;
+    drum(whole, at, { gain: accent ? 1 : 0.72, f0: accent ? 90 : 105, decay: accent ? 0.75 : 0.5 });
+    hiDrum(whole, at + BEAT_END / 2, 0.45);
+    rattle(whole, at + BEAT_END / 4, 0.15);
+    rattle(whole, at + (BEAT_END * 3) / 4, 0.15);
+  }
+  const loop = whole.slice(Math.floor(pad * RATE), Math.floor((pad + LOOP) * RATE));
+  return { intro, loop };
+}
+
 function normalize(o, peak = 0.8) {
   let m = 0;
   for (const v of o) m = Math.max(m, Math.abs(v));
@@ -451,7 +663,17 @@ export async function makeSounds(outDir) {
   const d = wav(normalize(drone(), 0.6));
   bytes += d.length;
   await writeFile(join(outDir, 'drone.wav'), d);
-  return { count: Object.keys(SOUNDS).length + 1, bytes };
+  const { intro, loop } = song();
+  // Both at the same level, so the build runs straight into the loop.
+  let peak = 0;
+  for (const a of [intro, loop]) for (const v of a) peak = Math.max(peak, Math.abs(v));
+  for (const [name, a] of [['intro', intro], ['intro_loop', loop]]) {
+    for (let i = 0; i < a.length; i++) a[i] *= 0.85 / peak;
+    const w = wav(a);
+    bytes += w.length;
+    await writeFile(join(outDir, `${name}.wav`), w);
+  }
+  return { count: Object.keys(SOUNDS).length + 3, bytes };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

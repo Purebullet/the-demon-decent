@@ -42,6 +42,10 @@ const C = {
   iron: '#1e0c09',
 };
 
+// Room left at the top of the screen for Project 0's own bar and labels
+// (the lot's name, who is here), above the floor and demon counts.
+const TOP = 46;
+
 // Skill slots along the bottom: the three demon spells, then Phantom Step.
 const SLOTS = [...SPELL_IDS.map((id) => ({ id, icon: id })), { id: 'dodge', icon: 'dodge' }];
 
@@ -193,6 +197,20 @@ const SPLAT_FRAG = `
     gl_FragColor = vec4(col, a * mix(0.7, 0.92, smoothstep(0.4, 0.9, m)));
   }`;
 
+// A meter (the guard under the crosshair, the sprint over the health):
+// fill, dark track, and a red flicker when it is about to run out.
+const BAR_FRAG = `
+  varying vec2 vUv;
+  uniform float uFrac; uniform vec3 uColor; uniform vec3 uLow; uniform float uWarn; uniform float uAlpha; uniform float uTime;
+  void main(){
+    float inside = step(vUv.x, uFrac);
+    float flash = uWarn * (0.55 + 0.45 * sin(uTime * 24.0));
+    vec3 col = mix(uColor, uLow, clamp(uWarn * 1.4, 0.0, 1.0)) + vec3(0.4, 0.1, 0.05) * flash;
+    float edge = smoothstep(0.0, 0.2, vUv.y) * smoothstep(1.0, 0.8, vUv.y) * smoothstep(0.0, 0.02, vUv.x) * smoothstep(1.0, 0.98, vUv.x);
+    vec3 c = mix(vec3(0.07, 0.02, 0.02), col, inside);
+    gl_FragColor = vec4(c, (inside * 0.95 + (1.0 - inside) * 0.5) * edge * uAlpha);
+  }`;
+
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 // Damage numbers' size as a share of the screen's height.
 const NUM_W = 0.1;
@@ -244,9 +262,17 @@ export class Hud {
     this.chipHold = 0;
     // The health vial is its own little group (frame, blood, numbers) so a
     // blow can shake it; and the amount lost rises off it.
+    const bar = (color, low) => ({ mesh: shader(BAR_FRAG, { uFrac: { value: 1 }, uColor: { value: new THREE.Color(color) }, uLow: { value: new THREE.Color(low) }, uWarn: { value: 0 }, uAlpha: { value: 0 }, uTime: { value: 0 } }, 5), a: 0 });
+    this.guardBar = bar('#d8c2a0', '#e02a10');
+    this.sprintBar = bar('#7fc4ff', '#e02a10');
     this.healthBack = this._canvasLayer(16, 16, 2.5);
     this.healthTop = this._canvasLayer(16, 16, 4);
     this.lossL = this._canvasLayer(256, 96, 4);
+    // Our own cursor, a small sword, for when the mouse is free (menus, the
+    // pause, choosing at an altar).
+    this.cursorL = this._spriteLayer(96, 96, 30, (g) => this._paintCursor(g));
+    this.cursor = { on: false, x: 0, y: 0 };
+    this.hoverCode = null;
     this.hpFx = { shake: 0, hit: 0, loss: 0, lossT: 9, sig: '', back: '' };
     // Blood on the lens.
     const atlas = new THREE.CanvasTexture(splatAtlas());
@@ -479,6 +505,95 @@ export class Hud {
     return null;
   }
 
+  // Where the mouse is, and whether to draw the sword cursor there. Over a
+  // choice, the option under it lights up.
+  setCursor(on, x, y) {
+    const c = this.cursor;
+    c.on = on;
+    c.x = x;
+    c.y = y;
+    const code = on && this.panel === 'choice' ? this.buttonAt(x, y) : null;
+    if (code !== this.hoverCode) {
+      this.hoverCode = code;
+      this.dirty = true;
+    }
+  }
+
+  _paintCursor(g) {
+    g.clearRect(0, 0, 96, 96);
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    // Point at the top left (the hot spot), the hilt down and to the right.
+    const tip = [5, 5];
+    const guard = [56, 56];
+    const end = [82, 82];
+    const blade = () => {
+      g.beginPath();
+      g.moveTo(tip[0], tip[1]);
+      g.lineTo(guard[0] - 6, guard[1] + 4);
+      g.lineTo(guard[0] + 4, guard[1] - 6);
+      g.closePath();
+    };
+    // A dark outline so it reads on light and dark alike, then an ember glow.
+    g.shadowColor = 'rgba(255,70,10,0.9)';
+    g.shadowBlur = 8;
+    g.lineWidth = 5;
+    g.strokeStyle = '#1a0806';
+    blade();
+    g.stroke();
+    g.shadowBlur = 0;
+    const steel = g.createLinearGradient(tip[0], tip[1], guard[0], guard[1]);
+    steel.addColorStop(0, '#fff6e6');
+    steel.addColorStop(0.6, '#c9c0b2');
+    steel.addColorStop(1, '#8a8276');
+    g.fillStyle = steel;
+    blade();
+    g.fill();
+    // The fuller: a dark groove down the middle, a hot edge on one side.
+    g.lineWidth = 1.4;
+    g.strokeStyle = 'rgba(60,40,30,0.7)';
+    g.beginPath();
+    g.moveTo(tip[0] + 10, tip[1] + 10);
+    g.lineTo(guard[0] - 4, guard[1] - 4);
+    g.stroke();
+    g.strokeStyle = 'rgba(255,120,40,0.9)';
+    g.beginPath();
+    g.moveTo(tip[0] + 2, tip[1] + 3);
+    g.lineTo(guard[0] - 6, guard[1] + 3);
+    g.stroke();
+    // Crossguard, grip, pommel.
+    g.lineWidth = 7;
+    g.strokeStyle = '#1a0806';
+    g.beginPath();
+    g.moveTo(guard[0] - 13, guard[1] + 13);
+    g.lineTo(guard[0] + 13, guard[1] - 13);
+    g.stroke();
+    g.lineWidth = 4;
+    g.strokeStyle = '#7a1a0e';
+    g.stroke();
+    g.lineWidth = 7;
+    g.strokeStyle = '#1a0806';
+    g.beginPath();
+    g.moveTo(guard[0] + 2, guard[1] + 2);
+    g.lineTo(end[0] - 6, end[1] - 6);
+    g.stroke();
+    g.lineWidth = 4;
+    g.strokeStyle = '#3a2416';
+    g.stroke();
+    g.fillStyle = '#1a0806';
+    g.beginPath();
+    g.arc(end[0] - 4, end[1] - 4, 6, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#e8441a';
+    g.shadowColor = 'rgba(255,80,20,1)';
+    g.shadowBlur = 6;
+    g.beginPath();
+    g.arc(end[0] - 4, end[1] - 4, 3.5, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+
   // A demon's blow landed. `angle`: where it came from, relative to where
   // you face (0 ahead, positive to the right). The view reddens on that side,
   // blood is thrown across the lens, and the health vial jolts, flares and
@@ -585,6 +700,29 @@ export class Hud {
       this._place(this.lossL.mesh, F.lossX - w / 2 + ox, V.y - h * 0.9 - k * 26, w, h);
       this.lossL.mesh.material.opacity = Math.min(1, (1 - k) * 3);
     }
+  }
+
+  // The guard's strength under the crosshair while you block (flickering
+  // red as it is about to give), and the sprint's over the health vial.
+  _updateMeters(dt, play) {
+    const p = this.info.player;
+    const meter = (b, want, frac, warn, x, y, w, h) => {
+      b.a += ((play && want ? 1 : 0) - b.a) * Math.min(1, dt * (want ? 14 : 4));
+      b.mesh.visible = b.a > 0.01;
+      if (!b.mesh.visible) return;
+      const U = b.mesh.material.uniforms;
+      U.uFrac.value = frac;
+      U.uWarn.value = warn;
+      U.uAlpha.value = b.a;
+      U.uTime.value = this.time;
+      this._place(b.mesh, x, y, w, h);
+    };
+    if (!p) return;
+    const g = p.guard ?? 1;
+    meter(this.guardBar, p.blocking || g < 0.999, g, p.guardSpent ? 1 : p.blocking ? clamp01((0.4 - g) / 0.25) : 0, this.vw / 2 - 60, this.vh / 2 + 30, 120, 7);
+    const V = this.vial;
+    const sp = p.sprint ?? 1;
+    if (V) meter(this.sprintBar, sp < 0.999, sp, p.sprintSpent ? 1 : clamp01((0.3 - sp) / 0.2) * (p.sprinting ? 1 : 0), V.x + 6, V.y - 10, V.w - 12, 5);
   }
 
   _paintLoss(amount, blocked) {
@@ -770,6 +908,8 @@ export class Hud {
       p?.invuln > 0.25,
       p?.wrathT > 0,
       p?.burnT > 0,
+      Math.ceil(p?.flameT || 0),
+      Math.ceil(p?.coatT || 0),
       Math.floor(p?.momentum || 0),
       this.touch,
       this.w,
@@ -869,6 +1009,14 @@ export class Hud {
       H.uTime.value = this.time;
     }
     this._updateVial(dt, shown, play);
+    this._updateMeters(dt, play);
+    // The cursor: its tip on the mouse.
+    const cur = this.cursor;
+    this.cursorL.mesh.visible = cur.on;
+    if (cur.on) {
+      const s = 30;
+      this._place(this.cursorL.mesh, cur.x / this.u - s * (5 / 96), cur.y / this.u - s * (5 / 96), s, s);
+    }
     this._updateSplats(dt, shown);
 
     // Compass needle.
@@ -944,7 +1092,7 @@ export class Hud {
     if (this.toastL.mesh.visible) {
       const w = 340;
       const h = (w * this.toastL.ch) / this.toastL.cw;
-      this._place(this.toastL.mesh, this.vw - 18 - w, 64, w, h);
+      this._place(this.toastL.mesh, this.vw - 18 - w, TOP + 64, w, h);
     }
   }
 
@@ -1199,17 +1347,17 @@ export class Hud {
     const L = (this.layout = { slots: [], health: null });
 
     // Top corners (Project 0's own bar sits at the top centre).
-    this._text(g, (i.floorLabel || '').toUpperCase(), pad, 32, { size: 15, ls: 1.5, color: C.bone });
-    this._text(g, (i.enemyLabel || '').toUpperCase(), w - pad, 32, { size: 15, ls: 1.5, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
-    if (i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, 52, { size: 11, align: 'right' });
+    this._text(g, (i.floorLabel || '').toUpperCase(), pad, TOP + 32, { size: 15, ls: 1.5, color: C.bone });
+    this._text(g, (i.enemyLabel || '').toUpperCase(), w - pad, TOP + 32, { size: 15, ls: 1.5, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
+    if (i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, TOP + 52, { size: 11, align: 'right' });
 
     // Relics, top left: painted icons with their stack counts.
     const relics = Object.entries(r.relics || {});
     if (relics.length) {
-      this._label(g, 'Relics', pad, 58, { size: 10 });
+      this._label(g, 'Relics', pad, TOP + 58, { size: 10 });
       relics.forEach(([id, n], k) => {
         const x = pad + k * 44;
-        const y = 66;
+        const y = TOP + 66;
         this._box(g, x, y, 40, 40, 'rgba(10,3,3,0.7)', RELICS[id]?.color || C.edge);
         if (!IconAtlas.draw(g, id, x + 2, y + 2, 36)) this._text(g, RELICS[id]?.name[0] || '?', x + 20, y + 21, { size: 18, align: 'center', base: 'middle' });
         if (n > 1) this._text(g, `×${n}`, x + 37, y + 37, { size: 11, color: C.light, align: 'right' });
@@ -1287,12 +1435,14 @@ export class Hud {
     L.top = { x: (w - tw) / 2, y: hy + 30 - tw / 4, w: tw, h: tw / 4 };
     // Potions to the left of it, with the key.
     for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, hx - 30 - k * 26, hy - 4, k < r.potions);
-    this._text(g, 'E', hx - 34 - r.potionCap * 26, hy + 14, { size: 12, color: C.ash, base: 'middle', align: 'right' });
+    this._key(g, 'E', hx - 40 - r.potionCap * 26, hy + 13);
     // Buffs above the skills.
     const tags = [];
     if (p.siphonT > 0) tags.push([`Blood Siphon ${Math.ceil(p.siphonT)}s`, '#ff6a5a']);
     if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
     if (p.burnT > 0) tags.push(['Burning: dodge to put it out', '#ff8a2a']);
+    if (p.flameT > 0) tags.push([`Flaming blade ${Math.ceil(p.flameT)}s`, '#ff9a3a']);
+    else if (p.coatT > 0) tags.push([`Slime-coated ${Math.ceil(p.coatT)}s: block to ignite`, '#8ef05a']);
     if (p.invuln > 0.25) tags.push(['Invulnerable', '#c9a0ff']);
     if (tags.length) {
       g.font = `12px ${SERIF}`;
@@ -1352,6 +1502,14 @@ export class Hud {
 
     // Touch controls.
     if (this.touch) this._paintTouch(g);
+  }
+
+  // A key cap: the letter bold and bright on a dark plate, centred on x, y.
+  _key(g, text, x, y) {
+    g.font = `bold 15px ${SERIF}`;
+    const kw = Math.max(24, g.measureText(text).width + 14);
+    this._box(g, x - kw / 2, y - 12, kw, 24, 'rgba(26,8,5,0.95)', C.ember);
+    this._text(g, text, x, y + 1, { size: 15, weight: 'bold ', color: C.light, align: 'center', base: 'middle', glow: 'rgba(200,50,0,0.85)' });
   }
 
   _tag(g, text, x, y, color) {
@@ -1446,7 +1604,7 @@ export class Hud {
     y += big * 0.9;
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 2.6);
     g.font = `${Math.max(16, big * 0.27)}px ${SERIF}`;
-    const label = this.touch ? 'Tap to enter the pit' : 'Click to enter the pit';
+    const label = 'Enter the pit';
     const bw = g.measureText(label).width + 48;
     this._box(g, (w - bw) / 2, y - 24, bw, 48, `rgba(${40 + pulse * 30},6,4,0.88)`, '#8a2210');
     this._text(g, label.toUpperCase(), w / 2, y, { size: Math.max(14, big * 0.22), ls: 2, color: C.light, align: 'center', base: 'middle', glow: `rgba(200,40,0,${0.5 + pulse * 0.4})` });
@@ -1473,22 +1631,23 @@ export class Hud {
     }
     // Controls.
     if (!this.touch && h > 420) {
+      // Keys bold and bright, what they do quieter beside them.
       const rows = [
         ['W A S D', 'move', 'Mouse', 'aim'],
-        ['Click / hold', 'light / heavy', 'Right button', 'block'],
+        ['Left click', 'attack: tap or hold', 'Right click', 'block'],
         ['Click as it lands', 'Perfect Chain', 'Hit a wind-up', 'counter'],
-        ['A A / D D', 'dodge (once learned)', '', ''],
+        ['Shift', 'sprint', 'A A / D D', 'dodge (once learned)'],
         ['E', 'drink potion', '1 2 3', 'demon spells'],
         ['F', 'take / use', '', ''],
       ];
-      let cy = Math.max(y + 20, h - 24 - rows.length * 19);
-      this._box(g, w / 2 - 210, cy - 22, 420, rows.length * 19 + 18, 'rgba(10,2,2,0.7)', C.edge);
+      let cy = Math.max(y + 20, h - 24 - rows.length * 20);
+      this._box(g, w / 2 - 250, cy - 22, 500, rows.length * 20 + 18, 'rgba(10,2,2,0.7)', C.edge);
       for (const [a, b, c2, d] of rows) {
-        this._text(g, a, w / 2 - 190, cy, { size: 13, color: C.bone });
-        this._text(g, b, w / 2 - 80, cy, { size: 13, color: C.ash });
-        this._text(g, c2, w / 2 + 30, cy, { size: 13, color: C.bone });
-        this._text(g, d, w / 2 + 140, cy, { size: 13, color: C.ash });
-        cy += 19;
+        this._text(g, a, w / 2 - 230, cy, { size: 14, weight: 'bold ', color: C.light });
+        this._text(g, b, w / 2 - 105, cy, { size: 13, color: C.ash });
+        this._text(g, c2, w / 2 + 30, cy, { size: 14, weight: 'bold ', color: C.light });
+        this._text(g, d, w / 2 + 145, cy, { size: 13, color: C.ash });
+        cy += 20;
       }
     }
   }
@@ -1531,14 +1690,15 @@ export class Hud {
     let y = h * 0.3 + 30;
     c.options.forEach((o, k) => {
       const bh = o.detail ? 62 : 46;
-      this._box(g, (w - bw) / 2, y, bw, bh, C.panel, C.edge);
+      const hot = this.hoverCode === `Digit${k + 1}`;
+      this._box(g, (w - bw) / 2, y, bw, bh, hot ? 'rgba(70,14,8,0.95)' : C.panel, hot ? C.ember : C.edge);
       this._text(g, String(k + 1), (w - bw) / 2 + 22, y + bh / 2, { size: 26, color: C.ember, align: 'center', base: 'middle' });
       this._text(g, o.label, (w - bw) / 2 + 46, y + (o.detail ? 22 : bh / 2), { size: 17, base: 'middle' });
       if (o.detail) this._wrap(g, o.detail, (w - bw) / 2 + 46, y + 42, bw - 60, 12, C.ash);
       this.buttons.push({ x: (w / 2) * this.u, y: (y + bh / 2) * this.u, w: bw * this.u, h: bh * this.u, code: `Digit${k + 1}`, rect: true });
       y += bh + 10;
     });
-    this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Press 1 or 2 to choose · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
+    this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Click one (or press its number) · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
   }
 
   _wrap(g, text, x, y, maxW, size, color) {

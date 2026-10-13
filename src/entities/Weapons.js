@@ -30,6 +30,7 @@ export const WEAPON_TYPES = {
     knockback: 3,
     stagger: 28,
     blade: [0.05, 1.12], // hitbox span along the blade, metres from the grip
+    steel: 0.48, // where the bare steel starts, above the guard (for its glow)
     width: 0.055,
     reach: 2.55,
     style: 'Momentum',

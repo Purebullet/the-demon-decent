@@ -68,7 +68,15 @@ export function createBrowserHost(canvas) {
     }
     return buffers.get(path);
   };
+  // One music track at a time; a newer play() wins even if an older one is
+  // still loading.
   let musicSrc = null;
+  let musicTok = 0;
+  const stopMusic = () => {
+    musicTok++;
+    musicSrc?.stop();
+    musicSrc = null;
+  };
   const playBuffer = async (path, { volume = 1, rate = 1, loop = false } = {}) => {
     const buf = await decode(path);
     if (!buf) return null;
@@ -81,6 +89,8 @@ export function createBrowserHost(canvas) {
     g.gain.value = volume;
     src.connect(g).connect(c.destination);
     src.start();
+    src.gain = g;
+    src.t0 = c.currentTime;
     return src;
   };
 
@@ -129,6 +139,10 @@ export function createBrowserHost(canvas) {
       canvas.requestPointerLock?.()?.catch?.(() => {});
     },
     unlockPointer: () => document.exitPointerLock?.(),
+    // The game draws its own (sword) cursor: hide the page's while it does.
+    setCursor: (own) => {
+      canvas.style.cursor = own ? 'none' : '';
+    },
     asset: (path) => path,
     loading: () => {},
     hud: () => {},
@@ -136,11 +150,19 @@ export function createBrowserHost(canvas) {
     sound: { play: (path, opts) => void playBuffer(path, opts), stop: () => {} },
     music: {
       play: async (path, opts) => {
-        musicSrc?.stop();
-        musicSrc = await playBuffer(path, { ...opts, loop: opts?.loop ?? true });
+        stopMusic();
+        const tok = musicTok;
+        const src = await playBuffer(path, { ...opts, loop: opts?.loop ?? true });
+        if (tok === musicTok) musicSrc = src;
+        else src?.stop();
       },
-      stop: () => musicSrc?.stop(),
-      volume: () => {},
+      stop: stopMusic,
+      volume: (v) => {
+        if (musicSrc) musicSrc.gain.gain.value = v;
+      },
+      get time() {
+        return musicSrc ? audio().currentTime - musicSrc.t0 : 0;
+      },
     },
     score(n) {
       if (n > best) {

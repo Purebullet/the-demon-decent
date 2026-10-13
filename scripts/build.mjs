@@ -87,10 +87,11 @@ async function buildExperience() {
   if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com); creatures rigged and animated in code' });
   await writeFile(join(out, 'experience.json'), `${JSON.stringify({ ...EXPERIENCE, credits }, null, 2)}\n`);
   const a = await copyAssets(out);
-  // Sound effects as MP3 (the looping drone stays WAV), and the game told so.
+  // Sound effects as MP3 (the looping drone and intro loop stay WAV), and the
+  // game told so.
   const sounds = join(out, 'assets/sounds');
   for (const f of await readdir(sounds)) {
-    if (!f.endsWith('.wav') || f === 'drone.wav') continue;
+    if (!f.endsWith('.wav') || f === 'drone.wav' || f === 'intro_loop.wav') continue;
     const mp3 = join(sounds, f.replace(/\.wav$/, '.mp3'));
     execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(sounds, f), '-ac', '1', '-b:a', '96k', mp3]);
     await rm(join(sounds, f));

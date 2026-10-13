@@ -1,11 +1,16 @@
-// Sound effects and the ambient drone, played through the host from the WAV
-// files that scripts/make-sounds.mjs renders. Sounds with a world position
-// fade with distance from the listener. Rapid repeats of the same sound are
-// thinned so a swarm does not turn into noise.
+// Sound effects and music, played through the host from the WAV files that
+// scripts/make-sounds.mjs renders. Sounds with a world position fade with
+// distance from the listener. Rapid repeats of the same sound are thinned so
+// a swarm does not turn into noise.
+//
+// Music: on the title and the surface the intro song (a groaning earth, then
+// a war drum beating quicker and quicker, then its driving loop); in the pit
+// the ambient drone.
 
-import { SOUND_EXT } from './soundFormat.js';
+import { SOUND_EXT, INTRO_SECONDS } from './soundFormat.js';
 
 const DIR = 'assets/sounds/';
+const MUSIC = { intro: 0.6, drone: 0.35 };
 
 export class Audio {
   constructor(host) {
@@ -15,19 +20,71 @@ export class Audio {
     this.started = false;
     this.last = new Map();
     this.heartT = 0;
+    this.mode = 'intro';
+    this.playing = null;
+    this.songT = 0;
+    this.fade = null;
   }
 
   // Browsers only allow sound after the first click or key press.
   init() {
     if (this.started) return;
     this.started = true;
-    if (!this.muted) this.host.music.play(this.host.asset(`${DIR}drone.wav`), { volume: 0.35, loop: true });
+    this._startMusic();
   }
 
   setMuted(m) {
     this.muted = m;
-    if (m) this.host.music.stop();
-    else if (this.started) this.host.music.play(this.host.asset(`${DIR}drone.wav`), { volume: 0.35, loop: true });
+    if (m) {
+      this.host.music.stop();
+      this.playing = null;
+    } else this._startMusic();
+  }
+
+  // 'intro' or 'drone'. Asking for what is already playing leaves it be.
+  music(mode) {
+    if (mode === this.mode && (this.playing || !this.started)) return;
+    this.mode = mode;
+    this._startMusic();
+  }
+
+  // Let the music die away over `secs` (the jump into the pit).
+  fadeMusic(secs) {
+    if (this.playing) this.fade = { t: 0, secs };
+  }
+
+  _startMusic() {
+    this.fade = null;
+    if (!this.started || this.muted) return;
+    const intro = this.mode === 'intro';
+    const file = intro ? `intro.${SOUND_EXT}` : 'drone.wav';
+    this.host.music.play(this.host.asset(DIR + file), { volume: MUSIC[this.mode], loop: !intro });
+    this.playing = intro ? 'intro' : 'drone';
+    this.songT = 0;
+  }
+
+  // Once a frame: the intro's build hands over to its loop, fades run.
+  update(dt) {
+    if (this.fade) {
+      const f = this.fade;
+      f.t += dt;
+      const k = Math.max(0, 1 - f.t / f.secs);
+      this.host.music.volume?.(MUSIC[this.mode] * k * k);
+      if (k <= 0) {
+        this.fade = null;
+        this.host.music.stop();
+        this.playing = null;
+      }
+      return;
+    }
+    if (this.playing !== 'intro') return;
+    this.songT += dt;
+    // Where the song is as heard (it may take a moment to start streaming).
+    const t = this.host.music.time;
+    if ((typeof t === 'number' && t > 0 ? t : this.songT) >= INTRO_SECONDS || this.songT > INTRO_SECONDS + 8) {
+      this.host.music.play(this.host.asset(`${DIR}intro_loop.wav`), { volume: MUSIC.intro, loop: true });
+      this.playing = 'intro_loop';
+    }
   }
 
   _vol(pos) {
@@ -58,13 +115,29 @@ export class Audio {
   kind = (k) => (k === 'ghoul' || k === 'hound' ? 'ghoul' : k === 'fiend' || k === 'witch' ? 'fiend' : 'brute');
 
   // A swing's sound says how it was made: a Perfect Chain cuts deeper with
-  // every link, a sluggish one drags.
-  swing(type, { perfect = false, chain = 0, sluggish = false } = {}) {
+  // every link, a sluggish one drags, a heavy blow (or an axe or mace) heaves
+  // through the air, a burning blade roars.
+  swing(type, { perfect = false, chain = 0, sluggish = false, flame = false } = {}) {
+    const take = (n) => 1 + Math.floor(Math.random() * n);
     if (perfect) {
-      this.play('swing_perfect', { volume: 0.8, rate: 1 - 0.05 * chain });
+      this.play('swing_perfect', { volume: 0.9, rate: 1 - 0.05 * chain });
       this.play('chain', { volume: 0.35 + 0.08 * chain, rate: 1 + 0.06 * chain, gap: 0.02 });
-    } else if (sluggish) this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.45, rate: 0.75 });
-    else this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.7 });
+    } else if (type === 'heavy') this.play(`swing_heavy_${take(2)}`, { volume: sluggish ? 0.55 : 0.95, rate: sluggish ? 0.8 : 0.92 });
+    else if (type === 'sword') this.play(`swing_light_${take(3)}`, { volume: sluggish ? 0.5 : 0.85, rate: sluggish ? 0.78 : 1 });
+    else this.play(`swing_heavy_${take(2)}`, { volume: sluggish ? 0.5 : 0.8, rate: sluggish ? 0.9 : 1.15 });
+    if (flame) this.play('flame_swing', { volume: 0.7, gap: 0.05 });
+  }
+  footstep(ground = 'stone', pace = 1) {
+    this.play(`step_${ground}_${1 + Math.floor(Math.random() * 3)}`, { volume: 0.22 + 0.12 * Math.min(1.6, pace), gap: 0.12, rate: 0.95 + 0.05 * Math.min(1.6, pace) });
+  }
+  slime() {
+    this.play('slime', { volume: 0.9, gap: 0.2 });
+  }
+  extinguish() {
+    this.play('extinguish', { volume: 0.8, gap: 0.5 });
+  }
+  guardDrop() {
+    this.play('guard_drop', { volume: 0.8, gap: 0.3 });
   }
   fumble() {
     this.play('fumble', { volume: 0.6, gap: 0.08 });

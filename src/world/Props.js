@@ -11,11 +11,12 @@ import { mulberry32 } from '../core/rng.js';
 // Things on a cavern floor you can do something with:
 //
 //   Chests sit at the ends of dead-end passages. F opens one: it jolts, a
-//   burst of light, and its contents spill out onto the floor in front of it
-//   (always a potion; often a weapon, a demon sigil or a second potion).
+//   burst of light, and one thing spills out in front of it (a relic, a
+//   weapon, a potion, a demon sigil or a tome).
 //   Breakables (burial urns, rotten barrels) stand in groups along the walls
 //   of the larger rooms. A blow smashes one into flying pieces; some hold a
-//   potion.
+//   potion. An urn holds slime that coats the blade (Player.coat): block
+//   while it is coated and the blade catches fire.
 //
 // Both block movement while whole (circles in the floor's collision world)
 // and never sit inside another prop's footprint (Dressing.free/claim).
@@ -28,6 +29,9 @@ const DIRS = [
   [0, 1],
   [0, -1],
 ];
+
+const SLIME = new THREE.Color(0.45, 0.95, 0.2);
+const SLIME_DARK = new THREE.Color(0.1, 0.35, 0.05);
 
 export class Props {
   constructor(level) {
@@ -199,6 +203,11 @@ export class Props {
     if (b.id === 'barrel') burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.7, p.z), { count: 10, speed: 3, color: C.bone ?? C.smoke, colorEnd: C.smoke, size: 0.12, life: 0.9 });
     ctx.audio?.smash?.(b.id);
     ctx.shake?.(0.08);
+    // An urn holds slime: it splashes out and coats the blade that broke it.
+    if (b.id === 'urn') {
+      burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.55, p.z), { count: 34, speed: 3, color: SLIME, colorEnd: SLIME_DARK, size: 0.16, life: 0.9, gravity: -9 });
+      ctx.player?.coat?.(ctx);
+    }
     const roll = Math.random();
     if (roll < 0.2) ctx.pickups?.addPotion(p.x, p.z);
     else if (roll < 0.23) ctx.pickups?.addSpell(p.x, p.z);
@@ -216,14 +225,26 @@ export class Props {
     const at = (k, side) => [c.x + fx * (1.1 + k * 0.2) + fz * side, c.z + fz * (1.1 + k * 0.2) - fx * side];
     const floor = this.level.floor;
     const run = ctx.player.run;
-    const loot = [];
-    loot.push(['potion']);
-    // The first chest of a run always holds a relic; after that, often.
-    if (!Object.keys(run.relics || {}).length || Math.random() < 0.45) loot.push(['relic']);
-    if (!run.skills?.phantomStep && floor >= 2 && Math.random() < 0.3) loot.push(['tome']);
-    if (Math.random() < 0.45) loot.push(['weapon']);
-    if (Math.random() < 0.3) loot.push(['spell']);
-    if (Math.random() < 0.25) loot.push(['potion']);
+    // One thing per chest. The first chest of a run always holds a relic.
+    const table = [
+      ['relic', 0.3],
+      ['weapon', 0.25],
+      ['potion', 0.25],
+      ['spell', 0.12],
+      ['tome', !run.skills?.phantomStep && floor >= 2 ? 0.1 : 0],
+    ];
+    let pick = 'relic';
+    if (Object.keys(run.relics || {}).length) {
+      let roll = Math.random() * table.reduce((a, [, w]) => a + w, 0);
+      for (const [kind, w] of table) {
+        roll -= w;
+        if (roll <= 0) {
+          pick = kind;
+          break;
+        }
+      }
+    }
+    const loot = [[pick]];
     loot.forEach(([kind], i) => {
       const [x, z] = at(i, (i - (loot.length - 1) / 2) * 0.8);
       if (kind === 'potion') ctx.pickups?.addPotion(x, z);
@@ -233,7 +254,7 @@ export class Props {
       else ctx.pickups?.addWeapon(x, z, rollWeapon(floor, 0.5));
     });
     burst(ctx.fx.add, new THREE.Vector3(c.x, 0.8, c.z), { count: 50, speed: 3.5, color: C.spark, colorEnd: C.fireEdge, size: 0.1, life: 1.1, gravity: -2 });
-    ctx.toast?.(`The chest held ${loot.length} ${loot.length === 1 ? 'thing' : 'things'}`);
+    ctx.toast?.({ relic: 'The chest held a relic', weapon: 'The chest held a weapon', potion: 'The chest held a potion', spell: 'The chest held a spell', tome: 'The chest held a tome' }[pick]);
   }
 
   // The prompt to show, if a closed chest is within reach.

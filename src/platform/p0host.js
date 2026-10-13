@@ -66,6 +66,9 @@ export function createP0Host(p0) {
       play: (path, opts) => p0.music.play(path, opts),
       stop: () => p0.music.stop(),
       volume: (v) => p0.music.volume?.(v),
+      get time() {
+        return p0.music.time;
+      },
     },
     // Scores: the deepest floor goes to the lot's weekly table.
     score: (n) => p0.score(n),

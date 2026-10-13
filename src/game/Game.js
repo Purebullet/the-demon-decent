@@ -34,7 +34,7 @@ const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019
 // sandbox or a plain web page (src/platform).
 
 const PLAYING = new Set(['surface', 'floor', 'sanctum']);
-const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, mouseClicked: [], mouseDown: [] };
+const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
 export class Game {
@@ -108,12 +108,13 @@ export class Game {
       .add('title', { enter: (g) => g._enterTitle(), update: (g, dt) => g._updateTitle(dt), exit: (g) => g.hud.show('title', false) })
       .add('surface', { enter: (g) => g._enterSurface(), update: (g, dt) => g._updateSurface(dt) })
       .add('floor', { enter: (g, p) => g._enterFloor(p), update: (g, dt) => g._updateFloor(dt), exit: (g) => g._exitFloor() })
-      .add('sanctum', { enter: (g, p) => g._enterSanctum(p), update: (g, dt) => g._updateSanctum(dt), exit: (g) => g.hud.hideChoice() })
+      .add('sanctum', { enter: (g, p) => g._enterSanctum(p), update: (g, dt) => g._updateSanctum(dt), exit: (g) => { g.hud.hideChoice(); g.uiMouse = false; } })
       .add('dead', { enter: (g) => g._enterEnd(false), update: (g, dt) => g._updateEnd(dt), exit: (g) => g.hud.show('death', false) })
       .add('victory', { enter: (g) => g._enterEnd(true), update: (g, dt) => g._updateEnd(dt), exit: (g) => g.hud.show('victory', false) });
 
     this.input.onLockChange = (locked) => {
-      if (!locked && PLAYING.has(this.fsm.currentName) && !this.busy && !this.input.touch) {
+      // (While choosing at an altar the mouse is let go on purpose.)
+      if (!locked && PLAYING.has(this.fsm.currentName) && !this.busy && !this.input.touch && !this.uiMouse) {
         this.paused = true;
         this.hud.show('pause', true);
       } else if (locked && this.paused) {
@@ -124,8 +125,11 @@ export class Game {
     host.on('resize', () => this._resize());
     this._resize();
     this.fsm.change('title');
+    // Project 0's "How to play" box takes plain text: the keys are set in
+    // Unicode bold so they stand out.
     host.hud(
-      'WASD move · mouse aim · click attack · Space/Shift dodge · E potion · 1 2 3 spells · F take/use.\n' +
+      `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Left click')} attack (tap or hold) · ${bold('Right click')} block · ` +
+        `${bold('Shift')} sprint · ${bold('E')} potion · ${bold('1 2 3')} spells · ${bold('F')} take/use\n` +
         'Twenty floors, one life: die and you start again at the surface. Your deepest floor goes on the weekly table.\n' +
         'Click or press any key for sound.',
     );
@@ -305,6 +309,7 @@ export class Game {
     const s = new THREE.Scene();
     s.background = new THREE.Color(background);
     s.fog = new THREE.FogExp2(fog, density);
+    this.fogBase = density;
     // One point light rides with the player (the torch); flashes borrow it
     // rather than keeping a second light lit at zero, which every lit pixel
     // would still pay for.
@@ -384,6 +389,7 @@ export class Game {
     this._refreshTitle();
     this.viewRoot.visible = false;
     this.orbit = 0;
+    this.audio.music('intro');
   }
 
   _updateTitle(dt) {
@@ -415,7 +421,8 @@ export class Game {
     this.hud.setPlaying(true);
     this.hud.show('title', false);
     this.falling = 0;
-    this.ctx = this._baseCtx({ world: this.surface.world, combat: true });
+    this.audio.music('intro');
+    this.ctx = this._baseCtx({ world: this.surface.world, combat: true, ground: 'gravel' });
     this.hud.announce(this.lotLabel, 'The pit waits. Step over the edge to descend.');
     if (this.devFloor) {
       this.run.dev = true;
@@ -455,6 +462,7 @@ export class Game {
       this.hud.announcement = null;
       this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
       this.audio.portal();
+      this.audio.fadeMusic(2.5);
     }
     this.hud.update(dt, p, this.run, {
       floorLabel: `${this.lotLabel} — The Surface`,
@@ -467,6 +475,7 @@ export class Game {
   // ---------------------------------------------------------------- floor ---
 
   _enterFloor({ floor, arrival = false }) {
+    this.audio.music('drone');
     const def = FLOORS[floor - 1];
     const run = this.run;
     run.floor = floor;
@@ -495,6 +504,7 @@ export class Game {
 
     this.ctx = this._baseCtx({
       world: level.world,
+      ground: look.step,
       nav: level.nav,
       director: this.director,
       pathService: this.pathService,
@@ -613,6 +623,16 @@ export class Game {
     } else if (kind === 'stunned') this.hud.callout('STUNNED', { color: '#ffd080', size: 1.0 });
     else if (kind === 'enrage') this.hud.callout('ENRAGED', { color: '#ff4020', size: 1.0 });
     else if (kind === 'blocked') this._hint('parry', 'Raise your block <b>just as a blow lands</b> to parry it (fireballs too)');
+    else if (kind === 'coated') {
+      this.hud.callout('SLIME-COATED', { color: '#8ef05a', size: 0.9 });
+      this._hint('slime', 'Slime coats your blade: <b>raise your block</b> to set it alight');
+    } else if (kind === 'ignite') this.hud.callout('FLAMING BLADE', { color: '#ffa040', size: 1.1 });
+    else if (kind === 'refuel') this.hud.callout('THE FIRE FEEDS', { color: '#ffa040', size: 0.85 });
+    else if (kind === 'extinguish') this.hud.toast('The flame on your blade dies');
+    else if (kind === 'guardSpent') {
+      this.hud.callout('GUARD BROKEN', { color: '#d05040', size: 0.8 });
+      this._hint('guard3', 'A block holds for <b>3 seconds</b>: watch the bar under your aim');
+    }
   }
 
   _onProc(id, P) {
@@ -683,6 +703,10 @@ export class Game {
       this.enemies.splice(i, 1);
     }
 
+    // A burning blade lights the way: the murk draws back a little.
+    const fog = this.scene.fog;
+    if (fog) fog.density += (this.fogBase * (p.flameT > 0 ? 0.78 : 1) - fog.density) * Math.min(1, dt * 1.5);
+
     level.update(dt, ctx);
     this.effects.update(dt, ctx);
     this.pickups.update(dt, ctx);
@@ -726,9 +750,9 @@ export class Game {
   }
 
   // Arriving at the bottom of the pit (floor 1 after the fall): you come to
-  // on the floor and push yourself up in near darkness, the last of the
-  // light goes, then you strike your torch alight. Your sword lies on the
-  // ground in front of you, flung there by the fall.
+  // in pitch darkness and push yourself up, then strike your torch alight,
+  // each spark of the flint lighting the dark for an instant. Your sword
+  // lies on the ground in front of you, flung there by the fall.
   _beginArrival(level) {
     const p = this.player;
     p.wake = 0;
@@ -736,14 +760,14 @@ export class Game {
     p.torchRaise = 0;
     p.armed = false;
     p.pitch = -0.42;
-    this.renderer.toneMappingExposure = 0.55;
+    this.renderer.toneMappingExposure = 0;
     const sp = level.spawn;
     const yaw = p.yaw;
     let d = 2.3;
     while (d > 0.8 && level.world.isSolidAt(sp.x - Math.sin(yaw) * d, sp.z - Math.cos(yaw) * d)) d -= 0.3;
     this.pickups.addStarter(sp.x - Math.sin(yaw) * d, sp.z - Math.cos(yaw) * d, this.run.weapon, yaw);
-    // The last red light falling down the shaft you came through. It stays in
-    // the scene at zero afterwards: removing a light would recompile shaders.
+    // (A light kept at zero, where the light down the shaft used to be:
+    // taking it out would change the light count and recompile shaders.)
     this.introLight = new THREE.PointLight(0xff3014, 0, 22, 1.3);
     this.introLight.position.set(sp.x, 7, sp.z);
     this.scene.add(this.introLight);
@@ -756,19 +780,19 @@ export class Game {
     if (!a) return false;
     const p = this.player;
     const r = this.renderer;
-    a.t += dt;
+    // (It waits while the floor's shaders compile behind the black.)
+    if (!this.compiling) a.t += dt;
     const t = a.t;
     const smooth = (k) => k * k * (3 - 2 * k);
-    // 0-3.2 s: getting up in the last dim red light from the shaft above.
-    p.wake = Math.min(1, smooth(Math.min(1, t / 3.2)));
-    a.look = t > 3.2;
-    // 3.2-4.2 s: it fades to complete darkness.
-    if (t < 3.2) r.toneMappingExposure = 0.55;
-    else if (t < 4.2) r.toneMappingExposure = 0.55 * (1 - (t - 3.2));
-    this.introLight.intensity = t < 3.2 ? 60 : Math.max(0, 60 * (1 - (t - 3.2)));
-    // 4.2-6.4 s: the torch comes up, three strikes of the flint, it catches.
-    p.torchRaise = smooth(Math.min(1, Math.max(0, (t - 4.2) / 0.6)));
-    const strikes = [4.9, 5.35, 5.8];
+    // Pitch black from the first frame: getting up off the floor unseen.
+    p.wake = Math.min(1, smooth(Math.min(1, t / 1.6)));
+    a.look = t > 1.6;
+    r.toneMappingExposure = 0;
+    this.introLight.intensity = 0;
+    // The torch comes up, three strikes of the flint (each spark lights the
+    // dark for an instant), and it catches.
+    p.torchRaise = smooth(Math.min(1, Math.max(0, (t - 1.6) / 0.6)));
+    const strikes = [2.3, 2.75, 3.2];
     while (a.strikes < strikes.length && t >= strikes[a.strikes]) {
       a.strikes++;
       this.audio.strike?.();
@@ -776,21 +800,23 @@ export class Game {
       burst(this.fx.add, tip, { count: 14, speed: 2.4, size: 0.05, life: 0.35, color: C.spark, colorEnd: C.fireEdge, gravity: -6 });
       p.shake(0.03);
     }
-    if (t >= 5.85 && !a.lit) {
+    const lightAt = 3.25;
+    if (t >= lightAt && !a.lit) {
       a.lit = true;
       this.audio.ignite?.();
     }
     if (a.lit) {
-      const k = Math.min(1, (t - 5.85) / 0.9);
+      const k = Math.min(1, (t - lightAt) / 0.9);
       p.torchLit = smooth(k);
       r.toneMappingExposure = 1.2 * smooth(k);
-    } else if (t >= 4.2) {
-      // A flicker of light with each spark.
-      const since = Math.min(...strikes.map((s) => (t >= s ? t - s : 9)));
-      p.torchLit = since < 0.12 ? 0.15 * (1 - since / 0.12) : 0;
+    } else {
+      const since = Math.min(...strikes.map((st) => (t >= st ? t - st : 9)));
+      const spark = since < 0.14 ? 1 - since / 0.14 : 0;
+      p.torchLit = 0.25 * spark;
+      r.toneMappingExposure = 0.9 * spark;
     }
     this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
-    if (t >= 7) {
+    if (t >= lightAt + 1.2) {
       this.intro = null;
       r.toneMappingExposure = 1.2;
       this.hud.announce(...this.floorTitle);
@@ -869,13 +895,14 @@ export class Game {
   // -------------------------------------------------------------- sanctum ---
 
   _enterSanctum({ next }) {
+    this.audio.music('drone');
     const s = this._newScene({ fog: 0x0a0404, density: 0.035, background: 0x050202 });
     this.sanctum = new Sanctum(next);
     s.add(this.sanctum.group);
     this.player.spawnAt(this.sanctum.spawn.x, this.sanctum.spawn.z, 0);
     this.player.position.y = 0;
     this.choice = null;
-    this.ctx = this._baseCtx({ world: this.sanctum.world, torchRange: 14 });
+    this.ctx = this._baseCtx({ world: this.sanctum.world, torchRange: 14, ground: 'stone' });
     this.hud.announce('Sanctum', `Wake one altar before Floor ${next}`);
   }
 
@@ -902,6 +929,9 @@ export class Game {
       else {
         this.choice = { node: focused, options };
         this.hud.showChoice(NODES[focused.key].title, options);
+        // Let the mouse go so the options can be clicked.
+        this.uiMouse = true;
+        this.input.host.unlockPointer?.();
       }
     }
     if (sc.atPortal(p.position) && !this.busy) {
@@ -930,6 +960,10 @@ export class Game {
   _closeChoice() {
     this.choice = null;
     this.hud.hideChoice();
+    if (this.uiMouse) {
+      this.uiMouse = false;
+      this.input.requestLock();
+    }
   }
 
   // ------------------------------------------------------- death / victory ---
@@ -991,6 +1025,7 @@ export class Game {
       this.input.claimTap?.();
     }
     if (this.input.pressed.size || this.input.mouseClicked[0]) this.audio.init();
+    this.audio.update(rawDt);
     if (this.paused && (this.input.mouseClicked[0] || this.input.taps.length)) this.input.requestLock();
 
     if (!this.paused) {
@@ -1010,6 +1045,12 @@ export class Game {
         this.audio.setLowHealth(frac < 0.3 && !this.player.dead ? (0.3 - frac) / 0.3 : 0, dt);
       }
       this.hud.updateNumbers(dt);
+    }
+    const own = !this.input.locked && !this.input.touch;
+    this.hud.setCursor(own, this.input.pointer.x, this.input.pointer.y);
+    if (own !== this.ownCursor) {
+      this.ownCursor = own;
+      this.host.setCursor?.(own);
     }
     this.input.endFrame();
     this._render(dt);
@@ -1167,4 +1208,17 @@ function pointAlongPath(path, from, ahead) {
     pz = q.z;
   }
   return { x: px, z: pz };
+}
+
+// Text in Unicode sans-serif bold (letters and digits), for plain-text places.
+function bold(text) {
+  return [...text]
+    .map((ch) => {
+      const c = ch.codePointAt(0);
+      if (c >= 65 && c <= 90) return String.fromCodePoint(0x1d5d4 + c - 65);
+      if (c >= 97 && c <= 122) return String.fromCodePoint(0x1d5ee + c - 97);
+      if (c >= 48 && c <= 57) return String.fromCodePoint(0x1d7ec + c - 48);
+      return ch;
+    })
+    .join('');
 }
