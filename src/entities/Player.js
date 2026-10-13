@@ -122,6 +122,7 @@ export class Player {
     viewRoot.add(this.torch);
     this.torchLight = new THREE.PointLight(0xffb070, 30, 16, 1.7);
     this.prevTorch = new THREE.Vector3();
+    this.flashFx = { color: new THREE.Color(), base: 0, t: 0, dur: 1 };
     this.reset();
   }
 
@@ -928,6 +929,19 @@ export class Player {
     this.torchLight.position.copy(_v).add(_v2.set(0, this.flameY + 0.1, 0));
     this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit;
     this.torchLight.distance = (ctx.torchRange ?? 16) * (relicPassive(this.run || { relics: {} }, 'light') ?? 1);
+    const fl = this.flashFx;
+    const k = fl.t > 0 ? fl.t / fl.dur : 0;
+    fl.t = Math.max(0, fl.t - dt);
+    this.torchLight.color.copy(_torchCol).lerp(fl.color, k * 0.85);
+    this.torchLight.intensity += fl.base * k;
+  }
+
+  // A burst of light around you (a spell, a proc, a counter): the torch's
+  // light flares in that colour and dies back.
+  flash(color, intensity, dur) {
+    this.flashFx.color.setHex(color);
+    this.flashFx.base = intensity;
+    this.flashFx.t = this.flashFx.dur = dur;
   }
 
   // ---------------------------------------------------- health & hurt ---
@@ -1050,6 +1064,7 @@ export class Player {
 }
 
 const _heatCol = new THREE.Color(1, 0.45, 0.1);
+const _torchCol = new THREE.Color(0xffb070);
 const _wrathCol = new THREE.Color(1, 0.12, 0.04);
 const easeOut = (k) => 1 - (1 - k) * (1 - k);
 const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);

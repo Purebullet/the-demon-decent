@@ -21,9 +21,18 @@ const VENT_PERIOD = 4.2;
 
 export class Level {
   // `light`: fewer dynamic lights, for slow machines and software rendering.
+  //
+  // Braziers, lava and glowing set pieces are light *sources* (spots); only a
+  // small pool of real point lights exists (POOL, plus the torch), and each
+  // moment they go to the sources nearest the player, fading in as they are
+  // handed over. Every lit pixel pays for every light in the scene, lit or
+  // not, so this keeps a floor to four lights however many fires burn in it,
+  // and the count never changes (no shader is ever recompiled for it).
   constructor(floorNumber, def, { light = false } = {}) {
-    this.maxLights = light ? 2 : 7;
-    this.maxBrazierLights = light ? 1 : 4;
+    this.maxLights = light ? 2 : 9;
+    this.maxBrazierLights = light ? 1 : 6;
+    this.poolSize = light ? 1 : 3;
+    this.spots = [];
     this.floor = floorNumber;
     this.def = def;
     this.data = parseLevel(def);
@@ -33,7 +42,6 @@ export class Level {
     this.nav = d.nav;
     this.world = new CollisionWorld({ grid: { cols: d.cols, rows: d.rows, solid: d.solid }, tileSize: TILE });
     this.group = new THREE.Group();
-    this.lights = [];
     this.exitOpen = false;
     this.portalT = 0;
     this.time = 0;
@@ -53,6 +61,7 @@ export class Level {
     this.props = new Props(this);
     this._buildGlowLights();
     this._buildExit();
+    this._buildLightPool();
   }
 
   get spawn() {
@@ -111,12 +120,7 @@ export class Level {
       flame.position.copy(anchor);
       this.group.add(flame);
       this.braziers.push({ pos: anchor, flame });
-      if (i < this.maxBrazierLights) {
-        const l = new THREE.PointLight(flame, 18, 14, 1.6);
-        l.position.set(b.x, 2.2, b.z);
-        this.group.add(l);
-        this.lights.push({ light: l, base: 18, seed: i * 3.1 });
-      }
+      if (i < this.maxBrazierLights) this._spot({ color: flame, base: 18, distance: 14, decay: 1.6, x: b.x, y: 2.2, z: b.z, seed: i * 3.1 });
     });
   }
 
@@ -135,11 +139,8 @@ export class Level {
       this.group.add(new THREE.Mesh(merged, this.lavaMat));
       // A few lights over the largest pools.
       const step = Math.max(1, Math.floor(d.lava.length / 3));
-      for (let i = 0; i < d.lava.length && this.lights.length < this.maxLights; i += step) {
-        const l = new THREE.PointLight(0xff4a10, 14, 12, 1.5);
-        l.position.set(d.lava[i].x, 1.2, d.lava[i].z);
-        this.group.add(l);
-        this.lights.push({ light: l, base: 14, seed: i });
+      for (let i = 0; i < d.lava.length && this.spots.length < this.maxLights; i += step) {
+        this._spot({ color: 0xff4a10, base: 14, distance: 12, decay: 1.5, x: d.lava[i].x, y: 1.2, z: d.lava[i].z, seed: i });
       }
     }
 
@@ -174,12 +175,63 @@ export class Level {
   // Light from the brightest glowing set pieces (crystals, rune stones), with
   // whatever light budget the braziers and lava left.
   _buildGlowLights() {
-    const free = Math.min(this.maxLights - this.lights.length, this.maxLights > 2 ? 3 : 1);
+    const free = Math.min(this.maxLights - this.spots.length, this.maxLights > 2 ? 3 : 1);
     for (const [i, g] of this.dressing.lightSpots(Math.max(0, free)).entries()) {
-      const l = new THREE.PointLight(this.look.glow, 9, 11, 1.6);
-      l.position.set(g.x, Math.max(1.2, g.y), g.z);
-      this.group.add(l);
-      this.lights.push({ light: l, base: 9, seed: 10 + i * 2.3, slow: true });
+      this._spot({ color: this.look.glow, base: 9, distance: 11, decay: 1.6, x: g.x, y: Math.max(1.2, g.y), z: g.z, seed: 10 + i * 2.3, slow: true });
+    }
+  }
+
+  // A light source; the pool of real lights is shared out among them.
+  _spot(o) {
+    this.spots.push({ ...o, color: new THREE.Color(o.color), pos: new THREE.Vector3(o.x, o.y, o.z) });
+  }
+
+  _buildLightPool() {
+    this.pool = [];
+    for (let i = 0; i < this.poolSize; i++) {
+      const light = new THREE.PointLight(0xff6020, 0, 12, 1.6);
+      light.position.set(0, -50, 0);
+      this.group.add(light);
+      this.pool.push({ light, spot: null, fade: 0 });
+    }
+  }
+
+  // Give the pool's lights to the sources nearest the player (the open
+  // portal counts as one), each fading in as it arrives.
+  _updateLightPool(dt, t, player) {
+    const p = player.position;
+    const exit = this.exitSpot;
+    exit.base = 4 + this.portalT * 26 + Math.sin(t * 5) * 2;
+    this.poolT = (this.poolT ?? 0) - dt;
+    const want = this.poolT > 0 && this.poolWant ? this.poolWant : null;
+    if (!want) {
+      this.poolT = 0.25;
+      const ranked = [...this.spots, exit].map((s) => ({ s, d: (s.pos.x - p.x) ** 2 + (s.pos.z - p.z) ** 2 - (s === exit ? this.portalT * 60 : 0) })).sort((a, b) => a.d - b.d);
+      this.poolWant = ranked.slice(0, this.pool.length).map((r) => r.s);
+    }
+    this._assignPool(this.poolWant);
+    for (const L of this.pool) {
+      const s = L.spot;
+      if (!s) continue;
+      L.fade = Math.min(1, L.fade + dt * 3);
+      const flicker = s.slow ? 0.8 + Math.sin(t * 1.3 + s.seed) * 0.2 : 0.85 + Math.sin(t * 9 + s.seed) * 0.08 + Math.sin(t * 23 + s.seed * 2) * 0.05;
+      L.light.intensity = s.base * (s === exit ? 1 : flicker) * L.fade;
+    }
+  }
+
+  // Keep lights on sources still wanted; hand the rest over.
+  _assignPool(want) {
+    const free = this.pool.filter((L) => !want.includes(L.spot));
+    for (const s of want) {
+      if (this.pool.some((L) => L.spot === s)) continue;
+      const L = free.shift();
+      if (!L) break;
+      L.spot = s;
+      L.fade = 0;
+      L.light.position.copy(s.pos);
+      L.light.color.copy(s.color);
+      L.light.distance = s.distance;
+      L.light.decay = s.decay;
     }
   }
 
@@ -221,9 +273,8 @@ export class Level {
       this.seal.add(line);
     }
     g.add(this.seal);
-    this.exitLight = new THREE.PointLight(0xff3010, 4, 9, 1.6);
-    this.exitLight.position.y = 1.2;
-    g.add(this.exitLight);
+    // The portal is a light source like the others (see the pool).
+    this.exitSpot = { color: new THREE.Color(0xff3010), base: 4, distance: 9, decay: 1.6, pos: new THREE.Vector3(x.x, 1.2, x.z), seed: 0 };
     this.exitRune = rune;
     // Once the seal breaks, a pillar of hellfire light stands over the
     // portal, seen through the dark from across the cavern.
@@ -265,10 +316,7 @@ export class Level {
     this.portalMat.uniforms.uOpen.value = this.portalT;
     this.exitRune.rotation.z = t * (0.1 + this.portalT * 0.6);
     this.exitRune.material.opacity = 0.25 + this.portalT * 0.6;
-    this.exitLight.intensity = 4 + this.portalT * 26 + Math.sin(t * 5) * 2;
-    for (const l of this.lights) {
-      l.light.intensity = l.slow ? l.base * (0.8 + Math.sin(t * 1.3 + l.seed) * 0.2) : l.base * (0.85 + Math.sin(t * 9 + l.seed) * 0.08 + Math.sin(t * 23 + l.seed * 2) * 0.05);
-    }
+    this._updateLightPool(dt, t, ctx.player);
     const ps = ctx.fx.add;
     for (const b of this.braziers) {
       b.flame.userData.tick(t);

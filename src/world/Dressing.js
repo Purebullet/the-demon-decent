@@ -35,20 +35,24 @@ const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar']);
 // A generated model's material made to sit in the cave: its painted colour
 // tinted, no metal/roughness texture (the models' are glossy for a lit studio,
 // not a torchlit cave), and the bright parts of its albedo glowing if asked.
-export function sceneryMaterial(base, { tint = [1, 1, 1], metal = 0, rough = 0.9, glow = null, strength = 1.4 } = {}) {
-  const m = base.clone();
-  m.color.multiply(new THREE.Color(tint[0], tint[1], tint[2]));
-  m.metalnessMap = null;
-  m.roughnessMap = null;
-  m.aoMap = null;
-  m.metalness = metal;
-  m.roughness = metal ? 0.55 : rough;
+export function sceneryMaterial(base, { tint = [1, 1, 1], glow = null, strength = 1.4 } = {}) {
+  // Lambert: the same matte look as a rough standard material, at a fraction
+  // of the cost per pixel (there is nothing in a cave to reflect).
+  const m = new THREE.MeshLambertMaterial({
+    map: base.map || null,
+    normalMap: base.normalMap || null,
+    color: base.color.clone().multiply(new THREE.Color(tint[0], tint[1], tint[2])),
+    side: base.side,
+    transparent: base.transparent,
+    alphaTest: base.alphaTest,
+  });
+  if (base.normalMap) m.normalScale.copy(base.normalScale);
   if (glow !== null) {
     m.emissive = new THREE.Color(glow);
     m.emissiveMap = m.map;
     m.emissiveIntensity = strength;
   }
-  m.needsUpdate = true;
+  m.name = base.name;
   return m;
 }
 

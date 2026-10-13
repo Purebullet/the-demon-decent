@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHARACTERS, PROPS } from './manifest.js';
 import { IconAtlas } from '../ui/IconAtlas.js';
 
@@ -314,7 +314,10 @@ export const Assets = {
       material ??= Array.isArray(o.material) ? o.material[0] : o.material;
     });
     if (!geos.length) return null;
-    const geometry = geos.length === 1 ? geos[0] : mergeGeometries(geos) || geos[0];
+    // Welded back into an indexed mesh: the models arrive with every
+    // triangle's corners separate, nearly three times the vertices to shade
+    // for every instance drawn.
+    const geometry = mergeVertices(geos.length === 1 ? geos[0] : mergeGeometries(geos) || geos[0], 1e-4);
     p.merged = { geometry, material };
     return p.merged;
   },

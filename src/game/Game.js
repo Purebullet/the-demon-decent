@@ -89,8 +89,6 @@ export class Game {
     this.hitStopT = 0;
     this.paused = false;
     this.busy = false;
-    this.flashT = 0;
-    this.flashLight = new THREE.PointLight(0xff5a1e, 0, 16, 1.5);
 
     // Scores live in the host (the lot's weekly table on Project 0).
     host.on('reward', (r2) => {
@@ -305,12 +303,14 @@ export class Game {
     const s = new THREE.Scene();
     s.background = new THREE.Color(background);
     s.fog = new THREE.FogExp2(fog, density);
-    s.add(this.fx.add.points, this.fx.alpha.points, this.player.torchLight, this.flashLight);
+    // One point light rides with the player (the torch); flashes borrow it
+    // rather than keeping a second light lit at zero, which every lit pixel
+    // would still pay for.
+    s.add(this.fx.add.points, this.fx.alpha.points, this.player.torchLight);
     this.fx.add.clear();
     this.fx.alpha.clear();
     this.fx.add.setFogDensity(density);
     this.fx.alpha.setFogDensity(density);
-    this.flashLight.intensity = 0;
     this.scene = s;
     this.hud.setWorld(s);
     return s;
@@ -331,13 +331,7 @@ export class Game {
       tuning: SURFACE_TUNING,
       hitStop: (s) => (this.hitStopT = Math.max(this.hitStopT, s)),
       shake: (a) => this.player.shake(a),
-      flash: (color, intensity, dur) => {
-        this.flashLight.color.setHex(color);
-        this.flashLight.position.copy(this.player.position).setY(1.5);
-        this.flashLight.userData.base = intensity * 6;
-        this.flashT = dur;
-        this.flashDur = dur;
-      },
+      flash: (color, intensity, dur) => this.player.flash(color, intensity * 6, dur),
       onDamage: (e, amount, crit, point, kind) => this.hud.damageNumber(point || e.position, amount, crit, kind),
       onPlayerHurt: () => {},
       onDodge: () => this.hud.callout('EVADED', { color: '#c9a0ff', size: 0.8 }),
@@ -601,10 +595,7 @@ export class Game {
     if (kind === 'counter') {
       if (r) r.best.counters++;
       this.hud.callout('COUNTER', { color: '#ffb060', size: 1.15 });
-      this.flashLight.color.setHex(0xffa040);
-      this.flashLight.position.copy(this.player.position).setY(1.5);
-      this.flashLight.userData.base = 30;
-      this.flashT = this.flashDur = 0.18;
+      this.player.flash(0xffa040, 30, 0.18);
     } else if (kind === 'clash') this.hud.callout('GUARDED', { color: '#c05040', size: 0.85 });
     else if (kind === 'guardBreak') this.hud.callout('GUARD SHATTERED', { color: '#ff8a3a', size: 1.0 });
     else if (kind === 'crash') this.hud.callout('CRUSHED THROUGH', { color: '#ffa060', size: 0.95 });
@@ -678,7 +669,6 @@ export class Game {
     level.update(dt, ctx);
     this.effects.update(dt, ctx);
     this.pickups.update(dt, ctx);
-    this._updateFlash(dt);
 
     const alive = this.enemies.filter((e) => e.alive);
     if (!level.exitOpen && alive.length === 0) {
@@ -859,13 +849,6 @@ export class Game {
     this.enemies = [];
   }
 
-  _updateFlash(dt) {
-    if (this.flashT > 0) {
-      this.flashT -= dt;
-      this.flashLight.intensity = Math.max(0, (this.flashT / this.flashDur) * this.flashLight.userData.base);
-    } else this.flashLight.intensity = 0;
-  }
-
   // -------------------------------------------------------------- sanctum ---
 
   _enterSanctum({ next }) {
@@ -896,7 +879,6 @@ export class Game {
     }
     const focused = sc.focusedNode(this.camera);
     sc.update(dt, this.ctx, focused);
-    this._updateFlash(dt);
     if (!this.choice && focused && this.input.wasPressed('KeyF')) {
       const options = NODES[focused.key].options(this.run);
       if (!options.length) this.hud.toast('The circle is silent: your spells are complete.');
