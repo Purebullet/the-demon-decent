@@ -5,6 +5,8 @@ import { momentumSpeed, MOMENTUM_MAX, sunderDamage, SUNDER_MAX, guardOutcome } f
 import { RELICS, RELIC_IDS, rollRelic, addRelic, relicPassive } from '../src/combat/Relics.js';
 import { ProcEngine, procChance, procSources, PROCS, ENCHANTS } from '../src/combat/Procs.js';
 import { WEAPON_TYPES } from '../src/entities/Weapons.js';
+import { ENEMY_TYPES } from '../src/entities/EnemyTypes.js';
+import { BOSS_TYPES } from '../src/entities/Bosses.js';
 
 const swing = (t, extra = {}) => ({ W: 0.2, A: 0.15, R: 0.4, t, ...extra });
 
@@ -118,4 +120,33 @@ test('procs fire only on their trigger, scale with the chain, and respect cooldo
   assert.ok(procChance(0.2, { chainMul: chainBonus(5).proc, counter: true }) <= 0.95);
   assert.ok(procChance(0.2, { chainMul: chainBonus(3).proc }) > procChance(0.2, { chainMul: 1 }) * 2);
   for (const e of Object.values(ENCHANTS)) assert.ok(PROCS[e.proc] && e.prefix);
+});
+
+test('every demon fights its own way, and its strings and blinks are well formed', () => {
+  for (const [key, t] of [...Object.entries(ENEMY_TYPES), ...Object.entries(BOSS_TYPES)]) {
+    const names = new Set(t.attacks.map((a) => a.name));
+    assert.ok(t.attacks.some((a) => !a.comboOnly), `${key}: nothing to open with`);
+    for (const a of t.attacks) {
+      if (a.combo) assert.ok(names.has(a.combo.next) && a.combo.chance > 0 && a.combo.chance < 1, `${key}.${a.name}: combo`);
+      if (a.comboOnly) assert.ok(t.attacks.some((b) => b.combo?.next === a.name), `${key}.${a.name}: unreachable`);
+      if (a.charge) assert.ok(a.lunge > 0 && a.volume, `${key}.${a.name}: a charge needs to move and to hit`);
+      if (a.feint) assert.ok(a.feint > 0 && a.feint < 0.5, `${key}.${a.name}: feint`);
+    }
+    if (t.blink?.then) assert.ok(names.has(t.blink.then), `${key}: blink follow-up`);
+    if (t.blink) assert.ok(['behind', 'away'].includes(t.blink.mode), `${key}: blink mode`);
+  }
+  // Something to learn on every kind of regular demon.
+  const tricks = (t) => [t.skittish, t.blink, t.enrage, ...t.attacks.map((a) => a.combo || a.feint || a.armor || a.charge || a.eruption || a.ignite)].filter(Boolean).length;
+  for (const [key, t] of Object.entries(ENEMY_TYPES)) assert.ok(tricks(t) >= 2, `${key} has too few tricks`);
+});
+
+test('the first demon has a quick, weaker attack besides its rake', () => {
+  const g = ENEMY_TYPES.ghoul;
+  const claw = g.attacks.find((a) => a.name === 'claw');
+  const quick = g.attacks.filter((a) => a.windup < claw.windup * 0.6 && a.dmg < claw.dmg * 0.6 && a.maxRange >= 1.5);
+  assert.ok(quick.length, 'no quick attack');
+});
+
+test('swings reach as far as they look and no further than a few metres', () => {
+  for (const [k, t] of Object.entries(WEAPON_TYPES)) assert.ok(t.reach > t.blade[1] + 0.8 && t.reach < 3, k);
 });

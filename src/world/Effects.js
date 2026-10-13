@@ -9,6 +9,8 @@ import { C, burst, ring, spawnFlame } from './Particles.js';
 const ringGeo = new THREE.RingGeometry(0.9, 1, 48);
 const discGeo = new THREE.CircleGeometry(1, 48);
 const orbGeo = new THREE.SphereGeometry(1, 12, 8);
+const _t = new THREE.Vector3();
+const _target = new THREE.Vector3();
 
 export class Effects {
   constructor(scene, fx) {
@@ -121,13 +123,26 @@ export class Effects {
     });
   }
 
-  fireball(origin, dir, speed, damage, { radius = 0.32, homing = 0.6, life = 4 } = {}) {
+  // `owner`: the caster, for a parried fireball to fly back at.
+  fireball(origin, dir, speed, damage, { radius = 0.32, homing = 0.6, life = 4, owner = null } = {}) {
     const mat = new THREE.MeshBasicMaterial({ color: 0xffa040 });
     const mesh = new THREE.Mesh(orbGeo, mat);
     mesh.scale.setScalar(radius);
     mesh.position.copy(origin);
     this.scene.add(mesh);
-    this.projectiles.push({ mesh, vel: dir.clone().normalize().multiplyScalar(speed), speed, damage, radius, homing, life });
+    this.projectiles.push({ mesh, vel: dir.clone().normalize().multiplyScalar(speed), speed, damage, radius, homing, life, owner, reflected: false });
+  }
+
+  // A fireball parried: it flies back at whoever threw it, hotter.
+  _reflect(p, ctx) {
+    const o = p.owner;
+    const to = o?.alive ? _t.set(o.position.x, (o.model?.height || 1.6) * 0.6 * (o.type?.scale || 1), o.position.z) : _t.copy(p.mesh.position).addScaledVector(p.vel, -1);
+    p.vel.copy(to).sub(p.mesh.position).normalize().multiplyScalar(p.speed * 1.6);
+    p.homing = 0;
+    p.reflected = true;
+    p.life = 3;
+    p.mesh.material.color.setHex(0xfff0c0);
+    ctx.player._parry(ctx, p.mesh.position, null);
   }
 
   update(dt, ctx) {
@@ -156,13 +171,13 @@ export class Effects {
     }
 
     const pl = ctx.player;
-    const target = new THREE.Vector3(pl.position.x, 1.2, pl.position.z);
+    const target = _target.set(pl.position.x, 1.2, pl.position.z);
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.life -= dt;
       const pos = p.mesh.position;
       if (p.homing > 0) {
-        const desired = target.clone().sub(pos).normalize().multiplyScalar(p.speed);
+        const desired = _t.copy(target).sub(pos).normalize().multiplyScalar(p.speed);
         p.vel.lerp(desired, Math.min(1, p.homing * dt));
       }
       pos.addScaledVector(p.vel, dt);
@@ -170,9 +185,26 @@ export class Effects {
       spawnFlame(this.fx.add, pos, { size: 0.45, rise: 0.3, life: 0.35, spread: 0.15 });
 
       let explode = p.life <= 0 || pos.y < 0.1 || ctx.world.isSolidAt(pos.x, pos.z);
-      if (!explode && pl.overlapsSphere(pos, p.radius)) {
-        pl.takeDamage(p.damage, pos, 4, ctx);
-        explode = true;
+      if (!explode && !p.reflected && pl.overlapsSphere(pos, p.radius)) {
+        if (pl.canParry(pos)) this._reflect(p, ctx);
+        else {
+          pl.takeDamage(p.damage, pos, 4, ctx);
+          explode = true;
+        }
+      }
+      if (!explode && p.reflected) {
+        // Thrown back: it burns whatever demon it meets, twice over.
+        for (const e of ctx.enemies) {
+          if (!e.alive || e.hidden || e.state === 'burrowed') continue;
+          const h = (e.model?.height || 1.6) * (e.type?.scale || 1);
+          if (Math.hypot(e.position.x - pos.x, e.position.z - pos.z) > e.radius + p.radius + 0.2 || pos.y > h + 0.3) continue;
+          const dir = _t.copy(p.vel).setY(0).normalize();
+          const dealt = e.takeHit(p.damage * 2.5, dir, 4, 80, ctx, { contact: pos.clone(), force: 0.9 });
+          ctx.onDamage?.(e, dealt, true, pos.clone(), 'counter');
+          e.addStatus?.('burn', { dps: p.damage * 0.3, dur: 3 });
+          explode = true;
+          break;
+        }
       }
       if (explode) {
         burst(this.fx.add, pos, { count: 22, speed: 5, color: C.fireCore, colorEnd: C.fireEdge, size: 0.2, life: 0.5 });

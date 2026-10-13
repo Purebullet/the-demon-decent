@@ -108,6 +108,15 @@ export class Audio {
   ignite() {
     this.play('ignite', { volume: 0.9, gap: 0.5 });
   }
+  parry() {
+    this.play('parry', { volume: 1, gap: 0.05 });
+  }
+  whoosh(pos) {
+    this.play('whoosh', { pos, volume: 0.7, gap: 0.08, rate: 0.9 + Math.random() * 0.2 });
+  }
+  blink(pos) {
+    this.play('blink', { pos, volume: 0.9, gap: 0.1 });
+  }
   block() {
     this.play('block', { volume: 0.9, gap: 0.05, rate: 0.95 + Math.random() * 0.1 });
   }

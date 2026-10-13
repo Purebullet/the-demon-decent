@@ -10,6 +10,9 @@ import { runeCircleTexture } from '../world/Textures.js';
 
 const WHITE = new THREE.Color(1, 0.86, 0.72);
 const TELL = new THREE.Color(1, 0.22, 0.04);
+// An armoured blow glows gold, not red: it cannot be interrupted by a light
+// blow, so it is to be dodged or blocked, not countered.
+const ARMOR_TELL = new THREE.Color(0.95, 0.55, 0.08);
 const ICE = new THREE.Color(0.45, 0.8, 1);
 const BROKEN = new THREE.Color(1, 0.55, 0.1);
 const tmpV = new THREE.Vector3();
@@ -36,9 +39,17 @@ const BROKEN_TAKEN = 1.5;
 //
 //   burrowed -> emerging -> chase                    (ambushers, floors 11+)
 //   dormant  -> chase <-> windup -> strike -> recover -> chase
-//                 ^                                   |
+//                 ^         ^          |                  |
+//                 |         +- combo --+ (next blow of a string)
 //                 +------------- stagger <------------+ (poise broken)
+//   chase -> evade -> chase | windup   (hops clear when stung; feints)
+//   chase -> blink -> windup | chase   (vanishes and reappears elsewhere)
 //   any -> dying
+//
+// Each kind fights its own way (EnemyTypes.js): strings of blows (`combo`),
+// feinted lunges (`feint`), blows that cannot be interrupted (`armor`, a gold
+// glow instead of red), bull charges that end in a wall (`charge`), hit and
+// run (`skittish`), blinking (`blink`) and rage when wounded (`enrage`).
 //
 // Movement in `chase` follows A* paths from the PathService toward a goal
 // picked by the AIDirector role (engage / flank / surround), falling back to
@@ -97,6 +108,19 @@ export class Enemy {
     this.stumbling = false;
     this.ward = null;
     this.tint = 0;
+    // Fighting style state.
+    this.comboN = 0;
+    this.feinted = false;
+    this.hits = [];
+    this.evadeV = new THREE.Vector3();
+    this.evadeFollow = null;
+    this.blinkCd = type.blink ? rand(type.blink.cooldown[0], type.blink.cooldown[1]) * 0.5 : Infinity;
+    this.blinkTo = new THREE.Vector3();
+    this.hidden = false;
+    this.blinked = false;
+    this.enraged = false;
+    this.strafeSide = Math.random() < 0.5 ? -1 : 1;
+    this.strafeT = rand(1.2, 2.6);
     this.strike = new StrikeVolume(this.root, new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
     this.emitters = [];
     this.baseEmissive = this.model.mats.map((m) => ({ c: m.emissive.clone(), i: m.emissiveIntensity }));
@@ -189,6 +213,7 @@ export class Enemy {
     this.stateT += dt;
     this.flash = Math.max(0, this.flash - dt * 9);
     this.cooldown -= dt;
+    this.blinkCd -= dt;
     this.poise = Math.max(0, this.poise - dt * this.type.poise * 0.3);
     const dx = player.position.x - this.position.x;
     const dz = player.position.z - this.position.z;
@@ -235,6 +260,12 @@ export class Enemy {
       }
       case 'strike':
         this._updateStrike(dt, ctx);
+        break;
+      case 'evade':
+        this._updateEvade(dt, ctx, dx, dz);
+        break;
+      case 'blink':
+        this._updateBlink(dt, ctx, dx, dz);
         break;
       case 'recover':
         this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.3);
@@ -291,8 +322,8 @@ export class Enemy {
       k = 0.75 + 0.1 * Math.sin(time * 6);
     } else if (this.state === 'windup' && this.alive) {
       const u = Math.min(1, this.stateT / Math.max(0.01, this.stateDur));
-      col = TELL;
-      k = Math.min(1, (0.25 + 0.75 * u * u) * 0.6 * tells) * (0.85 + 0.15 * Math.sin(time * 30));
+      col = this.attack?.armor ? ARMOR_TELL : TELL;
+      k = Math.min(1, (0.25 + 0.75 * u * u) * 0.6 * tells) * (0.85 + 0.15 * Math.sin(time * 30)) * (this.attack?.armor ? 0.8 : 1);
     } else if (this.brokenT > 0 && this.alive) {
       col = BROKEN;
       k = 0.35 + 0.15 * Math.sin(time * 10);
@@ -404,8 +435,26 @@ export class Enemy {
         speed *= 0.25;
       }
     } else {
+      // In reach and waiting for an opening: circle, never stand and wait to
+      // be hit; too close, give a little ground.
       const range = this.type.attacks[0].maxRange;
-      if (engaging && dist < range * 0.6 + ctx.player.radius) speed = 0;
+      const hold = range * 0.6 + ctx.player.radius;
+      if (engaging && dist < hold + 0.6) {
+        this.strafeT -= dt;
+        if (this.strafeT <= 0) {
+          this.strafeT = rand(1.1, 2.4);
+          if (Math.random() < 0.6) this.strafeSide = -this.strafeSide;
+        }
+        const ox = (px - ctx.player.position.x) / (dist || 1);
+        const oz = (pz - ctx.player.position.z) / (dist || 1);
+        const back = dist < hold - 0.35 ? 0.8 : dist > hold + 0.2 ? -0.5 : 0;
+        vx = -oz * this.strafeSide + ox * back;
+        vz = ox * this.strafeSide + oz * back;
+        const l = Math.hypot(vx, vz) || 1;
+        vx /= l;
+        vz /= l;
+        speed *= 0.42;
+      }
     }
     if (this.role === 'surround' && !engaging) {
       const toSlot = Math.hypot(this.slot.x - px, this.slot.z - pz);
@@ -459,36 +508,61 @@ export class Enemy {
       // Pack lunge ordered by the director: commit without waiting for a token.
       this.lungeDelay -= dt;
       if (this.lungeDelay < 0) {
-        const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange) || this.type.attacks[0];
+        const a = this.type.attacks.find((x) => !x.comboOnly && dist >= x.minRange && dist <= x.maxRange) || this.type.attacks[0];
         if (dist <= Math.max(...this.type.attacks.map((x) => x.maxRange))) this._startAttack(a, ctx, 0.75);
       }
       return;
     }
+    // Blinkers vanish and come back where you are not looking.
+    if (this.type.blink && this.blinkCd <= 0 && this._tryBlink(ctx, dist)) return;
     // A sluggish, fumbled swing is an opening: every demon in reach takes it.
     const opening = player.exposed && dist <= this.type.attacks[0].maxRange + 0.6;
     if (opening) this.cooldown = Math.min(this.cooldown, 0.08);
     if (this.cooldown > 0) return;
-    const options = this.type.attacks.filter((a) => dist >= a.minRange && dist <= a.maxRange);
+    const off = Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z)));
+    // Behind it, or pressed right up against it: what only that answers.
+    const behind = off > 1.6 || dist < 1.3;
+    const options = this.type.attacks.filter((a) => !a.comboOnly && dist >= a.minRange && dist <= a.maxRange && (!a.behind || behind));
     if (!options.length) return;
-    // Needs to be roughly facing and have a clear line.
-    if (Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z))) > 0.9) return;
+    // Needs to be roughly facing (unless it strikes behind) and a clear line.
+    const back = options.filter((a) => a.behind);
+    if (off > 0.9 && !back.length) return;
     if (!ctx.nav.hasLineOfSight(this.position.x, this.position.z, player.position.x, player.position.z, 0.2)) return;
     // Casters pace themselves; attack tokens are for those who close in.
     if (!this.type.keepAway && !opening && !ctx.director.requestToken(this)) return;
-    this._startAttack(options[Math.floor(Math.random() * options.length)], ctx);
+    this._startAttack(pickWeighted(off > 0.9 ? back : options), ctx);
   }
 
-  _startAttack(a, ctx, windupScale = 1) {
+  // `chained`: the next blow of a string (keeps its attack token).
+  _startAttack(a, ctx, windupScale = 1, chained = false) {
+    if (!chained) {
+      this.comboN = 0;
+      this.feinted = false;
+    }
     this.attack = a;
     this.hitPlayer = false;
     this.aoeDone = false;
-    this.setState('windup', a.windup * this.tuning.windup * windupScale * WINDUP_SCALE);
+    this.charged = 0;
+    const rage = this.enraged ? this.type.enrage.windup : 1;
+    this.setState('windup', a.windup * this.tuning.windup * windupScale * rage * WINDUP_SCALE);
     ctx.audio?.telegraph(this.typeKey, this.position);
+  }
+
+  // Is it in the middle of a blow that cannot be interrupted?
+  armored() {
+    return !!this.attack?.armor && (this.state === 'windup' || this.state === 'strike');
   }
 
   _beginStrike(ctx) {
     const a = this.attack;
+    // A feint: the lunge never comes; it skips aside and goes again, faster.
+    if (a.feint && !this.feinted && Math.random() < a.feint) {
+      this.feinted = true;
+      this._evade(ctx, { side: Math.random() < 0.5 ? -1 : 1, away: 0.3, speed: 6.5, dur: 0.3, follow: a, followScale: 0.5 });
+      return;
+    }
     this.setState('strike', a.strike);
+    if (a.eruption) this._erupt(ctx, a);
     const v = a.volume;
     if (v) {
       this.strike.localCenter.set(v.c[0], v.c[1], v.c[2]);
@@ -509,7 +583,7 @@ export class Enemy {
     for (let i = 0; i < count; i++) {
       const off = (i - (count - 1) / 2) * p.spread;
       const dir = aim.clone().applyAxisAngle(THREE.Object3D.DEFAULT_UP, off);
-      ctx.effects.fireball(from, dir, p.speed * Math.sqrt(this.tuning.speed), this.damage * a.dmg, { homing: p.homing });
+      ctx.effects.fireball(from, dir, p.speed * Math.sqrt(this.tuning.speed), this.damage * a.dmg, { homing: p.homing, owner: this });
     }
     ctx.audio?.fireball(from);
   }
@@ -517,10 +591,21 @@ export class Enemy {
   _updateStrike(dt, ctx) {
     const a = this.attack;
     if (a.lunge) {
-      const f = a.lunge * dt;
+      const f = a.lunge * dt * (this.enraged ? 1.15 : 1);
+      const bx = this.position.x;
+      const bz = this.position.z;
       ctx.world.move(this.position, this.radius, Math.sin(this.yaw) * f, Math.cos(this.yaw) * f);
       this.moveBlend = 1;
       this.walkPhase += dt * 8;
+      // A charge that runs into rock: stunned, and wide open.
+      if (a.charge) {
+        const moved = Math.hypot(this.position.x - bx, this.position.z - bz);
+        this.charged += moved;
+        if (moved < f * 0.45 && this.stateT > 0.08) {
+          this._wallStun(ctx);
+          return;
+        }
+      }
     }
     this.root.rotation.y = this.yaw;
     const player = ctx.player;
@@ -528,7 +613,10 @@ export class Enemy {
       this.root.updateMatrixWorld(true);
       if (player.overlapsOBB(this.strike.update())) {
         this.hitPlayer = true;
-        player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx);
+        const landed = player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
+        if (landed === true && a.ignite && !player.blocking) player.ignite?.(this.damage * a.ignite.dps, a.ignite.dur, ctx);
+        // Parried: the blow is thrown back and the string is broken.
+        if (this.state !== 'strike') return;
       }
     }
     if (a.aoe && !this.aoeDone && this.stateT >= this.stateDur * 0.5) {
@@ -536,7 +624,175 @@ export class Enemy {
       this._impact(ctx, a.aoe);
     }
     if (this.stateT >= this.stateDur) {
+      // The next blow of a string, if the player is still in reach of it.
+      const c = a.combo;
+      if (c && this.comboN < (c.max || 1) && !player.dead && Math.random() < c.chance) {
+        const next = this.type.attacks.find((x) => x.name === c.next);
+        if (next && this.distToPlayer <= next.maxRange + 0.4) {
+          this.comboN++;
+          this._startAttack(next, ctx, c.windup ?? 0.7, true);
+          return;
+        }
+      }
       this.setState('recover', a.recover * Math.sqrt(this.tuning.windup));
+    }
+  }
+
+  _wallStun(ctx) {
+    ctx.shake?.(0.5);
+    ctx.audio?.slam(this.position);
+    burst(ctx.fx.alpha, tmpV.set(this.position.x, 1.4 * (this.type.scale || 1), this.position.z), { count: 30, speed: 4, color: C.smoke, colorEnd: C.smoke, size: 0.6, life: 1.2, gravity: -1 });
+    burst(ctx.fx.add, tmpV, { count: 24, speed: 6, color: C.spark, colorEnd: C.fireEdge, size: 0.08, life: 0.4 });
+    ctx.onCombat?.('stunned', tmpV.clone());
+    this.interrupt(ctx, 2.1);
+    this.stumbling = true;
+    this.brokenT = 2.1;
+  }
+
+  // Fire breaks out of the ground where the player stands and where they
+  // are heading, each spot announced by a ring.
+  _erupt(ctx, a) {
+    const E = a.eruption;
+    const p = ctx.player;
+    const lead = E.delay * 0.8;
+    const spots = [
+      [p.position.x, p.position.z],
+      [p.position.x + p.vel.x * lead, p.position.z + p.vel.z * lead],
+    ];
+    for (let i = 2; i < E.count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      spots.push([p.position.x + Math.sin(ang) * E.spread, p.position.z + Math.cos(ang) * E.spread]);
+    }
+    spots.forEach(([x, z], i) => {
+      if (!ctx.nav.isWalkable(ctx.nav.tileX(x), ctx.nav.tileZ(z))) return;
+      ctx.effects?.fireStrike(x, z, E.radius, E.delay + i * 0.12, this.damage * a.dmg, ctx);
+    });
+    ctx.audio?.burst(this.position);
+  }
+
+  // ---------------------------------------------------- evade & blink ---
+
+  // A quick hop: away from the player (`away` 1) and/or aside (`side` +-1).
+  // With `follow`, it goes straight into that attack afterwards.
+  _evade(ctx, { side = 0, away = 1, speed = 7, dur = 0.38, follow = null, followScale = 1 } = {}) {
+    const p = ctx.player.position;
+    let tx = p.x - this.position.x;
+    let tz = p.z - this.position.z;
+    const l = Math.hypot(tx, tz) || 1;
+    tx /= l;
+    tz /= l;
+    let vx = -tx * away - tz * side;
+    let vz = -tz * away + tx * side;
+    const vl = Math.hypot(vx, vz) || 1;
+    this.evadeV.set((vx / vl) * speed, 0, (vz / vl) * speed);
+    this.evadeFollow = follow;
+    this.evadeScale = followScale;
+    if (!follow) {
+      ctx.director.releaseToken(this);
+      this.attack = null;
+    }
+    this.setState('evade', dur);
+    ctx.audio?.whoosh?.(this.position);
+    burst(ctx.fx.alpha, tmpV.set(this.position.x, 0.15, this.position.z), { count: 10, speed: 2, color: C.smoke, colorEnd: C.smoke, size: 0.35, life: 0.6, gravity: -1 });
+  }
+
+  _updateEvade(dt, ctx, dx, dz) {
+    const k = Math.min(1, this.stateT / this.stateDur);
+    const f = (1 - k) * 1.7 * dt;
+    ctx.world.move(this.position, this.radius, this.evadeV.x * f, this.evadeV.z * f);
+    this.moveBlend = 1;
+    this.walkPhase += dt * 12;
+    this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 1.5);
+    if (this.stateT < this.stateDur) return;
+    const follow = this.evadeFollow;
+    this.evadeFollow = null;
+    if (follow && !ctx.player.dead) this._startAttack(follow, ctx, this.evadeScale, true);
+    else {
+      this.attack = null;
+      this.setState('chase');
+      this.cooldown = Math.max(this.cooldown, 0.3);
+    }
+  }
+
+  // Vanish and reappear: behind the player (`behind`) to strike, or well
+  // away from them (`away`) to keep casting.
+  _tryBlink(ctx, dist) {
+    const B = this.type.blink;
+    const p = ctx.player;
+    const nav = ctx.nav;
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+    let ok = false;
+    if (B.mode === 'behind') {
+      // Only when it is being watched from a distance.
+      if (dist < B.range[0] || dist > B.range[1]) return false;
+      const dot = ((this.position.x - p.position.x) * fx + (this.position.z - p.position.z) * fz) / (dist || 1);
+      if (dot < 0.6) return false;
+      for (let i = 0; i < 6 && !ok; i++) {
+        const a = Math.atan2(-fx, -fz) + (i % 2 ? 1 : -1) * (0.3 + i * 0.2);
+        const r = 2.1 + Math.random() * 0.4;
+        this.blinkTo.set(p.position.x + Math.sin(a) * r, 0, p.position.z + Math.cos(a) * r);
+        ok = nav.isWalkable(nav.tileX(this.blinkTo.x), nav.tileZ(this.blinkTo.z)) && nav.hasLineOfSight(p.position.x, p.position.z, this.blinkTo.x, this.blinkTo.z, 0.3);
+      }
+    } else {
+      // Cornered: away to where it can cast again.
+      if (dist > B.range[0]) return false;
+      for (let i = 0; i < 10 && !ok; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = B.range[1] * (0.8 + Math.random() * 0.4);
+        this.blinkTo.set(p.position.x + Math.sin(a) * r, 0, p.position.z + Math.cos(a) * r);
+        ok = nav.isWalkable(nav.tileX(this.blinkTo.x), nav.tileZ(this.blinkTo.z)) && nav.hasLineOfSight(p.position.x, p.position.z, this.blinkTo.x, this.blinkTo.z, 0.3);
+      }
+    }
+    if (!ok) {
+      this.blinkCd = 1;
+      return false;
+    }
+    this.blinkCd = rand(B.cooldown[0], B.cooldown[1]);
+    ctx.director.releaseToken(this);
+    this.attack = null;
+    this.blinked = false;
+    this.setState('blink', B.time || 0.5);
+    this._blinkFx(ctx);
+    return true;
+  }
+
+  _blinkFx(ctx) {
+    const h = (this.model.height || 1.6) * (this.type.scale || 1);
+    const at = tmpV.set(this.position.x, h * 0.5, this.position.z);
+    burst(ctx.fx.alpha, at, { count: 26, speed: 3, color: C.smoke, colorEnd: C.smoke, size: 0.6, life: 0.9, gravity: -1 });
+    burst(ctx.fx.add, at, { count: 22, speed: 4, color: C.violet, colorEnd: C.violetDark, size: 0.14, life: 0.5 });
+    ctx.audio?.blink?.(this.position);
+  }
+
+  _updateBlink(dt, ctx, dx, dz) {
+    const half = this.stateDur * 0.45;
+    if (!this.hidden && this.stateT < half) {
+      this.hidden = true;
+      for (const e of this.emitters) e.active = false;
+    }
+    if (this.hidden && this.stateT >= half && !this.blinked) {
+      this.blinked = true;
+      this.position.copy(this.blinkTo);
+      ctx.world.resolve?.(this.position, this.radius);
+      this.yaw = Math.atan2(ctx.player.position.x - this.position.x, ctx.player.position.z - this.position.z);
+      this.hidden = false;
+      for (const e of this.emitters) e.active = true;
+      this._blinkFx(ctx);
+    }
+    this.moveBlend = 0;
+    if (this.stateT < this.stateDur) return;
+    this.blinked = false;
+    this.hidden = false;
+    const B = this.type.blink;
+    const a = B.then && this.type.attacks.find((x) => x.name === B.then);
+    const dist = Math.hypot(ctx.player.position.x - this.position.x, ctx.player.position.z - this.position.z);
+    if (a && dist <= a.maxRange + 0.5 && !ctx.player.dead) {
+      ctx.director.requestToken(this);
+      this._startAttack(a, ctx, B.thenWindup ?? 1);
+    } else {
+      this.setState('chase');
+      this.cooldown = Math.min(this.cooldown, 0.4);
     }
   }
 
@@ -562,7 +818,7 @@ export class Enemy {
   _endAttack(ctx) {
     ctx.director.releaseToken(this);
     this.attack = null;
-    this.cooldown = this.type.cooldown * this.tuning.cooldown * rand(0.8, 1.25);
+    this.cooldown = this.type.cooldown * this.tuning.cooldown * rand(0.8, 1.25) * (this.enraged ? this.type.enrage.cooldown : 1);
     this.setState('chase');
   }
 
@@ -577,7 +833,7 @@ export class Enemy {
   // opts: { proc (a proc or wound, not a blow), heavy, contact (world point),
   //         sweep (blade travel direction, world), force (0..1+) }
   takeHit(amount, dir, knockback, stagger, ctx, opts = {}) {
-    if (!this.alive || this.state === 'burrowed') return 0;
+    if (!this.alive || this.state === 'burrowed' || this.hidden) return 0;
     amount *= this.damageTakenMul();
     if (this.state === 'frozen' && !opts.proc) {
       // The blow shatters the ice.
@@ -596,16 +852,73 @@ export class Enemy {
       return amount;
     }
     if (this.state === 'dormant') this.becomeAlert(ctx);
+    // Wounded deep enough, a raging kind goes berserk.
+    const R = this.type.enrage;
+    if (R && !this.enraged && this.health < this.maxHealth * R.at) this._enrage(ctx);
     this.poise += stagger;
     const threshold = this.type.poise * (1 - 0.1 * this.sunder);
+    // An armoured blow carries through anything but a broken guard.
+    const armored = this.armored() && !opts.heavy;
+    if (armored) {
+      this.poise = Math.min(this.poise, threshold * 0.9);
+      if (!opts.proc) {
+        burst(ctx.fx.add, opts.contact || tmpV.set(this.position.x, 1.2, this.position.z), { count: 14, speed: 4, color: C.emberHot, colorEnd: C.fireEdge, size: 0.07, life: 0.3 });
+        ctx.onCombat?.('armored', opts.contact);
+      }
+      return amount;
+    }
     if (this.poise >= threshold && this.state !== 'stagger' && this.state !== 'emerging' && this.state !== 'frozen') {
       this.poise = 0;
       this.interrupt(ctx, 0.7);
-    } else if (!opts.proc && this.canGuard() && this.guardCd <= 0 && this.guardPending < 0 && this.state === 'chase' && Math.random() < this.type.guard.chance * 0.5) {
+      return amount;
+    }
+    if (opts.proc) return amount;
+    // Hit-and-run kinds spring clear of a flurry.
+    const S = this.type.skittish;
+    if (S && (this.state === 'chase' || this.state === 'recover')) {
+      const now = ctx.time || 0;
+      this.hits.push(now);
+      while (this.hits.length && now - this.hits[0] > S.window) this.hits.shift();
+      if (this.hits.length >= S.hits && Math.random() < S.chance) {
+        this.hits.length = 0;
+        this._evade(ctx, { side: Math.random() < 0.5 ? -0.6 : 0.6, away: 1, speed: 8, dur: 0.42 });
+        this.cooldown = Math.min(this.cooldown, rand(0.3, 0.8));
+        return amount;
+      }
+    }
+    if (this.canGuard() && this.guardCd <= 0 && this.guardPending < 0 && this.state === 'chase' && Math.random() < this.type.guard.chance * 0.5) {
       // Stung, a guarding demon gets its guard up.
       this.guardPending = 0.18;
     }
     return amount;
+  }
+
+  _enrage(ctx) {
+    const R = this.type.enrage;
+    this.enraged = true;
+    this.speed *= R.speed;
+    const red = new THREE.Color(0.9, 0.1, 0.02);
+    this.baseEmissive = this.baseEmissive.map((b) => ({ c: b.c.clone().lerp(red, 0.35), i: b.i + 0.25 }));
+    this._tinted = true;
+    for (const e of this.emitters) e.rate *= 1.8;
+    burst(ctx.fx.add, tmpV.set(this.position.x, (this.model.height || 1.6) * (this.type.scale || 1) * 0.8, this.position.z), { count: 40, speed: 5, color: C.fireCore, colorEnd: C.emberRed, size: 0.2, life: 0.7, up: 2 });
+    ctx.audio?.roar?.(this.position);
+    ctx.onCombat?.('enrage', tmpV.clone());
+  }
+
+  // A blow of its own turned aside at the last instant: thrown off balance,
+  // wide open (Player.takeDamage, a parry).
+  parried(ctx) {
+    if (!this.alive) return;
+    this.flash = 0.6;
+    this.comboN = 99;
+    if (this.isBoss) {
+      this.setState('recover', 0.7);
+      return;
+    }
+    this.interrupt(ctx, 1.1);
+    this.stumbling = true;
+    this.brokenT = Math.max(this.brokenT, 1.1);
   }
 
   // Sunder, frozen and a broken guard all open a demon up.
@@ -645,7 +958,7 @@ export class Enemy {
 
   _lowerGuard(ctx, dist) {
     // Riposte if the player is still in reach.
-    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && !x.projectile);
+    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && riposte(x));
     if (a && !ctx.player.dead) this._startAttack(a, ctx, RIPOSTE);
     else this.setState('chase');
   }
@@ -665,7 +978,7 @@ export class Enemy {
     this.flash = 0.4;
     burst(ctx.fx.add, at, { count: 26, speed: 6, color: C.spark, colorEnd: C.fireEdge, size: 0.07, life: 0.35 });
     const dist = this.distToPlayer;
-    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && !x.projectile);
+    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && riposte(x));
     if (a) this._startAttack(a, ctx, RIPOSTE);
   }
 
@@ -708,7 +1021,7 @@ export class Enemy {
   }
 
   freeze(ctx, dur) {
-    if (!this.alive || this.state === 'emerging' || this.state === 'burrowed') return;
+    if (!this.alive || this.state === 'emerging' || this.state === 'burrowed' || this.hidden) return;
     ctx.director.releaseToken(this);
     this.attack = null;
     this.lungeDelay = -1;
@@ -756,7 +1069,8 @@ export class Enemy {
   }
 
   interrupt(ctx, dur) {
-    if (this.state === 'frozen' || this.state === 'dying') return;
+    if (this.state === 'frozen' || this.state === 'dying' || this.hidden) return;
+    this.evadeFollow = null;
     ctx.director.releaseToken(this);
     this.attack = null;
     this.lungeDelay = -1;
@@ -854,3 +1168,19 @@ function makeWard(e) {
   e.root.add(m);
   return m;
 }
+
+// A random attack from a list, by `weight` (1 if not given).
+function pickWeighted(list) {
+  let total = 0;
+  for (const a of list) total += a.weight || 1;
+  let roll = Math.random() * total;
+  for (const a of list) {
+    roll -= a.weight || 1;
+    if (roll <= 0) return a;
+  }
+  return list[list.length - 1];
+}
+
+// What a demon answers with off its guard: a plain blow, not a string's
+// follow-up, a charge or a cast.
+const riposte = (a) => !a.projectile && !a.comboOnly && !a.charge && !a.behind && !a.eruption;

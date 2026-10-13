@@ -11,7 +11,9 @@ import { ENCHANTS } from '../combat/Procs.js';
 //   Mace  - Domination: crushing blows that knock a demon out of anything it does.
 //
 // `width` is the half-thickness of the blade's hit volume around its centre
-// line: thin, so a blow lands only where the weapon visibly is.
+// line: thin, so a blow lands only where the weapon visibly is. `reach` is how
+// far from the eye a blow carries: a demon the blade crosses on screen is
+// struck if it stands within it (Player._sweep).
 //
 // Swing arcs are given as start/end blade directions in camera space
 // (x right, y up, -z forward). The blade sweeps the great-circle arc between
@@ -29,6 +31,7 @@ export const WEAPON_TYPES = {
     stagger: 28,
     blade: [0.05, 1.12], // hitbox span along the blade, metres from the grip
     width: 0.055,
+    reach: 2.55,
     style: 'Momentum',
     hitstop: 0.045,
     arcs: [
@@ -48,6 +51,7 @@ export const WEAPON_TYPES = {
     stagger: 55,
     blade: [0.55, 1.15],
     width: 0.1,
+    reach: 2.65,
     style: 'Sunder',
     hitstop: 0.08,
     arcs: [
@@ -66,6 +70,7 @@ export const WEAPON_TYPES = {
     stagger: 120,
     blade: [0.55, 1.0],
     width: 0.12,
+    reach: 2.45,
     style: 'Domination',
     hitstop: 0.07,
     arcs: [

@@ -36,7 +36,7 @@ const DODGE_TIME = 0.3;
 const DODGE_IFRAMES = 0.26;
 const DODGE_CD = 0.7;
 const DRINK_TIME = 0.65;
-const POTION_HEAL = 0.4;
+const POTION_HEAL = 0.2;
 
 // Resting guard: held low on the right, blade nearly upright, leaning just a
 // little outward.
@@ -49,6 +49,11 @@ const BLOCK_AXIS = new THREE.Vector3(0, 0.1, 1).normalize();
 const BLOCK_POS = new THREE.Vector3(0.3, -0.32, -0.46);
 const BLOCK_FRONT = 0.3; // cos of the half-angle a block covers (about 72 degrees)
 const BLOCK_TAKEN = 0.2; // share of a blocked blow that still lands
+// Parry: a block raised this soon before a blow lands turns it aside
+// entirely and throws the demon off balance (a fireball flies back at its
+// caster). Not again until the block has been down a moment.
+const PARRY_WINDOW = 0.2;
+const PARRY_REARM = 0.35;
 // Heavy attack: a press held longer than HOLD draws back; full power after CHARGE_FULL.
 const HOLD = 0.2;
 const CHARGE_FULL = 0.75;
@@ -65,6 +70,10 @@ const DOUBLE_TAP = 0.28;
 // point would in the world. Hit tests push it out by tan(world/2)/tan(view/2)
 // so a blow lands exactly where the blade is seen.
 const VIEW_FOV = 62;
+// Depth slices a swing is tested in, as multiples of the blade's own distance
+// from the eye (see _sweep), and a little grace either side of the edge.
+const SLICES = [1, 1.3, 1.65, 2.05, 2.5, 3.1, 3.8];
+const BLADE_GRACE = 0.02;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -80,6 +89,10 @@ const _ax = new THREE.Vector3();
 const _az = new THREE.Vector3();
 const _half = new THREE.Vector3();
 const _mid = new THREE.Vector3();
+const _ca = new THREE.Vector3();
+const _cb = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _tm = new THREE.Vector3();
 const _tilt = new THREE.Quaternion();
 const _side = new THREE.Vector3(1, 0, 0);
 const _up = new THREE.Vector3(0, 1, 0);
@@ -168,6 +181,12 @@ export class Player {
     this.idleT = 0;
     this.blocking = false;
     this.blockK = 0;
+    this.blockHeld = 0;
+    this.parryOpen = false;
+    this.parryCd = 0;
+    this.burnT = 0;
+    this.burnDps = 0;
+    this.burnTick = 0;
     this.armed = true;
     this.torchLit = 1;
     this.torchRaise = 1;
@@ -192,6 +211,7 @@ export class Player {
     this.hurtFlash = 0;
     this.healFlash = 0;
     this.shakeT = 0;
+    this.jolt = 0;
     this.bobT = 0;
     this.lavaT = 0;
     this.knock.set(0, 0, 0);
@@ -256,14 +276,19 @@ export class Player {
 
   // ----------------------------------------------------------- update ---
 
+  // `dt` is game time, slowed while a blow's hit-stop holds; your own feet,
+  // eyes and torch run on real time (`ctx.realDt`), so a hit freezes the
+  // blade in the flesh, never your movement.
   update(dt, ctx) {
     const input = ctx.input;
     this.input = input;
+    const real = ctx.realDt ?? dt;
     const { dx, dy } = input.consumeMouse();
     if (!this.dead) {
       this.yaw -= dx;
       this.pitch = clamp(this.pitch - dy, -1.45, 1.45);
     }
+    this.jolt = Math.max(0, this.jolt - real * 2.8);
 
     this.invuln = Math.max(0, this.invuln - dt);
     this.dodgeCd = Math.max(0, this.dodgeCd - dt);
@@ -285,7 +310,7 @@ export class Player {
 
     if (this.dead) {
       this.deathT += dt;
-      this._updateCamera(dt);
+      this._updateCamera(real);
       return;
     }
 
@@ -300,6 +325,8 @@ export class Player {
       this._attackInput(dt, ctx);
     }
 
+    this._updateBurn(dt, ctx);
+
     // Potion: heal over the drink.
     if (this.drinkT > 0) {
       const step = Math.min(dt, this.drinkT);
@@ -307,10 +334,10 @@ export class Player {
       this.heal((this.drinkHeal * step) / DRINK_TIME);
     }
 
-    this._move(dt, ctx);
-    this._updateCamera(dt);
+    this._move(real, ctx);
+    this._updateCamera(real);
     this._updateWeapon(dt, ctx);
-    this._updateTorch(dt, ctx);
+    this._updateTorch(real, ctx);
     this.trail.update(dt);
     this.prevCamQ.copy(this.camera.quaternion);
     this.prevCamP.copy(this.camera.position);
@@ -398,10 +425,17 @@ export class Player {
       const strafe = this.input ? this.input.moveAxes().strafe : 0;
       roll = -strafe * 0.015;
     }
-    cam.position.set(this.position.x, this.position.y + eye, this.position.z);
+    // A blow taken jolts the whole view: a hard, quick, irregular judder on
+    // top of the head snapping back.
+    const j = this.jolt * this.jolt;
+    const tj = performance.now() * 0.001;
+    const n1 = Math.sin(tj * 37) * 0.6 + Math.sin(tj * 61 + 1) * 0.4;
+    const n2 = Math.sin(tj * 43 + 2) * 0.6 + Math.sin(tj * 71 + 3) * 0.4;
+    const n3 = Math.sin(tj * 53 + 4);
+    cam.position.set(this.position.x + n2 * j * 0.03, this.position.y + eye + n1 * j * 0.03, this.position.z);
     const sh = this.shakeT * this.shakeT;
     const t = performance.now() * 0.05;
-    cam.rotation.set(this.pitch + kk.x + Math.sin(t * 1.3) * sh * 0.06, this.yaw + Math.sin(t * 1.7) * sh * 0.06, roll + kk.z + Math.sin(t) * sh * 0.04, 'YXZ');
+    cam.rotation.set(this.pitch + kk.x + Math.sin(t * 1.3) * sh * 0.06 + n1 * j * 0.05, this.yaw + Math.sin(t * 1.7) * sh * 0.06 + n2 * j * 0.05, roll + kk.z + Math.sin(t) * sh * 0.04 + n3 * j * 0.07, 'YXZ');
     cam.updateMatrixWorld();
     // The viewmodel scene mirrors the camera so weapon and torch stay in hand.
     this.viewRoot.position.copy(cam.position);
@@ -438,6 +472,7 @@ export class Player {
     this.dodgeT = DODGE_TIME;
     this.dodgeCd = DODGE_CD + DODGE_TIME;
     this.invuln = Math.max(this.invuln, DODGE_IFRAMES);
+    this.burnT = 0;
     ctx.audio?.dodge();
     ctx.onRhythm?.('dodge');
   }
@@ -492,8 +527,17 @@ export class Player {
     // light one still striking.
     const s = this.swing;
     const locked = s && (s.heavy || s.bounced || s.t < s.W + s.A);
+    const was = this.blocking;
     this.blocking = !!input.mouseDown[2] && !locked && !this.charge && !this.press && this.staggerT <= 0 && this.drinkT <= 0 && this.dodgeT <= 0;
     if (this.blocking && s) this._endSwing();
+    // The parry window opens as a block goes up (if it has been down long
+    // enough to re-arm).
+    this.parryCd = Math.max(0, this.parryCd - dt);
+    if (this.blocking && !was) {
+      this.blockHeld = 0;
+      this.parryOpen = this.parryCd <= 0;
+    } else if (this.blocking) this.blockHeld += dt;
+    else if (was) this.parryCd = PARRY_REARM;
   }
 
   _onPress(ctx) {
@@ -724,16 +768,26 @@ export class Player {
 
   // Sweep the blade from arc fraction k0 to k1, sub-stepping both the arc
   // and the camera's motion since last frame, so neither a fast swing nor a
-  // flick of the mouse can tunnel through a target. The blade is a thin box
-  // around its own centre line (no fat hitboxes), placed where it is seen.
+  // flick of the mouse can tunnel through a target.
+  //
+  // What counts is what you see. The weapon is drawn over the world, so on
+  // screen it covers everything along the lines of sight behind it, out to
+  // the weapon's reach. So the blade's centre line is first put where it is
+  // seen (the viewmodel's narrower lens pushed out: see VIEW_FOV), then
+  // carried out along those lines of sight in depth slices to the reach.
+  // Each slice is a thin box around that stretch of the line of sight: a
+  // demon is struck exactly where the blade crosses it on screen, if it
+  // stands within reach, and nowhere else.
   _sweep(s, k0, k1, ctx) {
     const arc = s.arc;
     const cam = this.camera;
     const camAngle = this.prevCamQ.angleTo(cam.quaternion);
-    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(k1 - k0) * arc.angle, camAngle) / 0.05));
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(k1 - k0) * arc.angle, camAngle) / 0.04));
     const lens = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) / Math.tan(THREE.MathUtils.degToRad(VIEW_FOV / 2));
-    const [b0, b1] = this.weaponDef.blade;
-    const r = this.weaponDef.width;
+    const def = this.weaponDef;
+    const [b0, b1] = def.blade;
+    const r = def.width + BLADE_GRACE;
+    const reach = def.reach;
     const hits = [];
     for (let i = 1; i <= steps; i++) {
       const f = i / steps;
@@ -742,41 +796,80 @@ export class Player {
       _camP.lerpVectors(this.prevCamP, cam.position, f);
       arcDirection(arc, k, _v);
       gripPose(_v, arc.axis, _pos, _quat);
-      // Blade centre line in camera space, pushed out to where it is seen,
-      // then into the world.
-      _a.copy(_pos).addScaledVector(_v, b0);
-      _b.copy(_pos).addScaledVector(_v, b1 + 0.08);
-      _a.x *= lens;
-      _a.y *= lens;
-      _b.x *= lens;
-      _b.y *= lens;
-      _a.applyQuaternion(_camQ).add(_camP);
-      _b.applyQuaternion(_camQ).add(_camP);
-      _mid.addVectors(_a, _b).multiplyScalar(0.5);
-      _seg.subVectors(_b, _a);
-      const len = _seg.length();
-      _seg.divideScalar(len || 1);
-      _ax.set(0, 1, 0).cross(_seg);
-      if (_ax.lengthSq() < 1e-6) _ax.set(1, 0, 0);
-      _ax.normalize();
-      _az.crossVectors(_ax, _seg);
-      this.blade.set(_mid, _ax, _seg, _az, _half.set(r, len / 2, r));
-      this.bladeSeg.a.copy(_a);
-      this.bladeSeg.b.copy(_b);
-      queryHurtboxes(this.blade, ctx.enemies, s.hitSet, hits, this.bladeSeg);
-      if (ctx.props) queryHurtboxes(this.blade, ctx.props.targets, s.hitSet, hits, this.bladeSeg);
+      // Blade centre line in camera space, where it is seen.
+      _ca.copy(_pos).addScaledVector(_v, b0);
+      _cb.copy(_pos).addScaledVector(_v, b1 + 0.08);
+      _ca.x *= lens;
+      _ca.y *= lens;
+      _cb.x *= lens;
+      _cb.y *= lens;
+      for (let j = 0; j < SLICES.length - 1; j++) {
+        if (!this._slice(_ca, _cb, SLICES[j], SLICES[j + 1], r, reach)) continue;
+        queryHurtboxes(this.blade, ctx.enemies, s.hitSet, hits, this.bladeSeg);
+        if (ctx.props) queryHurtboxes(this.blade, ctx.props.targets, s.hitSet, hits, this.bladeSeg);
+        if (j === 0) _tm.copy(this.blade.center);
+      }
       // Which way the blade is travelling (for blood and the body's flinch).
       if (s.lastMid) {
-        _v2.subVectors(_mid, s.lastMid);
+        _v2.subVectors(_tm, s.lastMid);
         if (_v2.lengthSq() > 1e-8) (s.travel ||= new THREE.Vector3()).copy(_v2).normalize();
       } else s.lastMid = new THREE.Vector3();
-      s.lastMid.copy(_mid);
+      s.lastMid.copy(_tm);
       if (hits.length) {
         this._applyHits(hits, ctx);
         hits.length = 0;
         if (!this.swing || s.bounced) return;
       }
     }
+  }
+
+  // One depth slice of the swept line of sight: the blade's camera-space
+  // centre line a-b scaled out from the eye by s0..s1 (which keeps it on the
+  // same pixels), cut off at the reach, as a box in the world (this.blade)
+  // with its centre line (this.bladeSeg). False if the slice is out of reach.
+  _slice(a, b, s0, s1, r, reach) {
+    const sm = (s0 + s1) / 2;
+    // Clip the line at this depth to the sphere of reach round the eye.
+    _d.subVectors(b, a);
+    const lim = (reach / sm) ** 2;
+    const A = _d.lengthSq();
+    const B = 2 * a.dot(_d);
+    const Cq = a.lengthSq() - lim;
+    let t0 = 0;
+    let t1 = 1;
+    if (A < 1e-9) {
+      if (Cq > 0) return false;
+    } else {
+      const disc = B * B - 4 * A * Cq;
+      if (disc <= 0) return false;
+      const q = Math.sqrt(disc);
+      t0 = Math.max(0, (-B - q) / (2 * A));
+      t1 = Math.min(1, (-B + q) / (2 * A));
+      if (t1 - t0 < 0.02) return false;
+    }
+    _a.copy(a).addScaledVector(_d, t0).multiplyScalar(sm);
+    _b.copy(a).addScaledVector(_d, t1).multiplyScalar(sm);
+    _mid.addVectors(_a, _b).multiplyScalar(0.5);
+    const along = _mid.length();
+    _seg.subVectors(_b, _a);
+    const len = _seg.length();
+    _seg.divideScalar(len || 1);
+    // Depth: along the line of sight, square to the blade.
+    _az.copy(_mid).divideScalar(along || 1);
+    _az.addScaledVector(_seg, -_az.dot(_seg));
+    if (_az.lengthSq() < 1e-6) _az.set(0, 0, 1);
+    _az.normalize();
+    _ax.crossVectors(_seg, _az);
+    _half.set(r * sm, len / 2, (along * (s1 - s0)) / (2 * sm) + r * sm);
+    // Into the world.
+    _mid.applyQuaternion(_camQ).add(_camP);
+    _ax.applyQuaternion(_camQ);
+    _seg.applyQuaternion(_camQ);
+    _az.applyQuaternion(_camQ);
+    this.blade.set(_mid, _ax, _seg, _az, _half);
+    this.bladeSeg.a.copy(_a).applyQuaternion(_camQ).add(_camP);
+    this.bladeSeg.b.copy(_b).applyQuaternion(_camQ).add(_camP);
+    return true;
   }
 
   _applyHits(hits, ctx) {
@@ -838,10 +931,12 @@ export class Player {
       ctx.onDamage?.(e, dealt, crit || counter, h.point, counter ? 'counter' : s.perfect ? 'perfect' : null);
 
       // Weapon personality.
+      // An armoured blow (gold tell) shrugs off all but a heavy one.
       if (e.alive) {
+        const armored = e.armored?.() && !heavy;
         if (w.type === 'axe') e.applySunder?.(heavy ? 2 : 1, ctx);
-        if (w.type === 'mace' && guard !== 'crash' && (!e.isBoss || heavy)) e.stumble?.(ctx, heavy ? STUMBLE.heavy : STUMBLE.light, dir);
-        if (counter && e.state !== 'stagger' && (!e.isBoss || heavy)) e.interrupt?.(ctx, 0.9);
+        if (w.type === 'mace' && guard !== 'crash' && (!e.isBoss || heavy) && !armored) e.stumble?.(ctx, heavy ? STUMBLE.heavy : STUMBLE.light, dir);
+        if (counter && e.state !== 'stagger' && (!e.isBoss || heavy) && !armored) e.interrupt?.(ctx, 0.9);
       }
 
       // Blood thrown along the blade's travel, sparks at the contact.
@@ -986,6 +1081,60 @@ export class Player {
     return _seg.distanceToSquared(c) <= (r + 0.38) * (r + 0.38);
   }
 
+  // Is the block up, freshly, and facing `from`?
+  canParry(from) {
+    if (!this.blocking || !this.parryOpen || this.blockHeld > PARRY_WINDOW) return false;
+    const fx = from.x - this.position.x;
+    const fz = from.z - this.position.z;
+    const d = Math.hypot(fx, fz) || 1;
+    return -(fx * Math.sin(this.yaw) + fz * Math.cos(this.yaw)) / d > BLOCK_FRONT;
+  }
+
+  // Turned aside at the last instant: no damage, the attacker reels.
+  _parry(ctx, from, source) {
+    this.parryOpen = false;
+    this.invuln = Math.max(this.invuln, 0.15);
+    source?.parried?.(ctx);
+    _v.set(this.position.x - Math.sin(this.yaw) * 0.7, this.position.y + 1.3, this.position.z - Math.cos(this.yaw) * 0.7);
+    burst(ctx.fx.add, _v, { count: 40, speed: 7, size: 0.08, life: 0.4, color: C.spark, colorEnd: C.fireEdge });
+    ctx.hitStop?.(0.12);
+    this.shake(0.22);
+    this.kick.vx -= 0.6;
+    this.flash(0xffd090, 30, 0.2);
+    ctx.audio?.parry?.();
+    ctx.onCombat?.('parry', _v.clone());
+    // A parry earns the next blow as a counter (and the chain survives).
+    this.wrathT = Math.max(this.wrathT, 0.9);
+  }
+
+  // Set alight (a cinder hound's bite): burns for `dur` seconds; a dodge
+  // puts it out.
+  ignite(dps, dur, ctx) {
+    this.burnDps = Math.max(this.burnDps * (this.burnT > 0 ? 1 : 0), dps);
+    this.burnT = Math.max(this.burnT, dur);
+    ctx.audio?.ignite?.();
+  }
+
+  _updateBurn(dt, ctx) {
+    if (this.burnT <= 0 || this.dead) return;
+    this.burnT -= dt;
+    this.burnTick -= dt;
+    // Flames licking up in front of the eyes.
+    if (Math.random() < dt * 30) {
+      const s = Math.sin(this.yaw);
+      const c = Math.cos(this.yaw);
+      const side = (Math.random() - 0.5) * 1.4;
+      ctx.fx.add.emit({ x: this.position.x - s * 0.55 + c * side, y: this.position.y + 0.9 + Math.random() * 0.3, z: this.position.z - c * 0.55 - s * side, vy: 1.6, life: 0.45, size: 0.22, sizeEnd: 0.04, color: C.fireCore, colorEnd: C.fireEdge, drag: 1.5 });
+    }
+    if (this.burnTick > 0) return;
+    this.burnTick = 0.5;
+    const n = Math.max(1, Math.round(this.burnDps * 0.5));
+    this.run.health -= n;
+    this.hurtFlash = Math.max(this.hurtFlash, 0.3);
+    ctx.onPlayerHurt?.(n, 0, { burn: true });
+    if (this.run.health <= 0) this._die(ctx);
+  }
+
   _die(ctx) {
     this.run.health = 0;
     this.dead = true;
@@ -1000,11 +1149,15 @@ export class Player {
   // when you are exposed, and staggers you: a light swing or a drawn-back
   // heavy is knocked out of your hands (a heavy already in its arc carries
   // through), and for a moment you can neither strike, block nor dodge.
-  takeDamage(amount, from, knockback, ctx) {
+  takeDamage(amount, from, knockback, ctx, source = null) {
     if (this.dead) return false;
     if (this.invuln > 0) {
       if (this.dodgeT > 0 || this.dash) ctx.onDodge?.();
       return false;
+    }
+    if (source && this.canParry(from)) {
+      this._parry(ctx, from, source);
+      return 'parry';
     }
     const armor = relicPassive(this.run, 'armor') ?? 0;
     const poise = relicPassive(this.run, 'poise') ?? 0;
@@ -1012,6 +1165,10 @@ export class Player {
     const fx = this.position.x - from.x;
     const fz = this.position.z - from.z;
     const fd = Math.hypot(fx, fz);
+    // Where it came from, relative to where you face (0 ahead, + right).
+    const sy = Math.sin(this.yaw);
+    const cy = Math.cos(this.yaw);
+    const angle = fd > 1e-3 ? Math.atan2(-fx * cy + fz * sy, fx * sy + fz * cy) : 0;
     if (this.blocking && this.blockK > 0.5 && fd > 0.3) {
       const dot = (fx * Math.sin(this.yaw) + fz * Math.cos(this.yaw)) / fd;
       if (dot > BLOCK_FRONT) {
@@ -1026,6 +1183,8 @@ export class Player {
         burst(ctx.fx.add, _v, { count: 22, speed: 5, size: 0.06, life: 0.3, color: C.spark, colorEnd: C.fireEdge });
         this.run.health -= Math.round(amount);
         this.knock.add(_v.set(fx / fd, 0, fz / fd).multiplyScalar(knockback));
+        this.jolt = Math.min(1, this.jolt + (crushing ? 0.5 : 0.25));
+        ctx.onPlayerHurt?.(Math.round(amount), angle, { blocked: true });
         ctx.onCombat?.('blocked');
         if (this.run.health <= 0) this._die(ctx);
         return true;
@@ -1036,6 +1195,7 @@ export class Player {
     this.run.health -= amount;
     this.hurtFlash = Math.min(1, 0.45 + amount / 40);
     this.shake(0.25 + amount / 50);
+    this.jolt = Math.min(1, this.jolt + 0.55 + amount / 40);
     _v.set(this.position.x - from.x, 0, this.position.z - from.z);
     if (_v.lengthSq() > 1e-6) _v.normalize();
     this.knock.addScaledVector(_v, knockback);
@@ -1057,7 +1217,7 @@ export class Player {
     this.kick.vz += side * (1 + amount / 30);
     if (relicPassive(this.run, 'wrath')) this.wrathT = relicPassive(this.run, 'wrath');
     ctx.audio?.hurt();
-    ctx.onPlayerHurt?.(amount);
+    ctx.onPlayerHurt?.(amount, angle);
     if (this.run.health <= 0) this._die(ctx);
     return true;
   }

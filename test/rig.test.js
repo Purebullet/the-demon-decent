@@ -22,6 +22,6 @@ test('every attack of every enemy and boss has a clip on its model', () => {
   for (const t of [...Object.values(ENEMY_TYPES), ...Object.values(BOSS_TYPES)]) {
     const rig = rigFor(t.asset);
     assert.ok(rig, `${t.name}: no rig makes ${CHARACTERS[t.asset].model}`);
-    for (const a of t.attacks) assert.ok(rig.attacks[a.name], `${t.name}: no clip for "${a.name}"`);
+    for (const a of t.attacks) assert.ok(rig.attacks[a.clip || a.name], `${t.name}: no clip for "${a.clip || a.name}"`);
   }
 });

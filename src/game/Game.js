@@ -26,6 +26,8 @@ import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
 
+const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
+
 // Owns the run and the state machine that moves the player between the
 // surface lot, the 20 floors and the sanctums in between. Everything outside
 // the game (renderer, input, sound, scores) comes from the host: Project 0's
@@ -333,7 +335,7 @@ export class Game {
       shake: (a) => this.player.shake(a),
       flash: (color, intensity, dur) => this.player.flash(color, intensity * 6, dur),
       onDamage: (e, amount, crit, point, kind) => this.hud.damageNumber(point || e.position, amount, crit, kind),
-      onPlayerHurt: () => {},
+      onPlayerHurt: (amount, angle = 0, opts = {}) => this.hud.playerHurt(amount, angle, { ...opts, max: this.run?.maxHealth || 100 }),
       onDodge: () => this.hud.callout('EVADED', { color: '#c9a0ff', size: 0.8 }),
       later: (delay, fn) => (this.effects ? this.effects.later(delay, fn) : setTimeout(fn, delay * 1000)),
       tells: 1,
@@ -599,6 +601,18 @@ export class Game {
     } else if (kind === 'clash') this.hud.callout('GUARDED', { color: '#c05040', size: 0.85 });
     else if (kind === 'guardBreak') this.hud.callout('GUARD SHATTERED', { color: '#ff8a3a', size: 1.0 });
     else if (kind === 'crash') this.hud.callout('CRUSHED THROUGH', { color: '#ffa060', size: 0.95 });
+    else if (kind === 'parry') {
+      if (r) r.best.parries = (r.best.parries || 0) + 1;
+      this.hud.callout('PARRY', { color: '#ffe6a0', size: 1.2 });
+      this._hint('riposte', 'Parried: your <b>next blow is a counter</b>');
+    } else if (kind === 'armored') {
+      // Said at most once a second.
+      if (this.time - (this.armoredT ?? -9) > 1) this.hud.callout('ARMORED', { color: '#ffb040', size: 0.8 });
+      this.armoredT = this.time;
+      this._hint('armor', ARMOR_HINT);
+    } else if (kind === 'stunned') this.hud.callout('STUNNED', { color: '#ffd080', size: 1.0 });
+    else if (kind === 'enrage') this.hud.callout('ENRAGED', { color: '#ff4020', size: 1.0 });
+    else if (kind === 'blocked') this._hint('parry', 'Raise your block <b>just as a blow lands</b> to parry it (fireballs too)');
   }
 
   _onProc(id, P) {
@@ -640,7 +654,10 @@ export class Game {
       this.director.update(dt, this.enemies, p);
       for (const e of this.enemies) {
         e.update(dt, ctx);
-        if (e.state === 'windup' && e.distToPlayer < 4.5 && !this.hints?.has('tell')) this._hint('tell', 'It glows red as it winds up: <b>strike now to counter</b>, block, or step away');
+        if (e.state === 'windup' && e.distToPlayer < 4.5) {
+          if (e.attack?.armor) this._hint('armor', ARMOR_HINT);
+          else if (!this.hints?.has('tell')) this._hint('tell', 'It glows red as it winds up: <b>strike now to counter</b>, block, or step away');
+        }
       }
     }
 
@@ -655,7 +672,7 @@ export class Game {
 
     for (const e of this.enemies) {
       const far = e.distToPlayer > 42 && !e.isBoss;
-      e.root.visible = !far && e.state !== 'burrowed';
+      e.root.visible = !far && e.state !== 'burrowed' && !e.hidden;
       if (!far) e.postUpdate(dt, ctx, this.time);
     }
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -937,6 +954,7 @@ export class Game {
         ['Demons slain', run.kills],
         ['Longest chain', run.best?.chain || 0],
         ['Counters', run.best?.counters || 0],
+        ['Parries', run.best?.parries || 0],
         ['Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
         ['Time', time],
       ],
@@ -982,6 +1000,7 @@ export class Game {
         wdt = dt * 0.12;
       }
       this.time += wdt;
+      if (this.ctx) this.ctx.realDt = dt;
       this.fsm.update(wdt);
       this.fx.add.update(wdt);
       this.fx.alpha.update(wdt);
@@ -996,16 +1015,34 @@ export class Game {
     this._render(dt);
   }
 
-  // Step resolution down on slow machines (and in software rendering).
+  // Holds the frame rate up. The 3D view's resolution (only it: the
+  // interface stays sharp) steps down a little at a time while frames run
+  // long, and back up when there is time to spare. Slow machines also lose
+  // the ground mist, and get sparser scenery from the next floor (`slow`).
   _adaptQuality(rawDt) {
-    if (rawDt > 0.065) this.slow++;
-    else this.slow = Math.max(0, this.slow - 0.25);
-    if ((this.slow > 4 || rawDt > 0.25) && this.sceneScale * this.uiRatio > 0.5) {
-      // Only the 3D view loses resolution; the interface stays sharp.
-      this.sceneScale *= 0.75;
-      this.slow = 0;
+    // A hidden tab, or a floor being built: not a measure of anything.
+    if (rawDt > 1 || this.busy || this.compiling) return;
+    const q = (this.quality ||= { avg: 1 / 60, t: 0, good: 0, drops: 0 });
+    q.avg += (Math.min(rawDt, 0.1) - q.avg) * 0.06;
+    q.t += rawDt;
+    if (q.t < 1.5) return;
+    q.t = 0;
+    const base = Math.min(1, 1280 / Math.max(1, this.host.width * this.uiRatio));
+    if (q.avg > 1 / 45 && this.sceneScale > base * 0.52) {
+      this.sceneScale = Math.max(base * 0.5, this.sceneScale * 0.85);
+      q.drops++;
+      q.good = 0;
+      q.avg = 1 / 60;
+      this.slow = q.drops >= 3 ? 1 : 0;
       this._resize();
-    }
+    } else if (q.avg < 1 / 80 && this.sceneScale < base) {
+      if (++q.good >= 4) {
+        this.sceneScale = Math.min(base, this.sceneScale / 0.85);
+        q.good = 0;
+        this._resize();
+      }
+    } else q.good = 0;
+    this.level?.dressing?.setMist?.(this.sceneScale > base * 0.7);
   }
 
   // The render camera stays at the host's anchor (inside the lot's box on

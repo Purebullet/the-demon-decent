@@ -252,9 +252,10 @@ export function buildGltfCharacter(id, rootScale = 1) {
     } else if (e.state === 'stagger') {
       rate = 16;
       set('hit', k);
-    } else if (attacking && e.attack && (clips[e.attack.name] || clips.attack)) {
+    } else if (attacking && e.attack && (clips[e.attack.clip || e.attack.name] || clips.attack)) {
       rate = 14;
-      set(clips[e.attack.name] ? e.attack.name : 'attack', attackClipTime(e.state, k));
+      const name = e.attack.clip || e.attack.name;
+      set(clips[name] ? name : 'attack', attackClipTime(e.state, k));
     } else {
       // Idle, walk and run blended by speed; feet follow the stride phase.
       const mv = e.moveBlend;
@@ -385,9 +386,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
       if (e.state === 'dying') flop(e.stateT);
       // Attacks without a clip of their own still get a body lean; a guard
       // rears back behind it; a stumble lurches.
-      pose.rotation.x = (attacking && !clips[e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0) - 0.14 * guard - (e.stumbling ? 0.22 * stagger : 0);
+      pose.rotation.x = (attacking && !clips[e.attack?.clip || e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0) - 0.14 * guard - (e.stumbling ? 0.22 * stagger : 0);
     } else if (!rigged) {
-      const sweep = /sweep|gust|lash/.test(e.attack?.name || '');
+      const sweep = /sweep|gust|lash|backhand/.test(e.attack?.clip || e.attack?.name || '');
       const sw = Math.sin(e.walkPhase);
       // A beast's whole body is above its hips: pitch it gently.
       const k = beast ? 0.45 : 1;

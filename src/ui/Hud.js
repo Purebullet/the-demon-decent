@@ -51,11 +51,15 @@ const QUAD_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projec
 const VIGNETTE_FRAG = `
   varying vec2 vUv;
   uniform float uHurt; uniform float uLow; uniform float uFade; uniform float uPulse; uniform float uHeal;
+  uniform vec2 uDir; uniform float uBlow;
   void main(){
     vec2 c = vUv - 0.5;
     float edge = smoothstep(0.32, 0.75, length(c * vec2(1.4, 1.0)));
+    // A blow reddens the side it came from hardest.
+    float side = max(0.0, dot(normalize(c + 1e-4), uDir));
+    float blow = smoothstep(0.3, 0.75, length(c * vec2(1.4, 1.0))) * uBlow * (0.2 + 0.8 * side * side);
     vec3 col = mix(vec3(0.45, 0.0, 0.0), vec3(0.9, 0.12, 0.05), uHeal);
-    float a = edge * (uHurt * 0.55 + uLow * (0.35 + 0.25 * uPulse) + uHeal * 0.35);
+    float a = edge * (uHurt * 0.45 + uLow * (0.35 + 0.25 * uPulse) + uHeal * 0.35) + blow * 0.6;
     a = a * (1.0 - uFade) + uFade;
     col = mix(col, vec3(0.0), uFade);
     gl_FragColor = vec4(col * (1.0 - uFade), a);
@@ -149,7 +153,7 @@ const SLOT_FRAG = `
 // trails a blow away, a glow when healed and a pulse when low.
 const HEALTH_FRAG = `
   varying vec2 vUv;
-  uniform float uFrac; uniform float uChip; uniform float uHeal; uniform float uLow; uniform float uTime;
+  uniform float uFrac; uniform float uChip; uniform float uHeal; uniform float uLow; uniform float uTime; uniform float uHit;
   float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
   void main(){
     float x = vUv.x;
@@ -164,9 +168,29 @@ const HEALTH_FRAG = `
     col += vec3(1.0, 0.25, 0.1) * uHeal * 0.6;
     float edge = smoothstep(0.012, 0.0, abs(x - uFrac)) * fill;
     col += edge * vec3(1.0, 0.4, 0.2);
-    vec3 c = col * fill + vec3(0.9, 0.55, 0.45) * chip * 0.7;
+    // Struck: the blood flares white-hot and the lost chip burns.
+    col = mix(col, vec3(1.0, 0.78, 0.6), uHit * 0.55);
+    vec3 chipCol = mix(vec3(0.75, 0.32, 0.18), vec3(1.0, 0.8, 0.5), uHit);
+    vec3 c = col * fill + chipCol * chip;
     float a = fill + chip * 0.8;
     gl_FragColor = vec4(c, a);
+  }`;
+
+// Blood thrown across the lens by a blow: one splat of the atlas (four
+// splats in a 2 x 2 grid), thick blood darker, thin spray brighter.
+const SPLAT_FRAG = `
+  varying vec2 vUv;
+  uniform sampler2D uMap; uniform vec2 uCell; uniform float uAlpha; uniform float uRot;
+  void main(){
+    vec2 p = vUv - 0.5;
+    float cs = cos(uRot), sn = sin(uRot);
+    p = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y) + 0.5;
+    if (p.x < 0.0 || p.y < 0.0 || p.x > 1.0 || p.y > 1.0) discard;
+    float m = texture2D(uMap, (p + uCell) * 0.5).r;
+    float a = smoothstep(0.22, 0.42, m) * uAlpha;
+    // Thin spray bright red, the thick of it near black.
+    vec3 col = mix(vec3(0.46, 0.02, 0.01), vec3(0.11, 0.0, 0.0), smoothstep(0.45, 1.0, m));
+    gl_FragColor = vec4(col, a * mix(0.7, 0.92, smoothstep(0.4, 0.9, m)));
   }`;
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -190,7 +214,7 @@ export class Hud {
     this.vignette = new THREE.ShaderMaterial({
       vertexShader: FULL_VERT,
       fragmentShader: VIGNETTE_FRAG,
-      uniforms: { uHurt: { value: 0 }, uLow: { value: 0 }, uFade: { value: 1 }, uPulse: { value: 0 }, uHeal: { value: 0 } },
+      uniforms: { uHurt: { value: 0 }, uLow: { value: 0 }, uFade: { value: 1 }, uPulse: { value: 0 }, uHeal: { value: 0 }, uDir: { value: new THREE.Vector2(0, 1) }, uBlow: { value: 0 } },
       transparent: true,
       depthTest: false,
       depthWrite: false,
@@ -215,9 +239,24 @@ export class Hud {
     };
     this.ring = shader(RING_FRAG, { uProg: { value: 0 }, uWin: { value: 0 }, uChain: { value: 0 }, uFumble: { value: 0 }, uPerfect: { value: 0 }, uAlpha: { value: 0 }, uTime: { value: 0 }, uHeavy: { value: 0 } }, 5);
     this.slotFx = SLOTS.map(() => ({ mesh: shader(SLOT_FRAG, { uCd: { value: 0 }, uFlash: { value: 0 }, uReady: { value: 0 }, uDenied: { value: 0 }, uColor: { value: new THREE.Color(1, 0.5, 0.2) } }, 4), ready: 0, denied: 0, lastCd: 0 }));
-    this.healthFx = shader(HEALTH_FRAG, { uFrac: { value: 1 }, uChip: { value: 1 }, uHeal: { value: 0 }, uLow: { value: 0 }, uTime: { value: 0 } }, 3);
+    this.healthFx = shader(HEALTH_FRAG, { uFrac: { value: 1 }, uChip: { value: 1 }, uHeal: { value: 0 }, uLow: { value: 0 }, uTime: { value: 0 }, uHit: { value: 0 } }, 3);
     this.chip = 1;
     this.chipHold = 0;
+    // The health vial is its own little group (frame, blood, numbers) so a
+    // blow can shake it; and the amount lost rises off it.
+    this.healthBack = this._canvasLayer(16, 16, 2.5);
+    this.healthTop = this._canvasLayer(16, 16, 4);
+    this.lossL = this._canvasLayer(256, 96, 4);
+    this.hpFx = { shake: 0, hit: 0, loss: 0, lossT: 9, sig: '', back: '' };
+    // Blood on the lens.
+    const atlas = new THREE.CanvasTexture(splatAtlas());
+    atlas.generateMipmaps = false;
+    atlas.minFilter = THREE.LinearFilter;
+    this.splats = Array.from({ length: 7 }, () => ({
+      mesh: shader(SPLAT_FRAG, { uMap: { value: atlas }, uCell: { value: new THREE.Vector2() }, uAlpha: { value: 0 }, uRot: { value: 0 } }, 1.5),
+      t: 9,
+      life: 1,
+    }));
     this.compass = this._spriteLayer(64, 64, 6, (g) => this._paintNeedle(g));
     this.callouts = [0, 1, 2].map(() => ({ ...this._canvasLayer(768, 112, 7), t: 9, life: 0 }));
     this.announceL = this._canvasLayer(1400, 260, 7);
@@ -440,6 +479,152 @@ export class Hud {
     return null;
   }
 
+  // A demon's blow landed. `angle`: where it came from, relative to where
+  // you face (0 ahead, positive to the right). The view reddens on that side,
+  // blood is thrown across the lens, and the health vial jolts, flares and
+  // sheds the amount lost.
+  playerHurt(amount, angle, { blocked = false, burn = false, max = 100 } = {}) {
+    const k = clamp01(amount / Math.max(1, max * 0.25));
+    const F = this.hpFx;
+    if (burn) {
+      F.shake = Math.min(1.2, F.shake + 0.18);
+      F.hit = Math.max(F.hit, 0.45);
+      return;
+    }
+    F.shake = Math.min(1.2, F.shake + (blocked ? 0.35 : 0.65 + k * 0.5));
+    F.hit = 1;
+    F.loss = Math.round(amount);
+    F.lossT = 0;
+    F.lossX = this.vial ? this.vial.x + this.vial.w * clamp01(this.info.run ? this.info.run.health / this.info.run.maxHealth : 1) : 0;
+    this._paintLoss(F.loss, blocked);
+    if (blocked) return;
+    this.blow = Math.min(1, 0.6 + k);
+    this.vignette.uniforms.uDir.value.set(Math.sin(angle), Math.cos(angle));
+    const n = 1 + (k > 0.3 ? 1 : 0) + (k > 0.65 ? 1 : 0);
+    for (let i = 0; i < n; i++) this._splat(angle, k);
+  }
+
+  // One splat of blood near the edge on the side the blow came from (from
+  // ahead, high on either side; never over the middle of the view).
+  _splat(angle, k) {
+    const sp = this.splats.reduce((a, b) => (a.t / a.life > b.t / b.life ? a : b));
+    const sx = Math.sin(angle);
+    const side = Math.abs(sx) > 0.35 ? Math.sign(sx) : Math.random() < 0.5 ? -1 : 1;
+    const behind = Math.cos(angle) < -0.3;
+    sp.x = side > 0 ? 0.84 + Math.random() * 0.2 : -0.04 + Math.random() * 0.2;
+    sp.y = behind ? 0.55 + Math.random() * 0.45 : 0.08 + Math.random() * 0.8;
+    sp.size = 0.26 + Math.random() * 0.12 + k * 0.1;
+    sp.t = 0;
+    sp.life = 1.9 + Math.random() * 0.8;
+    const U = sp.mesh.material.uniforms;
+    const cell = Math.floor(Math.random() * 4);
+    U.uCell.value.set(cell % 2, Math.floor(cell / 2));
+    U.uRot.value = Math.random() * Math.PI * 2;
+  }
+
+  _updateSplats(dt, shown) {
+    for (const sp of this.splats) {
+      sp.t += dt;
+      const on = shown && sp.t < sp.life;
+      sp.mesh.visible = on;
+      if (!on) continue;
+      const k = sp.t / sp.life;
+      const a = Math.min(1, sp.t / 0.05) * (k < 0.45 ? 1 : 1 - (k - 0.45) / 0.55);
+      sp.mesh.material.uniforms.uAlpha.value = a * 0.9;
+      // It lands with a slap and runs a little.
+      const s = this.vh * sp.size * (1 + 0.25 * Math.max(0, 1 - sp.t / 0.08) + 0.05 * k);
+      this._place(sp.mesh, sp.x * this.vw - s / 2, sp.y * this.vh - s / 2 + k * this.vh * 0.035, s, s);
+    }
+  }
+
+  // The vial: frame and numbers on small canvases, the blood on the GPU,
+  // shaken together when you are struck.
+  _updateVial(dt, shown, play) {
+    const F = this.hpFx;
+    const L = this.layout;
+    F.shake = Math.max(0, F.shake - dt * 2.4);
+    F.hit = Math.max(0, F.hit - dt * 3.5);
+    F.lossT += dt;
+    const vis = shown && !!L?.vial;
+    this.healthBack.mesh.visible = this.healthTop.mesh.visible = vis;
+    this.lossL.mesh.visible = vis && play && F.lossT < 1.1;
+    if (!vis) return;
+    const r = this.info.run;
+    const V = (this.vial = L.vial);
+    const R = { x: V.x - 14, y: V.y - 14, w: V.w + 28, h: V.h + 28 };
+    const px = this.u * this.scale;
+    const backSig = `${R.x}|${R.y}|${R.w}|${px}`;
+    if (backSig !== F.back) {
+      F.back = backSig;
+      F.sig = '';
+      for (const l of [this.healthBack, this.healthTop]) this._fit(l, R.w * px, R.h * px);
+      const g = this._onLayer(this.healthBack, R);
+      this._box(g, V.x, V.y, V.w, V.h, 'rgba(10,2,2,0.92)', C.edge);
+      this.healthBack.tex.needsUpdate = true;
+    }
+    const sig = `${Math.ceil(r.health)}/${r.maxHealth}`;
+    if (sig !== F.sig) {
+      F.sig = sig;
+      const g = this._onLayer(this.healthTop, R);
+      this._text(g, `${Math.ceil(Math.max(0, r.health))} / ${r.maxHealth}`, V.x + V.w / 2, V.y + V.h / 2 + 0.5, { size: 13, ls: 1, color: C.light, align: 'center', base: 'middle', glow: 'rgba(0,0,0,1)' });
+      this.healthTop.tex.needsUpdate = true;
+    }
+    const sh = F.shake * F.shake;
+    const t = this.time;
+    const ox = (Math.sin(t * 83) * 0.65 + Math.sin(t * 47) * 0.35) * sh * 10;
+    const oy = Math.cos(t * 71) * sh * 4;
+    this._place(this.healthBack.mesh, R.x + ox, R.y + oy, R.w, R.h);
+    this._place(this.healthTop.mesh, R.x + ox, R.y + oy, R.w, R.h);
+    const b = L.health;
+    this._place(this.healthFx, b.x + ox, b.y + oy, b.w, b.h);
+    this.healthFx.material.uniforms.uHit.value = F.hit;
+    if (this.lossL.mesh.visible) {
+      const k = F.lossT / 1.1;
+      const w = 78;
+      const h = (w * this.lossL.ch) / this.lossL.cw;
+      this._place(this.lossL.mesh, F.lossX - w / 2 + ox, V.y - h * 0.9 - k * 26, w, h);
+      this.lossL.mesh.material.opacity = Math.min(1, (1 - k) * 3);
+    }
+  }
+
+  _paintLoss(amount, blocked) {
+    const L = this.lossL;
+    const g = L.g;
+    g.clearRect(0, 0, L.cw, L.ch);
+    g.font = `bold 64px ${SERIF}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineWidth = 8;
+    g.strokeStyle = 'rgba(30,0,0,0.95)';
+    g.strokeText(`-${amount}`, L.cw / 2, L.ch / 2);
+    g.fillStyle = blocked ? '#c8a080' : '#ff3a22';
+    g.shadowColor = 'rgba(255,40,10,0.8)';
+    g.shadowBlur = blocked ? 0 : 16;
+    g.fillText(`-${amount}`, L.cw / 2, L.ch / 2);
+    g.shadowBlur = 0;
+    L.tex.needsUpdate = true;
+  }
+
+  // Resize a canvas layer's canvas.
+  _fit(L, w, h) {
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    if (L.canvas.width === w && L.canvas.height === h) return;
+    L.canvas.width = L.cw = w;
+    L.canvas.height = L.ch = h;
+    L.tex.dispose();
+    L.tex.needsUpdate = true;
+  }
+
+  // Clear a layer and set it up to paint the virtual rect R.
+  _onLayer(L, R) {
+    const g = L.g;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, L.cw, L.ch);
+    g.setTransform(L.cw / R.w, 0, 0, L.ch / R.h, (-R.x * L.cw) / R.w, (-R.y * L.ch) / R.h);
+    return g;
+  }
+
   // ---- Damage numbers: sprites in the world --------------------------------
 
   setWorld(scene) {
@@ -532,6 +717,8 @@ export class Hud {
     V.uHeal.value = this.playing ? this.heal : 0;
     V.uPulse.value = 0.5 + 0.5 * Math.sin(this.time * 4);
     V.uFade.value = this.fadeValue;
+    this.blow = Math.max(0, (this.blow || 0) - dt * 1.6);
+    V.uBlow.value = this.playing ? this.blow : 0;
 
     const animating = this.panel === 'title' || this.panel === 'death' || this.panel === 'victory' || this.relicFlash;
     const sig = this._signature();
@@ -563,8 +750,6 @@ export class Hud {
     const cds = p ? SPELL_IDS.map((id) => Math.ceil(p.spellCd[id] || 0)).join(',') : '';
     return [
       this.panel,
-      Math.ceil(r.health),
-      r.maxHealth,
       r.potions,
       r.potionCap,
       r.weapon.name,
@@ -584,6 +769,7 @@ export class Hud {
       p?.siphonT > 0 ? Math.ceil(p.siphonT) : '',
       p?.invuln > 0.25,
       p?.wrathT > 0,
+      p?.burnT > 0,
       Math.floor(p?.momentum || 0),
       this.touch,
       this.w,
@@ -681,9 +867,9 @@ export class Hud {
       H.uHeal.value = this.heal;
       H.uLow.value = this._lowHealth();
       H.uTime.value = this.time;
-      const b = L.health;
-      this._place(this.healthFx, b.x, b.y, b.w, b.h);
     }
+    this._updateVial(dt, shown, play);
+    this._updateSplats(dt, shown);
 
     // Compass needle.
     const cmp = i.compass;
@@ -726,7 +912,7 @@ export class Hud {
     // Numbers over the fills (health, cooldowns): repainted when they change.
     this.topL.mesh.visible = shown && !!L?.top;
     if (this.topL.mesh.visible) {
-      const sig = `${Math.ceil(r.health)}/${r.maxHealth}|${SPELL_IDS.map((id) => (r.spells[id] ? Math.ceil(p.spellCd[id] || 0) : 0)).join(',')}|${this.w}x${this.h}`;
+      const sig = `${SPELL_IDS.map((id) => (r.spells[id] ? Math.ceil(p.spellCd[id] || 0) : 0)).join(',')}|${this.w}x${this.h}`;
       if (sig !== this.topSig) {
         this.topSig = sig;
         this._paintTopLayer();
@@ -773,8 +959,6 @@ export class Hud {
     g.setTransform(k, 0, 0, (Lr.ch / T.h), -T.x * k, (-T.y * Lr.ch) / T.h);
     const r = this.info.run;
     const p = this.info.player;
-    const H = this.layout.health;
-    this._text(g, `${Math.ceil(r.health)} / ${r.maxHealth}`, H.x + H.w / 2, H.y + H.h / 2 + 0.5, { size: 13, ls: 1, color: C.light, align: 'center', base: 'middle', glow: 'rgba(0,0,0,1)' });
     SLOTS.forEach((slot, i) => {
       if (slot.id === 'dodge' || !r.spells[slot.id]) return;
       const cd = Math.ceil(p.spellCd[slot.id] || 0);
@@ -1096,7 +1280,7 @@ export class Hud {
     // blood itself is drawn on the GPU (fill, chip, glow).
     const hw = Math.min(520, w * 0.5);
     const hx = (w - hw) / 2;
-    this._box(g, hx, hy, hw, 26, 'rgba(10,2,2,0.92)', C.edge);
+    L.vial = { x: hx, y: hy, w: hw, h: 26 };
     L.health = { x: hx + 5, y: hy + 5, w: hw - 10, h: 16 };
     // The layer the numbers ride on: the skills and the vial, 4:1.
     const tw = Math.max(hw + 40, total + 40, (hy + 30 - (sy - 6)) * 4);
@@ -1107,7 +1291,8 @@ export class Hud {
     // Buffs above the skills.
     const tags = [];
     if (p.siphonT > 0) tags.push([`Blood Siphon ${Math.ceil(p.siphonT)}s`, '#ff6a5a']);
-    if (p.wrathT > 0) tags.push(['Wrath: next blow counters', '#ff7040']);
+    if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
+    if (p.burnT > 0) tags.push(['Burning: dodge to put it out', '#ff8a2a']);
     if (p.invuln > 0.25) tags.push(['Invulnerable', '#c9a0ff']);
     if (tags.length) {
       g.font = `12px ${SERIF}`;
@@ -1398,4 +1583,67 @@ export class Hud {
     });
     if (e.ready) this._label(g, this.touch ? 'Tap to rise again at the surface' : 'Click to rise again at the surface', w / 2, y + 80, { size: 12, align: 'center', color: C.bone });
   }
+}
+
+// Four splats of blood, 2 x 2, as density in the red channel: a lumpy
+// body of overlapping drops, fine spray thrown out round it (smaller the
+// further it flew), a few thin streaks and a run or two dripping down.
+function splatAtlas() {
+  const S = 256;
+  const c = makeCanvas(S * 2, S * 2);
+  const g = c.getContext('2d');
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, S * 2, S * 2);
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const gauss = () => (rnd() + rnd() + rnd() - 1.5) / 1.5;
+  const drop = (x, y, r, a) => {
+    g.fillStyle = `rgba(255,255,255,${a})`;
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  };
+  g.globalCompositeOperation = 'lighter';
+  for (let cell = 0; cell < 4; cell++) {
+    const ox = (cell % 2) * S;
+    const oy = Math.floor(cell / 2) * S;
+    g.save();
+    g.beginPath();
+    g.rect(ox, oy, S, S);
+    g.clip();
+    const cx = ox + S * 0.5 + gauss() * 10;
+    const cy = oy + S * 0.44 + gauss() * 10;
+    const big = 0.75 + rnd() * 0.5;
+    // Body: many drops piled up, thickest in the middle.
+    for (let i = 0; i < 60; i++) {
+      const d = Math.abs(gauss()) * 34 * big;
+      const a = rnd() * Math.PI * 2;
+      drop(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.85, (3 + rnd() * 9) * big * (1 - d / (60 * big)), 0.32);
+    }
+    // Spray, finer with distance.
+    for (let i = 0; i < 90; i++) {
+      const a = rnd() * Math.PI * 2;
+      const d = (36 + rnd() ** 1.6 * 80) * big;
+      drop(cx + Math.cos(a) * d, cy + Math.sin(a) * d, Math.max(0.7, 3.4 - d / 30) * (0.5 + rnd()), 0.9);
+    }
+    // Streaks flung out from the body.
+    for (let i = 0; i < 4; i++) {
+      const a = rnd() * Math.PI * 2;
+      const d0 = 26 * big;
+      const len = (14 + rnd() * 30) * big;
+      for (let k = 0; k <= len; k += 1.5) drop(cx + Math.cos(a) * (d0 + k), cy + Math.sin(a) * (d0 + k), 1.7 * (1 - k / len) + 0.3, 0.5);
+    }
+    // Runs.
+    const runs = 1 + Math.floor(rnd() * 3);
+    for (let i = 0; i < runs; i++) {
+      const x = cx + gauss() * 18;
+      const len = (30 + rnd() * 60) * big;
+      const w = 1.6 + rnd() * 1.8;
+      for (let y = 0; y < len; y += 1.5) drop(x + Math.sin(y * 0.07 + i) * 1.5, cy + 12 + y, w * (1 - (y / len) * 0.35), 0.45);
+      drop(x, cy + 12 + len, w * 1.6, 0.9);
+    }
+    g.restore();
+  }
+  g.globalCompositeOperation = 'source-over';
+  return c;
 }

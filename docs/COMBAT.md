@@ -87,13 +87,18 @@ struck counting as a counter.
 
 ## 5. Game feel and hit detection (`Player._sweep`, `src/physics/Hitbox.js`, `GltfCharacter.react`)
 
-- The blade is a thin box (half-thickness 5.5 cm sword, 10 cm axe, 12 cm mace) around its centre
-  line, from the grip span in `WEAPON_TYPES.blade`. It is swept through the arc in steps of at most
-  0.05 rad, interpolating the camera too, so neither a fast swing nor a mouse flick tunnels.
-- The viewmodel is drawn with a narrower lens (62°) than the world (75°), so the blade on screen
-  sits nearer the middle than its camera-space position would in the world. The hit test pushes
-  the blade's camera-space x and y out by `tan(37.5°) / tan(31°) ≈ 1.28`, so a blow lands exactly
-  where the blade is seen, never before.
+- **What the blade covers on screen is what it hits.** The weapon is drawn over the world, so on
+  screen it covers everything along the lines of sight behind it. The blade's centre line (the
+  grip span in `WEAPON_TYPES.blade`) is first put where it is seen: the viewmodel is drawn with a
+  narrower lens (62°) than the world (75°), so its camera-space x and y are pushed out by
+  `tan(37.5°) / tan(31°) ≈ 1.28`. Then it is carried out along those lines of sight in depth
+  slices (the line scaled by 1 → 1.3 → 1.65 → 2.05 → 2.5 → 3.1 → 3.8 from the eye, which keeps it on
+  the same pixels), each cut off at the weapon's `reach` from the eye (sword 2.55 m, axe 2.65 m,
+  mace 2.45 m). Each slice is a thin box (half-thickness 5.5 cm sword, 10 cm axe, 12 cm mace, plus
+  2 cm grace, all scaled with the depth) as deep as the slice. Tested against demons placed at
+  1–3 m: every swing seen to cross a demon within reach lands, and none lands that is not seen to.
+- The arc is swept in steps of at most 0.04 rad, interpolating the camera too, so neither a fast
+  swing nor a mouse flick tunnels.
 - Hurtboxes ride the creatures' bones (head, chest, hips, forearms); head hits crit. The contact
   point is the point on the blade's centre line nearest the struck part, pulled into it: blood is
   thrown along the blade's travel from there, and the number appears there.
@@ -101,3 +106,43 @@ struck counting as a counter.
   pitch and roll away from the blow, twist with the blade's sweep, scaled by the height of the
   contact (leverage), the blow's force (heavy, counter and mace hit harder) and 1/√mass. It turns
   the whole body a little and the chest and head more; the head snaps hardest when struck.
+- **Hit-stop** freezes the blade in the flesh and the demons around it (game time × 0.12), never
+  your feet, your view or your torch: those run on real time.
+
+## 6. Being hit (`Player.takeDamage`, `Hud.playerHurt`)
+
+- The view jolts (an irregular judder of position and angle on top of the head snapping away from
+  the blow), the screen reddens hardest on the side the blow came from, and blood is thrown across
+  the lens near that edge (one to three splats by the size of the blow), running and fading over
+  about two seconds.
+- The health vial (frame, blood and numbers together) shakes, its blood flares, the lost chip
+  burns and drains, and the amount lost rises off it.
+- Potions heal 20% of your health over the drink.
+
+## 7. Parry (`Player.canParry`, `Enemy.parried`, `Effects._reflect`)
+
+A block raised within 0.2 s before a blow lands (from the front) **parries** it: no damage, a
+hit-stop, sparks and a ring of steel; the demon reels for 1.1 s (a boss for 0.7 s), its string
+broken, and your next blow counts as a counter. A fireball parried flies back at its caster,
+hotter (×2.5 damage, burning). The window re-arms once the block has been down 0.35 s, so holding
+or fanning the block does not parry. A late block still takes the usual 20%.
+
+## 8. Reading the demons (`src/entities/EnemyTypes.js`, `Enemy.js`)
+
+Every kind fights its own way, so each is a puzzle to learn. The tells are colour coded: **red** is
+a blow you can counter in its windup; **gold** is an **armoured** blow that a light hit cannot stop
+(only a heavy one, or a parry), to be blocked or dodged.
+
+| Demon | How it fights | How to beat it |
+| --- | --- | --- |
+| Gaunt Stalker | A quick, weak **snap** (0.27 s tell) that may run straight on into the full **rake**; a **pounce** from range that is sometimes a feint. Hit twice within 1.5 s and it often **springs clear**. | Parry the snap, counter the slower rake; don't chase its retreat, let the pounce come. |
+| Cinder Hound | **Bite flurries** (up to three) that **set you alight** (a dodge puts it out); feinted pounces. | Parry or block the flurry; save the dodge for the real pounce, punish the landing. |
+| Shadow Fiend | A wide **sweep** with a **backhand** after it; a **lash** that drags you in and may sweep after. Keep it at a distance and it **blinks behind you** (a hiss and a puff of shadow) and swings. | Block twice, or be clear of both; turn when you hear it vanish. |
+| Flame-Horned Brute | An **armoured slam**; a sweep that may run into the slam; from afar an **armoured bull charge** that ends **stunned for 2.1 s** in any wall it hits; a **stomp** if you stand at its back or hug it. Below 40% it goes **berserk** (faster windups, shorter rests, quicker feet). | Sidestep the charge into a wall and punish; heavy blows into the slam; never stand behind it. |
+| Pyre Witch | Fireballs (three on deep floors) that **parry back** at her; **pyre**: the ground erupts under you and where you are heading; a fire burst up close; **blinks away** when cornered. | Parry the fireballs; keep moving through the pyre; corner her after the blink. |
+| Gorvath | Armoured slam and charge (the charge stuns him in a wall); the sweep may run into the slam. | As the brute, bigger. |
+| Azrakel | The sweep may run into the gust; an armoured leap. | Watch the ring, then the follow-up. |
+
+Common to all: demons waiting for an opening **circle** you instead of queueing; strings keep
+their attack token; a string's next blow has a shorter windup (`combo.windup`); blinks and hops
+can't be hit while hidden; parrying breaks a string.

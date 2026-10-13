@@ -32,9 +32,9 @@ export const BOSS_TYPES = {
       { at: 0.33, spawn: ['ghoul', 'ghoul', 'fiend', 'ghoul', 'ghoul'] },
     ],
     attacks: [
-      { name: 'slam', windup: 1.0, strike: 0.2, recover: 0.9, dmg: 1, minRange: 0, maxRange: 4.2, volume: { c: [0, 0.8, 1.7], h: [0.6, 1.0, 1.1] }, lunge: 2, knockback: 7, aoe: { at: [0, 2.0], radius: 4.5, dmg: 0.5 }, weight: 3 },
-      { name: 'sweep', windup: 0.75, strike: 0.22, recover: 0.8, dmg: 0.85, minRange: 0, maxRange: 4.0, volume: { c: [0, 1.0, 1.3], h: [1.7, 0.7, 1.1] }, knockback: 12, weight: 3 },
-      { name: 'charge', windup: 0.85, strike: 1.0, recover: 1.1, dmg: 1.2, minRange: 6, maxRange: 40, volume: { c: [0, 0.9, 0.9], h: [0.7, 0.9, 0.6] }, lunge: 14, knockback: 14, weight: 2 },
+      { name: 'slam', windup: 1.0, strike: 0.2, recover: 0.9, dmg: 1, minRange: 0, maxRange: 4.2, volume: { c: [0, 0.8, 1.7], h: [0.6, 1.0, 1.1] }, lunge: 2, knockback: 7, aoe: { at: [0, 2.0], radius: 4.5, dmg: 0.5 }, weight: 3, armor: true },
+      { name: 'sweep', windup: 0.75, strike: 0.22, recover: 0.8, dmg: 0.85, minRange: 0, maxRange: 4.0, volume: { c: [0, 1.0, 1.3], h: [1.7, 0.7, 1.1] }, knockback: 12, weight: 3, combo: { next: 'slam', chance: 0.4, windup: 0.65 } },
+      { name: 'charge', windup: 0.85, strike: 1.0, recover: 1.1, dmg: 1.2, minRange: 6, maxRange: 40, volume: { c: [0, 0.9, 0.9], h: [0.7, 0.9, 0.6] }, lunge: 14, knockback: 14, weight: 2, armor: true },
       { name: 'stomp', windup: 0.6, strike: 0.2, recover: 0.8, dmg: 0.7, minRange: 0, maxRange: 3.5, volume: null, aoe: { at: [0, 0], radius: 5, dmg: 0.7 }, weight: 1, behind: true },
     ],
   },
@@ -59,10 +59,10 @@ export const BOSS_TYPES = {
       { at: 0.4, spawn: ['fiend', 'witch', 'brute', 'hound', 'hound'] },
     ],
     attacks: [
-      { name: 'sweep', windup: 0.8, strike: 0.24, recover: 0.8, dmg: 1, minRange: 0, maxRange: 5, volume: { c: [0, 1.4, 1.8], h: [2.2, 1.0, 1.6] }, knockback: 10, weight: 3 },
+      { name: 'sweep', windup: 0.8, strike: 0.24, recover: 0.8, dmg: 1, minRange: 0, maxRange: 5, volume: { c: [0, 1.4, 1.8], h: [2.2, 1.0, 1.6] }, knockback: 10, weight: 3, combo: { next: 'gust', chance: 0.35, windup: 0.6 } },
       { name: 'volley', windup: 0.7, strike: 0.6, recover: 0.7, dmg: 0.6, minRange: 4, maxRange: 60, volume: null, weight: 3 },
       { name: 'gust', windup: 0.6, strike: 0.3, recover: 0.7, dmg: 0.35, minRange: 0, maxRange: 4.5, volume: { c: [0, 1.5, 3], h: [2.5, 1.5, 3] }, knockback: 16, weight: 2 },
-      { name: 'leap', windup: 0.6, strike: 1.2, recover: 0.9, dmg: 1.2, minRange: 7, maxRange: 60, volume: null, aoe: { at: [0, 0], radius: 4, dmg: 1 }, weight: 2 },
+      { name: 'leap', windup: 0.6, strike: 1.2, recover: 0.9, dmg: 1.2, minRange: 7, maxRange: 60, volume: null, aoe: { at: [0, 0], radius: 4, dmg: 1 }, weight: 2, armor: true },
       { name: 'rain', windup: 0.9, strike: 0.4, recover: 0.8, dmg: 0.65, minRange: 0, maxRange: 60, volume: null, weight: 3, minPhase: 3 },
     ],
   },
@@ -141,7 +141,7 @@ export class Boss extends Enemy {
     if (player.dead || this.cooldown > 0) return;
     const behind = Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z))) > 1.6;
     const moves = this.type.attacks.filter((a) => {
-      if (dist < a.minRange || dist > a.maxRange) return false;
+      if (a.comboOnly || dist < a.minRange || dist > a.maxRange) return false;
       if (a.minPhase && this.phase < a.minPhase) return false;
       if (a.behind && !behind) return false;
       if (this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)) return false;

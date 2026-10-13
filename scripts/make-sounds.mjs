@@ -327,6 +327,24 @@ const SOUNDS = {
     tone(o, { freq: 55, freqEnd: 40, decay: 0.16, gain: 0.6 });
     tone(o, { freq: 50, freqEnd: 36, decay: 0.2, gain: 0.5, delay: 0.22 });
   },
+  // A parry: steel meeting steel cleanly, a bright ring that hangs, and a
+  // low thump of the blow thrown back.
+  parry: (o) => {
+    for (const [f, g, d] of [[1046, 0.2, 0.9], [1568, 0.12, 0.7], [2093, 0.08, 0.5], [523, 0.1, 0.6]]) tone(o, { type: 'triangle', freq: f, freqEnd: f * 0.995, attack: 0.002, decay: d, gain: g });
+    noise(o, { type: 'highpass', freq: 4200, decay: 0.05, gain: 0.6 });
+    tone(o, { freq: 90, freqEnd: 45, decay: 0.2, gain: 0.55 });
+  },
+  // A demon hopping clear: a short rush of air and a scuff.
+  whoosh: (o) => {
+    noise(o, { freq: 500, freqEnd: 1500, q: 0.9, attack: 0.05, decay: 0.16, gain: 0.35 });
+    noise(o, { type: 'lowpass', freq: 400, freqEnd: 120, decay: 0.08, gain: 0.25, delay: 0.12 });
+  },
+  // Vanishing into shadow: an indrawn breath of air under a falling hum.
+  blink: (o) => {
+    noise(o, { freq: 3000, freqEnd: 300, q: 1.2, attack: 0.12, decay: 0.12, gain: 0.4 });
+    tone(o, { type: 'sawtooth', freq: 220, freqEnd: 55, attack: 0.05, decay: 0.35, gain: 0.18, lp: 900 });
+    tone(o, { freq: 660, freqEnd: 110, attack: 0.02, decay: 0.3, gain: 0.08 });
+  },
 };
 
 function squelch(o, { delay = 0, dur = 0.2, gain = 0.5, freq = 900 }) {
