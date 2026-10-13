@@ -25,7 +25,7 @@
       "uniforms": {
         "tint": "#14b4ff",
         "deep": "#1a2fe6",
-        "storm": 0.3
+        "storm": 0.1
       },
       "transparent": true,
       "doubleSided": true

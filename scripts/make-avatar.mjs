@@ -9,8 +9,9 @@
 //   Avatar (origin at the feet)
 //     Body (at the centre, 0.9 m up: every clip turns and moves this)
 //       Shell      the bullet, 1.8 m tall, its own PBR textures (1024 px)
-//       Lightning  jagged bolts reaching off the body and arcing round it:
-//                  crossed ribbons that avatar/bolt-move.glsl makes crackle
+//       Lightning  short bolts off the body and arcs round it, and bolts
+//                  that stream out of the back in flight: crossed ribbons
+//                  that avatar/bolt-move.glsl lays out and makes crackle
 //                  and avatar/bolt.glsl strikes and flickers
 //
 // Clips (all on Body): idle (a slow turn), fly (leaning in, spinning),
@@ -94,15 +95,27 @@ function mulberry32(a) {
   };
 }
 
-// Each bolt: a jagged curve from a point on the body out into the air (or,
-// for the last few, round the body to another point on it), drawn as two
-// ribbons crossed along it so it reads from any side. The shaders need to
-// know, per vertex, which bolt it belongs to, how far along it, and which
-// edge of its ribbon. That goes in the normal (the lightning is unlit, so
-// it needs no other): its angle from straight up says how far along, its
-// angle round says bolt and edge (boltDecode in bolt-common.glsl). Not the
-// UVs: Project 0's optimisation (gltfpack) strips texture coordinates from
-// a material without textures, and rescales them on the rest.
+// The bolts, by kind (in order, so the shaders can tell them by number):
+//   tip     2  short sparks off the spiral point
+//   side    6  short bolts striking out from the body
+//   wrap    3  arcs from one point on the body round to another
+//   trail   5  out of the base, behind it in flight: in flight the round
+//              leans nose first, so its base points back (and stays so
+//              while it spins, about its own long axis). At rest they are
+//              stored folded flat up against the base (inside the bounds,
+//              never drawn); bolt-move.glsl unfurls them as you fly.
+// Each is a jagged curve drawn as two ribbons crossed along it so it reads
+// from any side. The shaders need to know, per vertex, which bolt it
+// belongs to, how far along it, and which edge of its ribbon. That goes in
+// the normal (the lightning is unlit, so it needs no other): its angle from
+// straight up says how far along, its angle round says bolt and edge
+// (boltDecode in bolt-common.glsl). Not the UVs: Project 0's optimisation
+// (gltfpack) strips texture coordinates from a material without textures,
+// and rescales them on the rest.
+const KINDS = { tip: 2, side: 6, wrap: 3, trail: 5 };
+const TRAIL_FIRST = KINDS.tip + KINDS.side + KINDS.wrap;
+const FOLD = 0.3;
+
 // Bolt, distance along (0..1) and edge (0/1) as a unit vector, coarse
 // enough to survive 8-bit quantization: polar angle from +Y for the
 // distance, the angle round Y for bolt and edge (BOLTS x 2 sectors).
@@ -121,78 +134,81 @@ function lightning() {
   const I = [];
   const up = new THREE.Vector3(0, 1, 0);
   for (let b = 0; b < BOLTS; b++) {
-    let start;
-    let dir;
-    let len;
     const th = (b / BOLTS) * Math.PI * 2 + r() * 0.5;
-    if (b < 2) {
-      // From the spiral tip, up and out.
-      start = new THREE.Vector3(0, HALF - 0.05, 0);
-      dir = new THREE.Vector3(Math.cos(th) * 0.8, 1, Math.sin(th) * 0.8);
-      len = 0.45 + r() * 0.3;
-    } else if (b < 4) {
-      // From the base, out low along the ground.
-      const y = -HALF + 0.12;
-      start = new THREE.Vector3(Math.cos(th) * radiusAt(y), y, Math.sin(th) * radiusAt(y));
-      dir = new THREE.Vector3(Math.cos(th), -0.1, Math.sin(th));
-      len = 0.5 + r() * 0.3;
-    } else if (b < BOLTS - 4) {
-      // From the sides, arcing outward.
-      const y = -0.7 + r() * 1.45;
-      start = new THREE.Vector3(Math.cos(th) * radiusAt(y) * 0.95, y, Math.sin(th) * radiusAt(y) * 0.95);
-      const t2 = th + (r() - 0.5) * 1.1;
-      dir = new THREE.Vector3(Math.cos(t2), (r() - 0.4) * 1.1, Math.sin(t2));
-      len = 0.6 + r() * 0.5;
-    }
+    let start;
     let end;
     let ctrl;
-    if (b >= BOLTS - 4) {
-      // Round the body: from one point on it to another, bowing out.
-      const y0 = -0.65 + r() * 1.3;
-      const y1 = Math.max(-0.75, Math.min(0.75, y0 + (r() - 0.5) * 0.7));
-      const t1 = th + (r() < 0.5 ? -1 : 1) * (1.3 + r() * 1.0);
+    let len;
+    const trail = b >= TRAIL_FIRST;
+    if (b < KINDS.tip) {
+      // Short sparks off the spiral point.
+      start = new THREE.Vector3(0, HALF - 0.05, 0);
+      len = 0.25 + r() * 0.15;
+      end = start.clone().addScaledVector(new THREE.Vector3(Math.cos(th) * 0.9, 1, Math.sin(th) * 0.9).normalize(), len);
+    } else if (b < KINDS.tip + KINDS.side) {
+      // Short bolts out from the body.
+      const y = -0.6 + r() * 1.25;
+      start = new THREE.Vector3(Math.cos(th) * radiusAt(y) * 0.95, y, Math.sin(th) * radiusAt(y) * 0.95);
+      const t2 = th + (r() - 0.5) * 0.9;
+      len = 0.3 + r() * 0.25;
+      end = start.clone().addScaledVector(new THREE.Vector3(Math.cos(t2), (r() - 0.4) * 0.9, Math.sin(t2)).normalize(), len);
+    } else if (!trail) {
+      // Round the body: from one point on it to another, bowing out a little.
+      const y0 = -0.6 + r() * 1.2;
+      const y1 = Math.max(-0.7, Math.min(0.7, y0 + (r() - 0.5) * 0.6));
+      const t1 = th + (r() < 0.5 ? -1 : 1) * (1.2 + r() * 0.8);
       start = new THREE.Vector3(Math.cos(th) * radiusAt(y0), y0, Math.sin(th) * radiusAt(y0));
       end = new THREE.Vector3(Math.cos(t1) * radiusAt(y1), y1, Math.sin(t1) * radiusAt(y1));
       const tm = (th + t1) / 2;
       const ym = (y0 + y1) / 2;
-      const rm = radiusAt(ym) + 0.22 + r() * 0.15;
-      ctrl = new THREE.Vector3(Math.cos(tm) * rm * 1.6, ym, Math.sin(tm) * rm * 1.6);
+      const rm = radiusAt(ym) + 0.1 + r() * 0.08;
+      ctrl = new THREE.Vector3(Math.cos(tm) * rm * 1.5, ym, Math.sin(tm) * rm * 1.5);
       len = start.distanceTo(end);
     } else {
-      dir.normalize();
-      end = start.clone().addScaledVector(dir, len);
+      // Out of the base: stored folded straight up against it.
+      const t = (b - TRAIL_FIRST) / KINDS.trail;
+      const a = t * Math.PI * 2 + r() * 0.6;
+      const y = -HALF + 0.04;
+      start = new THREE.Vector3(Math.cos(a) * radiusAt(y) * 0.7, y, Math.sin(a) * radiusAt(y) * 0.7);
+      end = start.clone().addScaledVector(up, FOLD);
+      len = FOLD;
+    }
+    if (!ctrl) {
       const out = new THREE.Vector3(start.x, 0, start.z).normalize();
-      ctrl = start.clone().lerp(end, 0.5).addScaledVector(out, len * 0.22).addScaledVector(up, (r() - 0.5) * len * 0.4);
+      ctrl = start.clone().lerp(end, 0.5);
+      if (!trail) ctrl.addScaledVector(out, len * 0.18).addScaledVector(up, (r() - 0.5) * len * 0.3);
     }
     const pts = [];
     for (let i = 0; i < BOLT_POINTS; i++) {
       const t = i / (BOLT_POINTS - 1);
-      const p = new THREE.Vector3()
-        .copy(start).multiplyScalar((1 - t) * (1 - t))
-        .addScaledVector(ctrl, 2 * t * (1 - t))
-        .addScaledVector(end, t * t);
-      pts.push(p);
+      pts.push(new THREE.Vector3().copy(start).multiplyScalar((1 - t) * (1 - t)).addScaledVector(ctrl, 2 * t * (1 - t)).addScaledVector(end, t * t));
     }
-    // Baked-in zigzag (the shader adds the live crackle on top).
-    for (let i = 1; i < BOLT_POINTS - 1; i++) {
-      const t = i / (BOLT_POINTS - 1);
-      const tan = pts[i + 1].clone().sub(pts[i - 1]).normalize();
-      const side = new THREE.Vector3().crossVectors(tan, up).normalize();
-      if (side.lengthSq() < 0.5) side.set(1, 0, 0);
-      const lift = new THREE.Vector3().crossVectors(side, tan);
-      const zig = (i % 2 ? 1 : -1) * len * (0.04 + r() * 0.05) * Math.sin(t * Math.PI);
-      pts[i].addScaledVector(side, zig).addScaledVector(lift, (r() - 0.5) * len * 0.06);
+    // Baked-in zigzag (the shader adds the live crackle on top); the trail
+    // bolts get theirs in the shader, where they are laid out.
+    if (!trail) {
+      for (let i = 1; i < BOLT_POINTS - 1; i++) {
+        const t = i / (BOLT_POINTS - 1);
+        const tan = pts[i + 1].clone().sub(pts[i - 1]).normalize();
+        const side = new THREE.Vector3().crossVectors(tan, up);
+        if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+        side.normalize();
+        const lift = new THREE.Vector3().crossVectors(side, tan);
+        const zig = (i % 2 ? 1 : -1) * len * (0.05 + r() * 0.05) * Math.sin(t * Math.PI);
+        pts[i].addScaledVector(side, zig).addScaledVector(lift, (r() - 0.5) * len * 0.06);
+      }
     }
     // Never below the feet (the avatar's bounds start there).
-    for (const p of pts) p.y = Math.max(p.y, -HALF + 0.06);
+    for (const p of pts) p.y = Math.max(p.y, -HALF + 0.03);
     for (let i = 0; i < BOLT_POINTS; i++) {
       const t = i / (BOLT_POINTS - 1);
       const tan = pts[Math.min(BOLT_POINTS - 1, i + 1)].clone().sub(pts[Math.max(0, i - 1)]).normalize();
-      const a = new THREE.Vector3().crossVectors(tan, up);
-      if (a.lengthSq() < 1e-4) a.set(1, 0, 0);
+      // Ribbon axes square to the bolt (for a trail bolt, horizontal, so
+      // they stay square to it once it is laid out along the long axis).
+      let a = new THREE.Vector3().crossVectors(tan, up);
+      if (a.lengthSq() < 1e-4) a = new THREE.Vector3(start.x, 0, start.z);
       a.normalize();
       const c = new THREE.Vector3().crossVectors(tan, a).normalize();
-      const w = 0.06 * (1 - 0.45 * t);
+      const w = 0.05 * (1 - 0.45 * t);
       const base = P.length / 3;
       for (const [axis, s] of [[a, -1], [a, 1], [c, -1], [c, 1]]) {
         const p = pts[i].clone().addScaledVector(axis, s * w);
@@ -240,10 +256,10 @@ const ease = (k) => k * k * (3 - 2 * k);
 const CLIPS = [
   // A slow, steady turn: one revolution every 6 s.
   clip('idle', 6, (k) => [0, k * TAU, 0]),
-  // Leaning into the flight, turning faster.
-  clip('fly', 1.5, (k) => [0.45, k * TAU, 0]),
+  // Leaning well into the flight, nose first, turning faster.
+  clip('fly', 1.5, (k) => [0.85, k * TAU, 0]),
   // Tipped right over to fly point first, rifling.
-  clip('fly_fast', 0.6, (k) => [1.35, k * TAU, 0]),
+  clip('fly_fast', 0.6, (k) => [1.4, k * TAU, 0]),
   clip('ascend', 1, (k) => [0.12, k * TAU, 0]),
   clip('descend', 1, (k) => [-0.25, -k * TAU, 0]),
   // Joy: a leap and a double spin.
@@ -342,6 +358,10 @@ await writeFile(
 // the surface stage in vBolt = (bolt, along, edge).
 #define BOLT_COUNT ${BOLTS}.0
 #define BOLT_POLE ${POLE}
+// Bolts from this number on stream out of the base in flight, stored
+// folded BOLT_FOLD m straight up against it.
+#define BOLT_TRAIL_FIRST ${TRAIL_FIRST}.0
+#define BOLT_FOLD ${FOLD}
 varying vec3 vBolt;
 vec3 boltDecode(vec3 n) {
   n = normalize(n);

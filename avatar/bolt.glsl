@@ -1,24 +1,27 @@
-// When each bolt strikes: on its own rhythm it lashes out from the body,
-// stutters, and is gone; most of the time several are lit at once, more in
-// a storm (an emote) or at speed. Vivid electric blue round a pale cyan
-// core, saturated enough to read against the white city as well as the dark.
+// When each bolt strikes. Standing still, now and then a short one flickers
+// off the body or an arc runs round it; in flight the trail bolts pour out
+// of the back almost without pause, more the faster you go; a storm (an
+// emote) sets everything off. Vivid electric blue round a pale cyan core,
+// saturated enough to read against the white city as well as the dark.
 void p0Surface(inout P0Surface s) {
   float id = floor(vBolt.x + 0.5);
   float along = vBolt.y;
   float across = abs(vBolt.z - 0.5) * 2.0;
-  float rate = 0.8 + 0.6 * srHash(vec3(id, 3.0, 1.0));
+  float trail = step(BOLT_TRAIL_FIRST, id);
+  float fly = smoothstep(0.03, 0.35, p0Speed);
+  float rate = mix(0.55 + 0.4 * srHash(vec3(id, 3.0, 1.0)), 1.6 + 0.8 * srHash(vec3(id, 4.0, 1.0)), trail);
   float phase = p0Time * rate + srHash(vec3(id, 9.0, 2.0));
   float cycle = floor(phase);
   float k = fract(phase);
-  float window = clamp(0.4 + 0.45 * storm + 0.2 * p0Speed, 0.0, 0.97);
-  // Most cycles strike.
-  float strikes = step(0.25 - 0.25 * storm, srHash(vec3(id, cycle, 5.0)));
+  float window = trail > 0.5 ? (0.55 + 0.35 * p0Speed) * fly : clamp(0.15 + 0.5 * storm + 0.1 * fly, 0.0, 0.95);
+  float chance = trail > 0.5 ? 0.9 : 0.5 + 0.45 * storm;
+  float strikes = step(1.0 - chance, srHash(vec3(id, cycle, 5.0)));
   float on = step(k, window) * strikes;
   // It reaches out from the body over the first part of its strike...
   float reach = clamp(k / max(0.02, window * 0.2), 0.0, 1.0);
   on *= step(along, reach);
   // ...and stutters while it holds.
-  on *= step(0.18, srHash(vec3(id, floor(p0Time * 30.0), 3.0)));
+  on *= step(0.1, srHash(vec3(id, floor(p0Time * 20.0), 3.0)));
   float core = 1.0 - smoothstep(0.0, 0.3, across);
   float body = 1.0 - smoothstep(0.35, 1.0, across);
   vec3 col = mix(deep, tint, body * 0.85);

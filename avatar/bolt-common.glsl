@@ -4,6 +4,10 @@
 // the surface stage in vBolt = (bolt, along, edge).
 #define BOLT_COUNT 16.0
 #define BOLT_POLE 0.15
+// Bolts from this number on stream out of the base in flight, stored
+// folded BOLT_FOLD m straight up against it.
+#define BOLT_TRAIL_FIRST 11.0
+#define BOLT_FOLD 0.3
 varying vec3 vBolt;
 vec3 boltDecode(vec3 n) {
   n = normalize(n);
