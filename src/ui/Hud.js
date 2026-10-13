@@ -3,11 +3,10 @@ import { SPELLS, SPELL_IDS } from '../entities/Spells.js';
 import { WEAPON_TYPES } from '../entities/Weapons.js';
 import { makeCanvas } from '../world/Textures.js';
 import { IconAtlas } from './IconAtlas.js';
-import { RELICS } from '../combat/Relics.js';
+import { RELICS, relicPassive } from '../combat/Relics.js';
 import { PROCS, ENCHANTS } from '../combat/Procs.js';
 import { MOMENTUM_MAX } from '../combat/Styles.js';
 import { WINDOW_EARLY, WINDOW_LATE, CHAIN_MAX } from '../combat/Rhythm.js';
-import { relicPassive } from '../combat/Relics.js';
 
 // The interface, drawn over the 3D view. Project 0 runs the game in a worker
 // with no DOM, so nothing here may touch the page.
