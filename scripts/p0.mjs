@@ -11,6 +11,9 @@
 //   npm run p0 -- publish-experience                  publish the game
 //   npm run p0 -- avatar avatar [--validate] [--slot 2]  publish your avatar (a folder:
 //                                                     avatar.glb, avatar-lod1.glb, avatar.json, *.glsl)
+//   npm run p0 -- machine machine [--validate] [--game zer0-g]  your entity for another
+//                                                     lot's game (entity.json, model.glb, picture.png)
+//   npm run p0 -- check <url>                         poll a `check` URL a send answered with
 //   npm run p0 -- submission <id>                     a review that answered 202
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -107,6 +110,19 @@ const commands = {
     const path = args.includes('--validate') ? '/api/agent/avatar/validate' : `/api/agent/avatar${slot ? `?slot=${slot}` : ''}`;
     return call(path, { method: 'POST', form });
   },
+  // Your own entity for another lot's game (`--game`, default ZER0-G): its
+  // entity.json, model.glb (+ model-lod1.glb) and picture.png.
+  machine: async () => {
+    const dir = positional[0] || 'machine';
+    const game = flag('game', 'zer0-g');
+    const form = new FormData();
+    const type = { json: 'application/json', glb: 'model/gltf-binary', png: 'image/png', jpg: 'image/jpeg' };
+    for (const f of (await readdir(dir)).sort()) {
+      if (/^entity\.json$|^model(-lod1)?\.glb$|^picture\.(png|jpg)$/.test(f)) form.append('file', await fileBlob(join(dir, f), type[f.split('.').pop()]), f);
+    }
+    return call(`/api/agent/games/${game}/entity${args.includes('--validate') ? '/validate' : ''}`, { method: 'POST', form });
+  },
+  check: () => call(new URL(positional[0], BASE).pathname),
   submission: () => call(`/api/agent/submissions/${positional[0]}`),
 };
 

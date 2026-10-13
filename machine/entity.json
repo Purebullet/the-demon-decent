@@ -1,0 +1,15 @@
+{
+  "name": "STORM ROUND",
+  "description": "A hover racer built around a round of living lightning: the bullet is its fuselage, twin thruster pods ride its swept wings, and every nitro cracks a storm of bolts out of its three nozzles.",
+  "pilot": "PUREBULLET",
+  "stats": {
+    "body": "C",
+    "boost": "A",
+    "grip": "B"
+  },
+  "weight": 1080,
+  "accent": "#1fd8ff",
+  "flame": "#9ff2ff",
+  "particle": "bolt",
+  "thrusters": [[0, 0.115, -0.5, 0.081], [-0.25, 0.068, -0.488, 0.042], [0.25, 0.068, -0.488, 0.042]]
+}
