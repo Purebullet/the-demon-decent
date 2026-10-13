@@ -3,9 +3,9 @@
 // a storm (an emote) or at speed. Vivid electric blue round a pale cyan
 // core, saturated enough to read against the white city as well as the dark.
 void p0Surface(inout P0Surface s) {
-  float id = boltId(s.uv);
-  float along = s.uv.x;
-  float across = boltAcross(s.uv);
+  float id = floor(vBolt.x + 0.5);
+  float along = vBolt.y;
+  float across = abs(vBolt.z - 0.5) * 2.0;
   float rate = 0.8 + 0.6 * srHash(vec3(id, 3.0, 1.0));
   float phase = p0Time * rate + srHash(vec3(id, 9.0, 2.0));
   float cycle = floor(phase);
@@ -26,4 +26,6 @@ void p0Surface(inout P0Surface s) {
   s.color = col;
   s.emissive = col * 0.35 * core;
   s.alpha = on * clamp(core + body * 0.95, 0.0, 1.0) * (1.0 - along * 0.25);
+  // Gone means gone, even if the material were drawn opaque.
+  if (s.alpha < 0.02) discard;
 }

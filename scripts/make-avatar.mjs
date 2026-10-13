@@ -97,10 +97,22 @@ function mulberry32(a) {
 // Each bolt: a jagged curve from a point on the body out into the air (or,
 // for the last few, round the body to another point on it), drawn as two
 // ribbons crossed along it so it reads from any side. The shaders need to
-// know, per vertex, how far along it (uv.x, 0 to 1), which bolt and which
-// edge of its ribbon (uv.y = (2 x bolt + edge) / (2 x BOLTS - 1), so both
-// stay within 0..1 whatever the server's optimisation does to UVs), and which
-// way it may be thrown when it crackles (the normal).
+// know, per vertex, which bolt it belongs to, how far along it, and which
+// edge of its ribbon. That goes in the normal (the lightning is unlit, so
+// it needs no other): its angle from straight up says how far along, its
+// angle round says bolt and edge (boltDecode in bolt-common.glsl). Not the
+// UVs: Project 0's optimisation (gltfpack) strips texture coordinates from
+// a material without textures, and rescales them on the rest.
+// Bolt, distance along (0..1) and edge (0/1) as a unit vector, coarse
+// enough to survive 8-bit quantization: polar angle from +Y for the
+// distance, the angle round Y for bolt and edge (BOLTS x 2 sectors).
+const POLE = 0.15;
+function boltEncode(bolt, along, edge) {
+  const th = POLE + along * (Math.PI - 2 * POLE);
+  const ph = ((bolt * 2 + edge + 0.5) / (BOLTS * 2)) * Math.PI * 2;
+  return new THREE.Vector3(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph));
+}
+
 function lightning() {
   const r = mulberry32(1738);
   const P = [];
@@ -185,8 +197,9 @@ function lightning() {
       for (const [axis, s] of [[a, -1], [a, 1], [c, -1], [c, 1]]) {
         const p = pts[i].clone().addScaledVector(axis, s * w);
         P.push(p.x, p.y, p.z);
-        N.push(a.x, a.y, a.z);
-        U.push(t, (b * 2 + (s < 0 ? 0 : 1)) / (BOLTS * 2 - 1));
+        const n = boltEncode(b, t, s < 0 ? 0 : 1);
+        N.push(n.x, n.y, n.z);
+        U.push(t, s < 0 ? 0 : 1);
       }
       if (i > 0) {
         const prev = base - 4;
@@ -323,12 +336,21 @@ async function build(file, { tris, texSize }) {
 await mkdir(OUT, { recursive: true });
 await writeFile(
   join(OUT, 'bolt-common.glsl'),
-  `// Written by scripts/make-avatar.mjs: how the lightning's UVs are packed.
-// uv.x runs 0 to 1 along a bolt; uv.y = (2 x bolt + edge) / (2 x BOLT_COUNT - 1).
+  `// Written by scripts/make-avatar.mjs: how each lightning vertex carries its
+// bolt, its distance along it and its ribbon edge, in its (object-space)
+// normal; see boltEncode there. The vertex stage decodes it and hands it to
+// the surface stage in vBolt = (bolt, along, edge).
 #define BOLT_COUNT ${BOLTS}.0
-float boltId(vec2 uv) { return floor(uv.y * (2.0 * BOLT_COUNT - 1.0) * 0.5 + 0.01); }
-// 0 on the ribbon's centre line, 1 at its edges.
-float boltAcross(vec2 uv) { return abs(uv.y * (2.0 * BOLT_COUNT - 1.0) - 2.0 * boltId(uv) - 0.5) * 2.0; }
+#define BOLT_POLE ${POLE}
+varying vec3 vBolt;
+vec3 boltDecode(vec3 n) {
+  n = normalize(n);
+  float along = clamp((acos(clamp(n.y, -1.0, 1.0)) - BOLT_POLE) / (3.14159265 - 2.0 * BOLT_POLE), 0.0, 1.0);
+  float u = fract(atan(n.z, n.x) / 6.28318531 + 1.0);
+  float code = floor(u * 2.0 * BOLT_COUNT);
+  float bolt = floor(code * 0.5);
+  return vec3(bolt, along, code - 2.0 * bolt);
+}
 `,
 );
 const made = [await build('avatar.glb', { tris: 0, texSize: 1024 }), await build('avatar-lod1.glb', { tris: 4150, texSize: 512 })];

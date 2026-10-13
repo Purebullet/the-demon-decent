@@ -1,6 +1,15 @@
-// Written by scripts/make-avatar.mjs: how the lightning's UVs are packed.
-// uv.x runs 0 to 1 along a bolt; uv.y = (2 x bolt + edge) / (2 x BOLT_COUNT - 1).
+// Written by scripts/make-avatar.mjs: how each lightning vertex carries its
+// bolt, its distance along it and its ribbon edge, in its (object-space)
+// normal; see boltEncode there. The vertex stage decodes it and hands it to
+// the surface stage in vBolt = (bolt, along, edge).
 #define BOLT_COUNT 16.0
-float boltId(vec2 uv) { return floor(uv.y * (2.0 * BOLT_COUNT - 1.0) * 0.5 + 0.01); }
-// 0 on the ribbon's centre line, 1 at its edges.
-float boltAcross(vec2 uv) { return abs(uv.y * (2.0 * BOLT_COUNT - 1.0) - 2.0 * boltId(uv) - 0.5) * 2.0; }
+#define BOLT_POLE 0.15
+varying vec3 vBolt;
+vec3 boltDecode(vec3 n) {
+  n = normalize(n);
+  float along = clamp((acos(clamp(n.y, -1.0, 1.0)) - BOLT_POLE) / (3.14159265 - 2.0 * BOLT_POLE), 0.0, 1.0);
+  float u = fract(atan(n.z, n.x) / 6.28318531 + 1.0);
+  float code = floor(u * 2.0 * BOLT_COUNT);
+  float bolt = floor(code * 0.5);
+  return vec3(bolt, along, code - 2.0 * bolt);
+}
