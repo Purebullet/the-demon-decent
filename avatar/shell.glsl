@@ -9,11 +9,14 @@ void p0Surface(inout P0Surface s) {
   float lit = smoothstep(0.16, 0.42, lum);
   float power = max(0.0, 1.0 + surge + 0.35 * p0Speed);
   float y = s.position.y;
-  // Waves of power climbing the body.
-  float wave = pow(fract(y * 0.75 - p0Time * 0.85), 5.0);
+  // Soft swells of power climbing the body: each fades in and out again
+  // (a smooth bump, no edge where one ends and the next begins).
+  float w = fract(y * 0.55 - p0Time * 0.6);
+  float wave = smoothstep(0.0, 0.5, w) * smoothstep(1.0, 0.5, w);
+  wave *= wave;
   float hum = 0.8 + 0.2 * sin(p0Time * 4.0 + y * 3.0);
-  vec3 energy = mix(deep, tint, 0.55 + 0.45 * wave);
-  s.emissive += energy * lit * (1.1 * hum + 2.2 * wave) * power;
+  vec3 energy = mix(deep, tint, 0.6 + 0.4 * wave);
+  s.emissive += energy * lit * (1.1 * hum + 1.3 * wave) * power;
   // Arcs: the ridges of a moving noise, sharpened to hairlines, lit in
   // bursts (more of them in a storm).
   float n = srNoise(s.position * 7.0 + vec3(0.0, -p0Time * 2.5, p0Time * 0.7));

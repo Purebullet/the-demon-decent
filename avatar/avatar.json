@@ -3,35 +3,170 @@
   "materials": {
     "Shell": {
       "lighting": "standard",
-      "include": ["noise.glsl"],
+      "include": [
+        "noise.glsl"
+      ],
       "surface": "shell.glsl",
-      "uniforms": { "tint": "#3fdcff", "deep": "#1f4dff", "surge": 0, "storm": 0.3 }
+      "uniforms": {
+        "tint": "#3fdcff",
+        "deep": "#1f4dff",
+        "surge": 0,
+        "storm": 0.3
+      }
     },
     "Lightning": {
       "lighting": "unlit",
-      "include": ["noise.glsl"],
+      "include": [
+        "noise.glsl",
+        "bolt-common.glsl"
+      ],
       "vertex": "bolt-move.glsl",
       "surface": "bolt.glsl",
-      "uniforms": { "tint": "#3fdcff", "deep": "#1f4dff", "storm": 0.3 },
+      "uniforms": {
+        "tint": "#14b4ff",
+        "deep": "#1a2fe6",
+        "storm": 0.3
+      },
       "transparent": true,
       "doubleSided": true
     }
   },
-  "motion": { "bank": 0.55, "pitch": 0.3, "bob": 0.07, "bobSpeed": 1.6, "squash": 0.12 },
-  "particles": {
-    "charge": { "shape": "dot", "colors": ["#18c8ff", "#2a6bff", "#9ff0ff", "#18c8ff", "#ff9a2e"], "size": [0.03, 0.08], "life": [0.8, 1.8], "speed": [0.3, 1.1], "gravity": -0.5, "spread": 1 },
-    "spark": { "shape": "spark", "colors": ["#00e1ff", "#3b74ff", "#c9f8ff", "#ff8a24"], "size": [0.05, 0.13], "life": [0.25, 0.7], "speed": [1.5, 4], "gravity": 3, "spread": 1, "spin": 4 },
-    "arc": { "shape": "star", "colors": ["#7af4ff", "#ffffff", "#2f7bff"], "size": [0.14, 0.38], "life": [0.3, 0.7], "speed": [2.5, 5.5], "gravity": 0.5, "spread": 1, "spin": 8 },
-    "spent": { "shape": "dot", "colors": ["#3a4f70", "#5a6f8f"], "size": [0.04, 0.09], "life": [1, 2], "speed": [0.1, 0.4], "gravity": 0.6, "spread": 1 }
+  "motion": {
+    "bank": 0.55,
+    "pitch": 0.3,
+    "bob": 0.07,
+    "bobSpeed": 1.6,
+    "squash": 0.12
   },
-  "aura": { "particle": "charge", "rate": 26 },
-  "trail": { "particle": "spark", "rate": 40 },
+  "particles": {
+    "spark": {
+      "shape": "spark",
+      "colors": [
+        "#00e1ff",
+        "#3b74ff",
+        "#c9f8ff",
+        "#ff8a24"
+      ],
+      "size": [
+        0.05,
+        0.13
+      ],
+      "life": [
+        0.25,
+        0.7
+      ],
+      "speed": [
+        1.5,
+        4
+      ],
+      "gravity": 3,
+      "spread": 1,
+      "spin": 4
+    },
+    "arc": {
+      "shape": "star",
+      "colors": [
+        "#7af4ff",
+        "#ffffff",
+        "#2f7bff"
+      ],
+      "size": [
+        0.14,
+        0.38
+      ],
+      "life": [
+        0.3,
+        0.7
+      ],
+      "speed": [
+        2.5,
+        5.5
+      ],
+      "gravity": 0.5,
+      "spread": 1,
+      "spin": 8
+    },
+    "spent": {
+      "shape": "dot",
+      "colors": [
+        "#3a4f70",
+        "#5a6f8f"
+      ],
+      "size": [
+        0.04,
+        0.09
+      ],
+      "life": [
+        1,
+        2
+      ],
+      "speed": [
+        0.1,
+        0.4
+      ],
+      "gravity": 0.6,
+      "spread": 1
+    }
+  },
+  "trail": "none",
   "idle": [],
   "emotes": [
-    { "name": "Joy", "clip": "surge", "burst": { "particle": "arc", "count": 48 }, "set": { "surge": 1.2, "storm": 0.9 } },
-    { "name": "Approval", "clip": "nod", "burst": { "particle": "spark", "count": 24 }, "set": { "surge": 0.5 } },
-    { "name": "Sadness", "clip": "droop", "loop": true, "emit": { "particle": "spent", "rate": 8 }, "set": { "surge": -0.75, "storm": 0 } },
-    { "name": "Indignation", "clip": "overload", "loop": true, "burst": { "particle": "arc", "count": 40 }, "emit": { "particle": "spark", "rate": 60 }, "set": { "surge": 1, "storm": 1 } }
+    {
+      "name": "Joy",
+      "clip": "surge",
+      "burst": {
+        "particle": "arc",
+        "count": 48
+      },
+      "set": {
+        "surge": 1.2,
+        "storm": 0.9
+      }
+    },
+    {
+      "name": "Approval",
+      "clip": "nod",
+      "burst": {
+        "particle": "spark",
+        "count": 24
+      },
+      "set": {
+        "surge": 0.5
+      }
+    },
+    {
+      "name": "Sadness",
+      "clip": "droop",
+      "loop": true,
+      "emit": {
+        "particle": "spent",
+        "rate": 8
+      },
+      "set": {
+        "surge": -0.75,
+        "storm": 0
+      }
+    },
+    {
+      "name": "Indignation",
+      "clip": "overload",
+      "loop": true,
+      "burst": {
+        "particle": "arc",
+        "count": 40
+      },
+      "emit": {
+        "particle": "spark",
+        "rate": 60
+      },
+      "set": {
+        "surge": 1,
+        "storm": 1
+      }
+    }
   ],
-  "reactions": { "pick": "Approval", "like": "Joy" }
+  "reactions": {
+    "pick": "Approval",
+    "like": "Joy"
+  }
 }

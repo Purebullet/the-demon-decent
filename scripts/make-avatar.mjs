@@ -9,14 +9,15 @@
 //   Avatar (origin at the feet)
 //     Body (at the centre, 0.9 m up: every clip turns and moves this)
 //       Shell      the bullet, 1.8 m tall, its own PBR textures (1024 px)
-//       Lightning  jagged bolts reaching off the body: crossed ribbons that
-//                  avatar/bolt-move.glsl makes crackle and avatar/bolt.glsl
-//                  strikes and flickers
+//       Lightning  jagged bolts reaching off the body and arcing round it:
+//                  crossed ribbons that avatar/bolt-move.glsl makes crackle
+//                  and avatar/bolt.glsl strikes and flickers
 //
 // Clips (all on Body): idle (a slow turn), fly (leaning in, spinning),
 // fly_fast (tipped over to fly point first, rifling), ascend, descend, and
 // the emotes' surge, nod, droop and overload. avatar/avatar.json and the
-// shaders beside it are written by hand.
+// shaders beside it are written by hand, except avatar/bolt-common.glsl
+// (the bolt count the shaders decode the UVs with), written here.
 //
 // Publish with: npm run p0 -- avatar avatar   (validate first: --validate)
 
@@ -33,7 +34,7 @@ const SRC = process.argv[2] || join(ROOT, 'assets/source/avatar-bullet.glb');
 const OUT = join(ROOT, 'avatar');
 const HEIGHT = 1.8;
 const HALF = HEIGHT / 2;
-const BOLTS = 12;
+const BOLTS = 16;
 const BOLT_POINTS = 13;
 
 // ---- Source -----------------------------------------------------------------
@@ -93,11 +94,13 @@ function mulberry32(a) {
   };
 }
 
-// Each bolt: a jagged curve from a point on the body out into the air,
-// drawn as two ribbons crossed along it (so it reads from any side). The
-// shaders need to know, per vertex: which bolt (uv.x's whole part), how far
-// along it (uv.x's fraction), which edge of its ribbon (uv.y), and which way
-// it may be thrown when it crackles (the normal).
+// Each bolt: a jagged curve from a point on the body out into the air (or,
+// for the last few, round the body to another point on it), drawn as two
+// ribbons crossed along it so it reads from any side. The shaders need to
+// know, per vertex, how far along it (uv.x, 0 to 1), which bolt and which
+// edge of its ribbon (uv.y = (2 x bolt + edge) / (2 x BOLTS - 1), so both
+// stay within 0..1 whatever the server's optimisation does to UVs), and which
+// way it may be thrown when it crackles (the normal).
 function lightning() {
   const r = mulberry32(1738);
   const P = [];
@@ -121,18 +124,34 @@ function lightning() {
       start = new THREE.Vector3(Math.cos(th) * radiusAt(y), y, Math.sin(th) * radiusAt(y));
       dir = new THREE.Vector3(Math.cos(th), -0.1, Math.sin(th));
       len = 0.5 + r() * 0.3;
-    } else {
+    } else if (b < BOLTS - 4) {
       // From the sides, arcing outward.
-      const y = -0.75 + r() * 1.55;
+      const y = -0.7 + r() * 1.45;
       start = new THREE.Vector3(Math.cos(th) * radiusAt(y) * 0.95, y, Math.sin(th) * radiusAt(y) * 0.95);
       const t2 = th + (r() - 0.5) * 1.1;
       dir = new THREE.Vector3(Math.cos(t2), (r() - 0.4) * 1.1, Math.sin(t2));
-      len = 0.5 + r() * 0.7;
+      len = 0.6 + r() * 0.5;
     }
-    dir.normalize();
-    const end = start.clone().addScaledVector(dir, len);
-    const out = new THREE.Vector3(start.x, 0, start.z).normalize();
-    const ctrl = start.clone().lerp(end, 0.5).addScaledVector(out, len * 0.22).addScaledVector(up, (r() - 0.5) * len * 0.4);
+    let end;
+    let ctrl;
+    if (b >= BOLTS - 4) {
+      // Round the body: from one point on it to another, bowing out.
+      const y0 = -0.65 + r() * 1.3;
+      const y1 = Math.max(-0.75, Math.min(0.75, y0 + (r() - 0.5) * 0.7));
+      const t1 = th + (r() < 0.5 ? -1 : 1) * (1.3 + r() * 1.0);
+      start = new THREE.Vector3(Math.cos(th) * radiusAt(y0), y0, Math.sin(th) * radiusAt(y0));
+      end = new THREE.Vector3(Math.cos(t1) * radiusAt(y1), y1, Math.sin(t1) * radiusAt(y1));
+      const tm = (th + t1) / 2;
+      const ym = (y0 + y1) / 2;
+      const rm = radiusAt(ym) + 0.22 + r() * 0.15;
+      ctrl = new THREE.Vector3(Math.cos(tm) * rm * 1.6, ym, Math.sin(tm) * rm * 1.6);
+      len = start.distanceTo(end);
+    } else {
+      dir.normalize();
+      end = start.clone().addScaledVector(dir, len);
+      const out = new THREE.Vector3(start.x, 0, start.z).normalize();
+      ctrl = start.clone().lerp(end, 0.5).addScaledVector(out, len * 0.22).addScaledVector(up, (r() - 0.5) * len * 0.4);
+    }
     const pts = [];
     for (let i = 0; i < BOLT_POINTS; i++) {
       const t = i / (BOLT_POINTS - 1);
@@ -161,13 +180,13 @@ function lightning() {
       if (a.lengthSq() < 1e-4) a.set(1, 0, 0);
       a.normalize();
       const c = new THREE.Vector3().crossVectors(tan, a).normalize();
-      const w = 0.075 * (1 - 0.5 * t);
+      const w = 0.06 * (1 - 0.45 * t);
       const base = P.length / 3;
       for (const [axis, s] of [[a, -1], [a, 1], [c, -1], [c, 1]]) {
         const p = pts[i].clone().addScaledVector(axis, s * w);
         P.push(p.x, p.y, p.z);
         N.push(a.x, a.y, a.z);
-        U.push(b + t * 0.999, s < 0 ? 0 : 1);
+        U.push(t, (b * 2 + (s < 0 ? 0 : 1)) / (BOLTS * 2 - 1));
       }
       if (i > 0) {
         const prev = base - 4;
@@ -302,6 +321,16 @@ async function build(file, { tris, texSize }) {
 }
 
 await mkdir(OUT, { recursive: true });
-const made = [await build('avatar.glb', { tris: 0, texSize: 1024 }), await build('avatar-lod1.glb', { tris: 4300, texSize: 512 })];
+await writeFile(
+  join(OUT, 'bolt-common.glsl'),
+  `// Written by scripts/make-avatar.mjs: how the lightning's UVs are packed.
+// uv.x runs 0 to 1 along a bolt; uv.y = (2 x bolt + edge) / (2 x BOLT_COUNT - 1).
+#define BOLT_COUNT ${BOLTS}.0
+float boltId(vec2 uv) { return floor(uv.y * (2.0 * BOLT_COUNT - 1.0) * 0.5 + 0.01); }
+// 0 on the ribbon's centre line, 1 at its edges.
+float boltAcross(vec2 uv) { return abs(uv.y * (2.0 * BOLT_COUNT - 1.0) - 2.0 * boltId(uv) - 0.5) * 2.0; }
+`,
+);
+const made = [await build('avatar.glb', { tris: 0, texSize: 1024 }), await build('avatar-lod1.glb', { tris: 4150, texSize: 512 })];
 await rm(tmp, { recursive: true, force: true });
 for (const m of made) console.log(`avatar/${m.file}  ${(m.bytes / 1024).toFixed(0)} KB, ${m.tris} triangles`);
