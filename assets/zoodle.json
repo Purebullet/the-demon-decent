@@ -179,6 +179,11 @@
       "id": 250,
       "source": "objects",
       "status": "done"
+    },
+    "torch": {
+      "id": 251,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

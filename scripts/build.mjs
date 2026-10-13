@@ -72,7 +72,8 @@ async function buildExperience() {
   let files = 0;
   for (const file of await walk(join(root, 'src'))) {
     const rel = relative(root, file);
-    if (!rel.endsWith('.js') || WEB_ONLY.has(rel)) continue;
+    // src/lot builds the street view (scripts/make-lot.mjs); the game never loads it.
+    if (!rel.endsWith('.js') || WEB_ONLY.has(rel) || rel.startsWith('src/lot/')) continue;
     await mkdir(join(out, rel, '..'), { recursive: true });
     await copyFile(file, join(out, rel));
     files++;
@@ -86,7 +87,7 @@ async function buildExperience() {
   // PNG textures inside the models as JPEG: half the download. Cave scenery,
   // only ever seen by torchlight, also drops to 512 px textures; creatures,
   // weapons and the things you walk up to keep 1024.
-  const close = new Set(['sword', 'axe', 'mace', 'potion', 'chest', 'gate', 'throne', 'statue']);
+  const close = new Set(['sword', 'axe', 'mace', 'torch', 'potion', 'chest', 'gate', 'throne', 'statue']);
   const small = Object.entries(PROPS).filter(([id, p]) => !close.has(id) && !p.lot).map(([, p]) => p.model.split('/').pop());
   execFileSync('python3', [join(root, 'scripts/shrink-textures.py'), `--small=${small.join(',')}`, join(out, 'assets/models')], { stdio: 'inherit' });
   await rm(join(dist, 'experience.zip'), { force: true });

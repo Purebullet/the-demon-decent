@@ -143,6 +143,8 @@ export const PROPS = {
   sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, guard: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
   axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
   mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
+  // The torch in your left hand (the flame is drawn by the game on its rags).
+  torch: { model: 'assets/models/torch.glb', size: 0.72, upright: true, maxTris: 3000, prompt: `Hand-held dungeon torch: one straight shaft of gnarled blackened wood bound with worn leather straps and riveted iron bands, a bone-and-iron pommel at the bottom, and at the top a small cage of curved black iron claws holding a tight bundle of oil-soaked cloth rags, no flame, standing upright, ${LOOK}` },
   potion: { model: 'assets/models/potion.glb', size: 0.36, maxTris: 1500, prompt: `Small round glass potion flask filled with glowing blood-red liquid, cork stopper, leather cord, ${LOOK}` },
   brazier: { model: 'assets/models/brazier.glb', size: 1.3, maxTris: 3000, prompt: `Wrought iron brazier on three clawed demon legs, wide bowl heaped with glowing orange coals, ${LOOK}` },
   // ---- Cavern scenery (floors 1-20).

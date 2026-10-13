@@ -7,7 +7,7 @@
 // a headless browser (Playwright) because its textures are painted on canvas.
 
 import { createServer } from 'node:http';
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -54,6 +54,8 @@ const lods = await page.evaluate((d) => window.buildLot(d), { width, depth, heig
 await browser.close();
 server.close();
 
+// A fresh folder, so no file a past build wrote is published by mistake.
+await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 const inside = (s) =>
   s.min[0] >= -width / 2 - 1e-3 && s.max[0] <= width / 2 + 1e-3 && s.min[2] >= -depth / 2 - 1e-3 && s.max[2] <= depth / 2 + 1e-3 && s.min[1] >= -1e-3 && s.max[1] <= height + 1e-3;
@@ -79,7 +81,6 @@ await writeFile(
         Glow: { surface: 'glow.glsl', glow: 2 },
         Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
-        Props: { surface: 'crag.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
       },
       script: 'build.js',
     },
@@ -167,55 +168,31 @@ void p0Surface(inout P0Surface s) {
 );
 await writeFile(
   join(out, 'rock.glsl'),
-  `// Molten cracks in the rock, brightest at the crater's lip.
-float h21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-float vnoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-void p0Surface(inout P0Surface s) {
-  float r = length(s.position.xz);
-  float n = vnoise(s.position.xz * 1.3) * 0.6 + vnoise(s.position.xz * 3.7 + s.position.y) * 0.4;
-  float crack = smoothstep(0.06, 0.0, abs(n - 0.5));
-  float near = smoothstep(reach, lip, r) * step(0.2, s.position.y) * (1.0 - smoothstep(mound * 1.2, mound * 1.6, s.position.y));
-  float pulse = 0.7 + 0.3 * sin(p0Time * 1.4 - r * 0.8);
-  s.emissive += vec3(1.0, 0.2, 0.02) * crack * near * pulse * 1.6;
-}
-`,
-);
-await writeFile(
-  join(out, 'crag.glsl'),
-  `// The spires, crags and broken pillars are the mound's own rock (the same
-// texture), a shade darker toward their tips, with the mound's molten cracks
-// running up their bases near the lip. 3D noise, so the cracks wander across
-// steep faces instead of streaking down them.
-float cragHash(vec3 p) {
+  `// The mound and the spires, crags and broken pillars on it are one rock (one
+// texture): a shade darker toward the tips, with molten cracks glowing near
+// the crater's lip and up the bases of the pieces standing there. 3D noise,
+// so the cracks wander across steep faces instead of streaking down them.
+float rockHash(vec3 p) {
   p = fract(p * 0.3183099 + 0.1);
   p *= 17.0;
   return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
 }
-float cragNoise(vec3 p) {
+float rockNoise(vec3 p) {
   vec3 i = floor(p);
   vec3 f = fract(p);
   vec3 u = f * f * (3.0 - 2.0 * f);
-  float a = mix(mix(cragHash(i), cragHash(i + vec3(1.0, 0.0, 0.0)), u.x), mix(cragHash(i + vec3(0.0, 1.0, 0.0)), cragHash(i + vec3(1.0, 1.0, 0.0)), u.x), u.y);
-  float b = mix(mix(cragHash(i + vec3(0.0, 0.0, 1.0)), cragHash(i + vec3(1.0, 0.0, 1.0)), u.x), mix(cragHash(i + vec3(0.0, 1.0, 1.0)), cragHash(i + vec3(1.0, 1.0, 1.0)), u.x), u.y);
+  float a = mix(mix(rockHash(i), rockHash(i + vec3(1.0, 0.0, 0.0)), u.x), mix(rockHash(i + vec3(0.0, 1.0, 0.0)), rockHash(i + vec3(1.0, 1.0, 0.0)), u.x), u.y);
+  float b = mix(mix(rockHash(i + vec3(0.0, 0.0, 1.0)), rockHash(i + vec3(1.0, 0.0, 1.0)), u.x), mix(rockHash(i + vec3(0.0, 1.0, 1.0)), rockHash(i + vec3(1.0, 1.0, 1.0)), u.x), u.y);
   return mix(a, b, u.z);
 }
 void p0Surface(inout P0Surface s) {
   float r = length(s.position.xz);
-  s.color *= 1.0 - 0.3 * smoothstep(mound, mound * 2.6, s.position.y);
-  float n = cragNoise(s.position * 1.3) * 0.6 + cragNoise(s.position * 3.7) * 0.4;
+  s.color *= 1.0 - 0.3 * smoothstep(mound * 1.2, mound * 2.6, s.position.y);
+  float n = rockNoise(s.position * 1.3) * 0.6 + rockNoise(s.position * 3.7) * 0.4;
   float crack = smoothstep(0.05, 0.0, abs(n - 0.5));
-  float near = smoothstep(reach, lip, r) * (1.0 - smoothstep(mound * 0.9, mound * 1.35, s.position.y));
+  float near = smoothstep(reach, lip, r) * step(0.2, s.position.y) * (1.0 - smoothstep(mound * 1.05, mound * 1.45, s.position.y));
   float pulse = 0.7 + 0.3 * sin(p0Time * 1.4 - r * 0.8);
-  s.emissive += vec3(1.0, 0.2, 0.02) * crack * near * pulse * 1.3;
+  s.emissive += vec3(1.0, 0.2, 0.02) * crack * near * pulse * 1.5;
 }
 `,
 );

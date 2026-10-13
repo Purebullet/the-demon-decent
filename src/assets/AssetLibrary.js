@@ -232,6 +232,8 @@ export const Assets = {
     }
     const holder = new THREE.Group();
     holder.add(scene);
+    // A long prop modelled leaning (the torch) is stood up along its shaft.
+    if (entry.upright) for (let i = 0; i < 2; i++) straighten(holder, scene);
     let box = boundsOf(holder);
     const size = box.getSize(_v);
     if (entry.weapon) {
@@ -330,6 +332,39 @@ function missingCharacter(id, rootScale) {
   inner.add(model);
   inner.scale.setScalar(1 / rootScale);
   return { inner, model, clips: {}, entry, height: H / rootScale };
+}
+
+// Turns a prop so the line from the middle of its lowest fifth to the middle
+// of its highest fifth points straight up.
+function straighten(holder, scene) {
+  const box = boundsOf(holder);
+  const h = Math.max(1e-6, box.max.y - box.min.y);
+  const lo = new THREE.Vector3();
+  const hi = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  let nl = 0;
+  let nh = 0;
+  holder.updateMatrixWorld(true);
+  holder.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    const step = Math.max(1, Math.floor(pos.count / 6000));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      const k = (v.y - box.min.y) / h;
+      if (k < 0.2) {
+        lo.add(v);
+        nl++;
+      } else if (k > 0.8) {
+        hi.add(v);
+        nh++;
+      }
+    }
+  });
+  if (!nl || !nh) return;
+  const axis = hi.divideScalar(nh).sub(lo.divideScalar(nl)).normalize();
+  scene.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(axis, new THREE.Vector3(0, 1, 0)));
+  scene.updateMatrixWorld(true);
 }
 
 // Which end of an upright weapon is the head? An axe or a mace is widest at

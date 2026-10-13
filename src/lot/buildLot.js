@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { rockTextures, makeCanvas } from '../world/Textures.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
 
@@ -14,10 +14,13 @@ import { mulberry32, fbm2 } from '../core/rng.js';
 // on the slopes, smoulder and go out. The game itself lives inside, as an experience.
 //
 // Three levels of detail, as Project 0 asks (skill.md section 3):
-//   LOD0  materials Rock (the mound), Props (the pieces, on the same rock
-//         texture), Glow, Smoke; the Fog shader and the Lava nodes move (lot.json)
-//   LOD1  the same shapes, simplified and static: Rock (mound and pieces) and Glow
-//   LOD2  one mesh, one material, one 256 px texture
+//   LOD0  materials Rock (the mound and the pieces), Glow, Smoke; the Fog
+//         shader and the Lava nodes move (lot.json)
+//   LOD1  every piece again, cut down by meshoptimizer, static: Rock and Glow
+//         (the same shaders, as Project 0 gives LOD1 the materials it shares
+//         by name with LOD0)
+//   LOD2  one mesh, one material, one 256 px texture: the mound, the pit and
+//         very light copies of the spires and pillars
 
 const TAU = Math.PI * 2;
 
@@ -112,26 +115,6 @@ function mound(dims, { segs, rings, lift }) {
   return g;
 }
 
-function shards(dims, count, rnd, height) {
-  const list = [];
-  const cone = new THREE.ConeGeometry(1, 1, 5, 2);
-  for (let i = 0; i < count; i++) {
-    const a = (i / count) * TAU + rnd() * 0.15;
-    const r = dims.rc * (1.02 + rnd() * 0.25);
-    const h = Math.min(height * 0.42, dims.S * (0.12 + rnd() * 0.22));
-    const w = h * (0.12 + rnd() * 0.08);
-    const lean = 0.25 + rnd() * 0.45;
-    const g = placed(cone, {
-      pos: [Math.cos(a) * r, dims.hm * 0.85 + h * 0.4, Math.sin(a) * r],
-      rot: [-Math.sin(a) * lean, rnd() * 6, Math.cos(a) * lean],
-      order: 'ZXY',
-      scale: [w, h, w * (0.7 + rnd() * 0.5)],
-    });
-    list.push(g);
-  }
-  return list;
-}
-
 // Billows of fog boiling up out of the pit: each puff is four crossed quads
 // (three upright, one flat) that the Smoke shader lifts, swells and fades on
 // a loop. A quad's UV holds its corner (the whole part) plus the puff's
@@ -201,6 +184,30 @@ function boxUv(geo) {
   return geo;
 }
 
+// A piece cut down to about `tris` triangles by meshoptimizer, welded on
+// position alone and flat-shaded: crisp facets read better than smoothed
+// lumps at a distance. Tiny loose bits are pruned.
+function lowPoly(geo, tris) {
+  const welded = new THREE.BufferGeometry();
+  welded.setAttribute('position', geo.attributes.position.clone());
+  const g = mergeVertices(welded, 1e-4);
+  const pos = g.attributes.position.array;
+  const idx = new Uint32Array(g.index.array);
+  let [out] = MeshoptSimplifier.simplify(idx, pos, 3, tris * 3, 1, ['Prune']);
+  if (out.length > tris * 3 * 1.3) [out] = MeshoptSimplifier.simplifySloppy(idx, pos, 3, null, tris * 3, 1);
+  const r = new THREE.BufferGeometry();
+  r.setAttribute('position', g.attributes.position);
+  r.setIndex(new THREE.BufferAttribute(out, 1));
+  const flat = r.toNonIndexed();
+  flat.computeVertexNormals();
+  return flat;
+}
+
+// Triangles per piece in LOD1 (all 42 pieces, about 8,500 in all) and LOD2
+// (spires and pillars only).
+const LOD1_TRIS = { spire: 220, crag: 130, 'pillar-a': 340, 'pillar-b': 240, 'pillar-c': 340 };
+const LOD2_TRIS = { spire: 26, crag: 0, 'pillar-a': 30, 'pillar-b': 24, 'pillar-c': 30 };
+
 function bakePiece(scene) {
   scene.updateMatrixWorld(true);
   const geos = [];
@@ -222,23 +229,13 @@ function bakePiece(scene) {
 let kitCache = null;
 async function kit(models) {
   if (kitCache) return kitCache;
+  await MeshoptSimplifier.ready;
   const pieces = {};
   for (const kind of KINDS) {
     const m = models?.[kind];
     if (!m) continue;
     const high = bakePiece(m);
-    // A light copy for LOD1: about a quarter of the triangles.
-    let low = high;
-    try {
-      const merged = mergeVertices(high.clone(), 1e-4);
-      const tris = (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
-      low = await new SimplifyModifier().modify(merged, Math.floor(merged.attributes.position.count * 0.75));
-      if (!low.attributes.position.count || low.index.count / 3 > tris) low = high;
-    } catch (e) {
-      console.warn(`Could not simplify ${kind}: ${e.message}`);
-      low = high;
-    }
-    pieces[kind] = { high, low };
+    pieces[kind] = { high, low: lowPoly(high, LOD1_TRIS[kind]), far: LOD2_TRIS[kind] ? lowPoly(high, LOD2_TRIS[kind]) : null };
   }
   kitCache = { pieces };
   return kitCache;
@@ -292,7 +289,7 @@ function piecesGeometry(list, pieces, which) {
   const geos = [];
   for (const p of list) {
     const piece = pieces[p.kind];
-    if (!piece) continue;
+    if (!piece?.[which]) continue;
     geos.push(placed(piece[which], { pos: p.pos, rot: p.rot, order: p.order, scale: [p.scale, p.scale, p.scale] }));
   }
   return geos.length ? boxUv(mergeGeometries(geos.map(prep))) : null;
@@ -361,8 +358,6 @@ function materials() {
   const glowMap = glowTexture();
   return {
     rock: new THREE.MeshStandardMaterial({ name: 'Rock', map: rock.map, roughness: 0.95, metalness: 0 }),
-    // The same texture object, so the GLB carries it once.
-    props: new THREE.MeshStandardMaterial({ name: 'Props', map: rock.map, roughness: 0.95, metalness: 0 }),
     smoke: new THREE.MeshStandardMaterial({ name: 'Smoke', color: 0x2a2224, roughness: 1, metalness: 0, transparent: true, opacity: 0.6, depthWrite: false }),
     glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1.6, roughness: 0.6, color: 0x220400 }),
   };
@@ -387,7 +382,7 @@ export async function buildLod0(width, depth, height, models) {
   root.add(mesh('Ground', prep(groundGeo), M.rock));
   const props = piecesGeometry(list, K.pieces, 'high');
   let propsMesh = null;
-  if (props) root.add((propsMesh = mesh('Pieces', props, M.props)));
+  if (props) root.add((propsMesh = mesh('Pieces', props, M.rock)));
   root.add(mesh('Pit', prep(pitFloor(dims, 48)), M.glow));
   root.add(mesh('Fog', merge(fogPuffs(dims, 34, rnd)), M.smoke));
   for (let i = 0; i < LAVA_COUNT; i++) {
@@ -412,20 +407,25 @@ export async function buildLod1(width, depth, height, models) {
   const groundHigh = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
   const list = placements(dims, height, groundSampler(groundHigh), mulberry32(266));
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
-  // At this distance the small crags on the slopes are not missed.
-  const pieces = piecesGeometry(list.filter((p, i) => p.kind !== 'crag' && (p.kind !== 'spire' || i % 4 !== 2)), K.pieces, 'low');
+  const pieces = piecesGeometry(list, K.pieces, 'low');
   root.add(mesh('Ground', pieces ? mergeGeometries([ground, pieces]) : ground, M.rock));
   root.add(mesh('Glow', prep(pitFloor(dims, 20)), M.glow));
   return { root, dims };
 }
 
-export function buildLod2(width, depth, height) {
+export async function buildLod2(width, depth, height, models) {
   const dims = shape(width, depth, height);
-  const rnd = mulberry32(265);
-  // One texture: dark rock on the left half, fire on the right.
+  const K = await kit(models);
+  // One texture: the mound's rock as its average colour on the left half (a
+  // shade darker, as the whole build glows a little), fire on the right.
   const c = makeCanvas(256, 256);
   const g = c.getContext('2d');
-  g.fillStyle = '#16100e';
+  g.drawImage(rockTextures(265, [58, 46, 44]).map.image, 0, 0, 128, 256);
+  const px = g.getImageData(0, 0, 128, 256).data;
+  const avg = [0, 0, 0];
+  for (let i = 0; i < px.length; i += 4) for (let k = 0; k < 3; k++) avg[k] += px[i + k];
+  const n = px.length / 4;
+  g.fillStyle = `rgb(${avg.map((v) => Math.round((v / n) * 0.8)).join(',')})`;
   g.fillRect(0, 0, 128, 256);
   const grad = g.createLinearGradient(128, 0, 256, 0);
   grad.addColorStop(0, '#ff8a2a');
@@ -441,12 +441,16 @@ export function buildLod2(width, depth, height) {
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (right ? 0.52 : 0.02) + 0.46 * (((uv.getX(i) % 1) + 1) % 1), 0.5);
     return p;
   };
+  const list = placements(dims, height, groundSampler(mound(dims, { segs: 160, rings: 18, lift: 0.1 })), mulberry32(266));
   const rockGeo = toHalf(mound(dims, { segs: 24, rings: 3, lift: 1.0 }), false);
-  const fire = [pitFloor(dims, 10)].map((x) => toHalf(x, true));
-  const spikes = shards(dims, 8, rnd, height).map((x) => toHalf(x, false));
+  const fire = toHalf(pitFloor(dims, 10), true);
+  // The spires and pillars as a few dozen triangles each (no crags).
+  const pieces = piecesGeometry(list, K.pieces, 'far');
+  const parts = [rockGeo, fire];
+  if (pieces) parts.push(toHalf(pieces, false));
   const root = new THREE.Group();
   root.name = 'HellMouth';
-  root.add(mesh('HellMouth', mergeGeometries([rockGeo, ...spikes, ...fire]), mat));
+  root.add(mesh('HellMouth', mergeGeometries(parts), mat));
   return { root, dims };
 }
 

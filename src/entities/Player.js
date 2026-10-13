@@ -4,8 +4,8 @@ import { queryHurtboxes } from '../physics/Hitbox.js';
 import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc } from './Weapons.js';
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
-import { softDotTexture } from '../world/Textures.js';
 import { makeFlame } from '../world/Shaders.js';
+import { Assets } from '../assets/AssetLibrary.js';
 import { clamp } from '../core/rng.js';
 
 // First-person demon hunter. WASD + mouse look. Left button: a tap swings a
@@ -18,8 +18,6 @@ import { clamp } from '../core/rng.js';
 const EYE = 1.65;
 const RADIUS = 0.4;
 const WALK = 5.2;
-// Speed of the step a blow carries you forward (decays to about 0.9 m).
-const LUNGE = 7;
 const DODGE_SPEED = 12.5;
 const DODGE_TIME = 0.3;
 const DODGE_IFRAMES = 0.26;
@@ -58,10 +56,14 @@ const _world = new THREE.Matrix4();
 const _one = new THREE.Vector3(1, 1, 1);
 const _dir = new THREE.Vector3();
 const _seg = new THREE.Vector3();
-const _roll = new THREE.Quaternion();
-const _fwd = new THREE.Vector3(0, 0, 1);
-const TORCH_POS = new THREE.Vector3(-0.46, -0.48, -0.68);
+const _tilt = new THREE.Quaternion();
+const _side = new THREE.Vector3(1, 0, 0);
+const TORCH_POS = new THREE.Vector3(-0.46, -0.45, -0.68);
 const TORCH_ROT = new THREE.Euler(0.12, 0, -0.14);
+// The torch model stands on its pommel this far below the hand; its flame
+// burns on the rags held in the claw cage at the top.
+const TORCH_BASE = -0.42;
+const TORCH_RAGS = 0.9;
 
 export class Player {
   constructor(camera, viewRoot) {
@@ -97,19 +99,28 @@ export class Player {
     const g = new THREE.Group();
     g.position.copy(TORCH_POS);
     g.rotation.copy(TORCH_ROT);
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.95 }));
-    stick.position.y = -0.1;
-    const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
-    wrap.position.y = 0.24;
-    // A living noise flame on the rag wrap, a soft glow around it.
-    const flame = makeFlame({ height: 0.3, seed: 1.7, intensity: 1.15 });
-    flame.position.y = 0.27;
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: 0xff7a24, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.position.y = 0.42;
-    glow.scale.set(0.46, 0.56, 1);
-    g.add(stick, wrap, flame, glow);
+    // The generated torch: a leather-bound shaft, a bone pommel and an iron
+    // claw cage of rags. Without it, a plain stick and wrap.
+    const model = Assets.instanceProp('torch');
+    let rags = 0.25;
+    if (model) {
+      model.position.y = TORCH_BASE;
+      g.add(model);
+      rags = TORCH_BASE + (Assets.props.get('torch')?.entry.size ?? 0.72) * TORCH_RAGS;
+    } else {
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.95 }));
+      stick.position.y = -0.1;
+      const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
+      wrap.position.y = 0.24;
+      g.add(stick, wrap);
+    }
+    // A living noise flame on the rags (no glow sprite: it read as a bright
+    // orb hanging in front of the view).
+    const flame = makeFlame({ height: 0.28, seed: 1.7, intensity: 1.0 });
+    flame.position.y = rags;
+    g.add(flame);
     this.flame = flame;
-    this.flameGlow = glow;
+    this.flameY = rags;
     return g;
   }
 
@@ -245,7 +256,7 @@ export class Player {
   _move(dt, ctx) {
     const dir = this.moveDirection(_dir);
     let speed = WALK;
-    // Rooted while swinging: the blow's own lunge is the only movement.
+    // Rooted while swinging.
     if (this.swing) speed = 0;
     else if (this.charge) speed *= 0.35;
     else if (this.blocking) speed *= 0.45;
@@ -391,8 +402,8 @@ export class Player {
     return { W: s.W, A: s.A, R: s.R };
   }
 
-  // Side-to-side sway of a hand while walking: a roll about the view axis and
-  // a little lateral drift, the two hands out of step like swinging arms.
+  // A hand swinging forward and back while walking, like an arm: -1 back,
+  // 1 forward. The two hands are out of step, one cycle every two strides.
   _sway(phase) {
     const walk = Math.min(1, (this.speedNow || 0) / WALK);
     return Math.sin(this.bobT + phase) * walk;
@@ -417,10 +428,11 @@ export class Player {
         }
         return;
       }
-      // Rest pose swaying side to side with the stride, eased into the block.
-      pivot.position.set(IDLE_POS.x + sw * 0.03, IDLE_POS.y + Math.sin(t * 1.3) * 0.004, IDLE_POS.z);
-      _roll.setFromAxisAngle(_fwd, -sw * 0.14);
-      pivot.quaternion.copy(this.idleQuat).premultiply(_roll);
+      // Rest pose swinging forward and back with the stride (a little higher
+      // and tipped forward at the front of the swing), eased into the block.
+      pivot.position.set(IDLE_POS.x, IDLE_POS.y + sw * 0.012 + Math.sin(t * 1.3) * 0.004, IDLE_POS.z - sw * 0.055);
+      _tilt.setFromAxisAngle(_side, -sw * 0.12);
+      pivot.quaternion.copy(this.idleQuat).premultiply(_tilt);
       if (this.blockK > 0.001) {
         pivot.position.lerp(BLOCK_POS, this.blockK);
         pivot.quaternion.slerp(this.blockQuat, this.blockK);
@@ -441,10 +453,6 @@ export class Player {
       if (!s.sounded) {
         s.sounded = true;
         ctx.audio?.swing(s.heavy ? 'heavy' : this.run.weapon.type);
-        // The blow carries you a step forward; a heavy one further.
-        const lunge = LUNGE * (s.heavy ? 1.5 : 1);
-        this.knock.x += Math.sin(this.yaw) * -lunge;
-        this.knock.z += Math.cos(this.yaw) * -lunge;
       }
       const k = smooth((s.t - W) / A);
       this._sweep(s, s.prevK, k, ctx);
@@ -537,14 +545,13 @@ export class Player {
     const lit = this.torchLit;
     this.flame.scale.setScalar(Math.max(0.001, lit));
     this.flame.visible = lit > 0.01;
-    this.flameGlow.material.opacity = (0.25 + (f - 0.7) * 0.5) * lit;
-    // Swings side to side with the stride, out of step with the weapon.
+    // Swings forward and back with the stride, out of step with the weapon.
     const sw = this._sway(Math.PI);
-    this.torch.position.set(TORCH_POS.x + sw * 0.025, TORCH_POS.y - (1 - this.torchRaise) * 0.5, TORCH_POS.z);
-    this.torch.rotation.set(TORCH_ROT.x, TORCH_ROT.y, TORCH_ROT.z - sw * 0.12);
+    this.torch.position.set(TORCH_POS.x, TORCH_POS.y + sw * 0.012 - (1 - this.torchRaise) * 0.5, TORCH_POS.z - sw * 0.055);
+    this.torch.rotation.set(TORCH_ROT.x - sw * 0.12, TORCH_ROT.y, TORCH_ROT.z);
     // World light rides with the torch.
     this.torch.getWorldPosition(_v);
-    this.torchLight.position.copy(_v).add(_v2.set(0, 0.35, 0));
+    this.torchLight.position.copy(_v).add(_v2.set(0, this.flameY + 0.1, 0));
     this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit;
     this.torchLight.distance = ctx.torchRange ?? 16;
   }

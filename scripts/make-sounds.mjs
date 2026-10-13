@@ -267,16 +267,18 @@ function death(o, f) {
   noise(o, { type: 'lowpass', freq: 600, freqEnd: 80, decay: 0.5, gain: 0.4 });
 }
 
-// A seamless 12 s drone: detuned saws through a low-pass, plus slow wind.
+// A seamless 12 s drone: detuned saws through a low-pass over a sub tone,
+// swelling slowly, with a faint pair of beating tones far above. No noise at
+// all: a noise layer here played as constant static.
 function drone() {
   const secs = 12;
   const o = track(secs);
   const lp = biquad('lowpass', 0.7);
-  const wind = biquad('bandpass', 0.6);
   const n = o.length;
   // Frequencies chosen to complete whole cycles in 12 s, so the loop is seamless.
   const freqs = [41 + 1 / 12, 41.5 + 1 / 12, 61.5];
   const phases = freqs.map(() => 0);
+  const TAU = 2 * Math.PI;
   for (let i = 0; i < n; i++) {
     let s = 0;
     freqs.forEach((f, k) => {
@@ -284,9 +286,11 @@ function drone() {
       s += 2 * phases[k] - 1;
     });
     const t = i / RATE;
-    const v = lp(s / 3, 160) * 0.55;
-    const w = wind(rnd() * 2 - 1, 380 + 140 * Math.sin((2 * Math.PI * t) / secs)) * 0.5;
-    o[i] = v + w;
+    const swell = 0.8 + 0.2 * Math.sin((TAU * t) / secs);
+    const v = lp(s / 3, 160) * 0.55 * swell;
+    const sub = Math.sin(TAU * 30.75 * t) * 0.18;
+    const far = (Math.sin(TAU * (110 + 1 / 12) * t) + Math.sin(TAU * 110.5 * t)) * 0.025 * (0.6 + 0.4 * Math.sin((TAU * t) / 6));
+    o[i] = v + sub + far;
   }
   // Crossfade the ends so filter state does not click at the loop point.
   const fade = Math.floor(RATE * 0.3);

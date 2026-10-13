@@ -683,7 +683,7 @@ export class Game {
     while (a.strikes < strikes.length && t >= strikes[a.strikes]) {
       a.strikes++;
       this.audio.strike?.();
-      const tip = p.camera.localToWorld(new THREE.Vector3(-0.42, -0.18, -0.7));
+      const tip = p.camera.localToWorld(new THREE.Vector3(-0.42, -0.15, -0.7));
       burst(this.fx.add, tip, { count: 14, speed: 2.4, size: 0.05, life: 0.35, color: C.spark, colorEnd: C.fireEdge, gravity: -6 });
       p.shake(0.03);
     }
