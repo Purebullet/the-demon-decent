@@ -75,7 +75,7 @@ await writeFile(
     {
       materials: {
         Glow: { surface: 'glow.glsl', glow: 2 },
-        Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: 'fog-common.glsl', transparent: true, doubleSided: false, glow: 0.4, uniforms: { rise: +(height * 0.75).toFixed(2), spread: +(rc * 0.9).toFixed(2) } },
+        Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: false, glow: 0.4, uniforms: { rise: +(height * 0.75).toFixed(2), spread: +(rc * 0.9).toFixed(2) } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
       },
       script: 'build.js',
