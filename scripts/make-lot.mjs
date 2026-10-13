@@ -79,6 +79,7 @@ await writeFile(
         Glow: { surface: 'glow.glsl', glow: 2 },
         Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
+        Props: { surface: 'crag.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
       },
       script: 'build.js',
     },
@@ -189,6 +190,36 @@ void p0Surface(inout P0Surface s) {
 `,
 );
 await writeFile(
+  join(out, 'crag.glsl'),
+  `// The spires, crags and broken pillars are the mound's own rock (the same
+// texture), a shade darker toward their tips, with the mound's molten cracks
+// running up their bases near the lip. 3D noise, so the cracks wander across
+// steep faces instead of streaking down them.
+float cragHash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float cragNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  float a = mix(mix(cragHash(i), cragHash(i + vec3(1.0, 0.0, 0.0)), u.x), mix(cragHash(i + vec3(0.0, 1.0, 0.0)), cragHash(i + vec3(1.0, 1.0, 0.0)), u.x), u.y);
+  float b = mix(mix(cragHash(i + vec3(0.0, 0.0, 1.0)), cragHash(i + vec3(1.0, 0.0, 1.0)), u.x), mix(cragHash(i + vec3(0.0, 1.0, 1.0)), cragHash(i + vec3(1.0, 1.0, 1.0)), u.x), u.y);
+  return mix(a, b, u.z);
+}
+void p0Surface(inout P0Surface s) {
+  float r = length(s.position.xz);
+  s.color *= 1.0 - 0.3 * smoothstep(mound, mound * 2.6, s.position.y);
+  float n = cragNoise(s.position * 1.3) * 0.6 + cragNoise(s.position * 3.7) * 0.4;
+  float crack = smoothstep(0.05, 0.0, abs(n - 0.5));
+  float near = smoothstep(reach, lip, r) * (1.0 - smoothstep(mound * 0.9, mound * 1.35, s.position.y));
+  float pulse = 0.7 + 0.3 * sin(p0Time * 1.4 - r * 0.8);
+  s.emissive += vec3(1.0, 0.2, 0.02) * crack * near * pulse * 1.3;
+}
+`,
+);
+await writeFile(
   join(out, 'build.js'),
   `// Now and then the pit spits a gob of lava: it arcs out of the hole and
 // lands on the slope around it (on one of the measured spots below, so it
@@ -240,16 +271,16 @@ export default function build(b) {
       let hgt
       if (g < SPLAT) {
         const k = g / SPLAT
-        w = 1 + k * 0.9
-        hgt = 1 - k * 0.7
+        w = 1 + k * 1.6
+        hgt = 1 - k * 0.75
       } else if (g < SPLAT + REST) {
         const k = (g - SPLAT) / REST
-        w = 1.9 - k * 0.4 + Math.sin(g * 6) * 0.03
-        hgt = 0.3 - k * 0.08
+        w = 2.6 - k * 0.5 + Math.sin(g * 6) * 0.04
+        hgt = 0.25 - k * 0.07
       } else {
         const k = (g - SPLAT - REST) / FADE
-        w = 1.5 * (1 - k)
-        hgt = 0.22 * (1 - k)
+        w = 2.1 * (1 - k)
+        hgt = 0.18 * (1 - k)
       }
       b.node('Lava' + i, { position: [to[0], to[1] + 0.02, to[2]], scale: [Math.max(0.001, w), Math.max(0.001, hgt), Math.max(0.001, w)] })
     }

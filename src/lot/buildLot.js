@@ -8,16 +8,15 @@ import { mulberry32, fbm2 } from '../core/rng.js';
 // The lot's street view: a hell-mouth diorama that stays inside the lot's
 // box (origin at the middle of the floor, metres, +Y up). A volcanic mound
 // torn open by a glowing pit, a ring of razor-sharp rock spires and crags
-// leaning over it, three kinds of broken pillar standing on its slopes (all
-// generated with Zoodle, sharing one texture atlas), billows of fog boiling
+// leaning over it, three kinds of broken pillar standing on its slopes (their
+// shapes generated with Zoodle, all of the mound's own rock), billows of fog boiling
 // up out of the hole, and gobs of lava it spits out now and then, which land
 // on the slopes, smoulder and go out. The game itself lives inside, as an experience.
 //
 // Three levels of detail, as Project 0 asks (skill.md section 3):
-//   LOD0  materials Rock (the mound), Props (the atlas), Glow, Smoke; the Fog
-//         shader and the Lava nodes move (lot.json)
-//   LOD1  the same shapes, simplified and static: Rock (mound and pieces on
-//         the atlas, the rock texture in one of its cells) and Glow
+//   LOD0  materials Rock (the mound), Props (the pieces, on the same rock
+//         texture), Glow, Smoke; the Fog shader and the Lava nodes move (lot.json)
+//   LOD1  the same shapes, simplified and static: Rock (mound and pieces) and Glow
 //   LOD2  one mesh, one material, one 256 px texture
 
 const TAU = Math.PI * 2;
@@ -167,35 +166,49 @@ export const LAVA_COUNT = 6;
 // ---- Generated pieces ------------------------------------------------------
 
 // The pieces from Zoodle (loaded by tools/lot.html into `models`), each
-// normalized to stand on y = 0, centred, 1 tall, and their colour textures
-// packed into one 1024 px atlas (3 x 2 cells; the sixth holds the mound's
-// rock texture for LOD1). Each piece's UVs are moved into its cell.
+// normalized to stand on y = 0, centred, 1 tall. Only their shapes are used:
+// they wear the mound's rock texture, so they read as the same stone.
 const KINDS = ['spire', 'crag', 'pillar-a', 'pillar-b', 'pillar-c'];
-const CELL = 1024 / 3;
 
-function cellUv(geo, index) {
-  const col = index % 3;
-  const row = Math.floor(index / 3);
-  const uv = geo.attributes.uv;
-  const inset = 0.012;
-  for (let i = 0; i < uv.count; i++) {
-    const u = Math.min(1, Math.max(0, uv.getX(i)));
-    const v = Math.min(1, Math.max(0, uv.getY(i)));
-    uv.setXY(i, (col + inset + u * (1 - 2 * inset)) / 3, (row + inset + v * (1 - 2 * inset)) / 2);
+// The rock texture laid on the placed pieces from the side each face looks
+// toward (a box projection per triangle), as dense as on the mound: one
+// repeat every 3 m.
+function boxUv(geo) {
+  const pos = geo.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i + 2 < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    n.subVectors(c, b).cross(b.clone().sub(a));
+    const ax = Math.abs(n.x);
+    const ay = Math.abs(n.y);
+    const az = Math.abs(n.z);
+    for (let k = 0; k < 3; k++) {
+      const x = pos.getX(i + k);
+      const y = pos.getY(i + k);
+      const z = pos.getZ(i + k);
+      const [u, v] = ay >= ax && ay >= az ? [x, z] : ax >= az ? [z, y] : [x, y];
+      uv[(i + k) * 2] = u / 3;
+      uv[(i + k) * 2 + 1] = v / 3;
+    }
   }
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   return geo;
 }
 
 function bakePiece(scene) {
   scene.updateMatrixWorld(true);
   const geos = [];
-  let image = null;
   scene.traverse((o) => {
     if (!o.isMesh) return;
     const g = o.geometry.clone().applyMatrix4(o.matrixWorld);
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal'].includes(k)) g.deleteAttribute(k);
     geos.push(g.index ? g.toNonIndexed() : g);
-    image ??= o.material.map?.image || null;
   });
   const g = geos.length === 1 ? geos[0] : mergeGeometries(geos);
   g.computeBoundingBox();
@@ -203,29 +216,23 @@ function bakePiece(scene) {
   const k = 1 / (b.max.y - b.min.y);
   g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
   g.scale(k, k, k);
-  return { geo: g, image };
+  return g;
 }
 
 let kitCache = null;
 async function kit(models) {
   if (kitCache) return kitCache;
-  const c = makeCanvas(1024, 1024);
-  const x = c.getContext('2d');
-  x.fillStyle = '#2a1e20';
-  x.fillRect(0, 0, 1024, 1024);
   const pieces = {};
-  for (const [i, kind] of KINDS.entries()) {
+  for (const kind of KINDS) {
     const m = models?.[kind];
     if (!m) continue;
-    const { geo, image } = bakePiece(m);
-    if (image) x.drawImage(image, (i % 3) * CELL, Math.floor(i / 3) * CELL, CELL, CELL);
-    const high = cellUv(geo.clone(), i);
-    // A light copy for LOD1: about a tenth of the triangles.
+    const high = bakePiece(m);
+    // A light copy for LOD1: about a quarter of the triangles.
     let low = high;
     try {
       const merged = mergeVertices(high.clone(), 1e-4);
       const tris = (merged.index ? merged.index.count : merged.attributes.position.count) / 3;
-      low = await new SimplifyModifier().modify(merged, Math.floor(merged.attributes.position.count * 0.96));
+      low = await new SimplifyModifier().modify(merged, Math.floor(merged.attributes.position.count * 0.75));
       if (!low.attributes.position.count || low.index.count / 3 > tris) low = high;
     } catch (e) {
       console.warn(`Could not simplify ${kind}: ${e.message}`);
@@ -233,19 +240,7 @@ async function kit(models) {
     }
     pieces[kind] = { high, low };
   }
-  // The mound's rock texture in the sixth cell, for LOD1.
-  const rock = rockTextures(265, [58, 46, 44]).map.image;
-  x.drawImage(rock, 2 * CELL, CELL, CELL, CELL);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.flipY = false;
-  // LOD1 may only use 512 px.
-  const small = makeCanvas(512, 512);
-  small.getContext('2d').drawImage(c, 0, 0, 512, 512);
-  const texSmall = new THREE.CanvasTexture(small);
-  texSmall.colorSpace = THREE.SRGBColorSpace;
-  texSmall.flipY = false;
-  kitCache = { tex, texSmall, pieces, canvas: c };
+  kitCache = { pieces };
   return kitCache;
 }
 
@@ -300,7 +295,7 @@ function piecesGeometry(list, pieces, which) {
     if (!piece) continue;
     geos.push(placed(piece[which], { pos: p.pos, rot: p.rot, order: p.order, scale: [p.scale, p.scale, p.scale] }));
   }
-  return geos.length ? mergeGeometries(geos.map(prep)) : null;
+  return geos.length ? boxUv(mergeGeometries(geos.map(prep))) : null;
 }
 
 // Ground height under (x, z), by a ray down onto a mound mesh.
@@ -361,12 +356,13 @@ function glowTexture(size = 64) {
   return t;
 }
 
-function materials(atlas = null) {
+function materials() {
   const rock = rockTextures(265, [58, 46, 44]);
   const glowMap = glowTexture();
   return {
     rock: new THREE.MeshStandardMaterial({ name: 'Rock', map: rock.map, roughness: 0.95, metalness: 0 }),
-    props: atlas ? new THREE.MeshStandardMaterial({ name: 'Props', map: atlas, roughness: 1, metalness: 0 }) : null,
+    // The same texture object, so the GLB carries it once.
+    props: new THREE.MeshStandardMaterial({ name: 'Props', map: rock.map, roughness: 0.95, metalness: 0 }),
     smoke: new THREE.MeshStandardMaterial({ name: 'Smoke', color: 0x2a2224, roughness: 1, metalness: 0, transparent: true, opacity: 0.6, depthWrite: false }),
     glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1.6, roughness: 0.6, color: 0x220400 }),
   };
@@ -382,7 +378,7 @@ export async function buildLod0(width, depth, height, models) {
   const dims = shape(width, depth, height);
   const rnd = mulberry32(265);
   const K = await kit(models);
-  const M = materials(K.tex);
+  const M = materials();
   const root = new THREE.Group();
   root.name = 'HellMouth';
   const groundGeo = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
@@ -396,7 +392,7 @@ export async function buildLod0(width, depth, height, models) {
   root.add(mesh('Fog', merge(fogPuffs(dims, 34, rnd)), M.smoke));
   for (let i = 0; i < LAVA_COUNT; i++) {
     // Each gob sits at the lot's origin; the script moves the node.
-    const g = new THREE.IcosahedronGeometry(dims.S * 0.014 + 0.1, 1);
+    const g = new THREE.IcosahedronGeometry(0.12 + dims.S * 0.004, 1);
     const m = mesh(`Lava${i}`, prep(g), M.glow);
     m.scale.setScalar(0.001);
     root.add(m);
@@ -412,22 +408,13 @@ export async function buildLod1(width, depth, height, models) {
   const M = materials();
   const root = new THREE.Group();
   root.name = 'HellMouth';
-  // The mound and every piece share the atlas (the mound on its rock cell).
+  // The mound and every piece in one mesh, on the rock texture.
   const groundHigh = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
   const list = placements(dims, height, groundSampler(groundHigh), mulberry32(266));
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
-  const uv = ground.attributes.uv;
-  const pos = ground.attributes.position;
-  for (let i = 0; i < uv.count; i++) {
-    const u = 0.5 + pos.getX(i) / (dims.hx * 2.2);
-    const v = 0.5 + pos.getZ(i) / (dims.hz * 2.2);
-    uv.setXY(i, (2 + 0.02 + u * 0.96) / 3, (1 + 0.02 + v * 0.96) / 2);
-  }
   // At this distance the small crags on the slopes are not missed.
   const pieces = piecesGeometry(list.filter((p, i) => p.kind !== 'crag' && (p.kind !== 'spire' || i % 4 !== 2)), K.pieces, 'low');
-  const atlas = K.texSmall;
-  const rock = new THREE.MeshStandardMaterial({ name: 'Rock', map: atlas, roughness: 1, metalness: 0 });
-  root.add(mesh('Ground', pieces ? mergeGeometries([ground, pieces]) : ground, rock));
+  root.add(mesh('Ground', pieces ? mergeGeometries([ground, pieces]) : ground, M.rock));
   root.add(mesh('Glow', prep(pitFloor(dims, 20)), M.glow));
   return { root, dims };
 }
