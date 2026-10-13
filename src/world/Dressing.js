@@ -25,7 +25,7 @@ const DIRS = [
 const METAL = { brazier: 0.55, cage: 0.6, chains: 0.6 };
 // Props whose bright parts glow in the floor's glow colour (a brazier's coals
 // in its flame colour), and how strongly.
-const GLOW = { crystal: 2.2, fungus: 1.5, eggs: 1.3, obelisk: 1.6, brazier: 1.2 };
+const GLOW = { crystal: 1.6, fungus: 1.4, eggs: 1.2, obelisk: 1.5, brazier: 1.2 };
 // Rock-like props take the full rock tint; the rest a softer one.
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar']);
 

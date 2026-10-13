@@ -96,6 +96,7 @@ export const LOOKS = {
       ['skulls', 1.5, 'open', [0.6, 1]],
       ['remains', 1.5, 'wall', [0.9, 1.15]],
       ['ribcage', 1, 'wall', [0.8, 1.1]],
+      ['altar', 0.6, 'wall', [0.9, 1.1]],
       ['stakes', 1, 'edge', [0.8, 1.1]],
       ['cage', 0.4, 'hang', [0.9, 1.1]],
     ],
@@ -181,7 +182,7 @@ export const LOOKS = {
   cinder: {
     rock: [0.42, 0.4, 0.42],
     ground: [46, 42, 42],
-    veins: [255, 90, 20, 0.6],
+    veins: [255, 90, 20, 0.4],
     fog: 0x0a0706,
     haze: 1.05,
     sky: 0x3a2a26,
@@ -257,7 +258,7 @@ export const LOOKS = {
   crucible: {
     rock: [0.5, 0.36, 0.32],
     ground: [56, 36, 28],
-    veins: [255, 80, 15, 0.9],
+    veins: [255, 80, 15, 0.6],
     fog: 0x140603,
     haze: 0.9,
     sky: 0x5a2a16,
@@ -272,6 +273,7 @@ export const LOOKS = {
     density: 0.3,
     decor: [
       ['statue', 1.5, 'wall', [0.95, 1.15]],
+      ['altar', 1, 'wall', [1, 1.2]],
       ['stakes', 1.5, 'edge', [0.9, 1.2]],
       ['skulls', 2, 'edge', [0.9, 1.4]],
       ['chains', 1, 'hang', [1, 1.3]],
@@ -282,7 +284,7 @@ export const LOOKS = {
   molten: {
     rock: [0.34, 0.3, 0.34],
     ground: [38, 30, 32],
-    veins: [255, 70, 10, 1.1],
+    veins: [255, 70, 10, 0.8],
     fog: 0x160502,
     haze: 0.95,
     sky: 0x5c2410,
@@ -375,6 +377,7 @@ export const LOOKS = {
     decor: [
       ['statue', 2, 'wall', [0.95, 1.15]],
       ['obelisk', 1.4, 'wall', [0.9, 1.1]],
+      ['altar', 0.8, 'wall', [1, 1.2]],
       ['stakes', 1, 'edge', [0.9, 1.2]],
       ['chains', 1, 'hang', [1, 1.3]],
       ['crystal', 1, 'edge', [0.6, 1.1]],
@@ -385,7 +388,7 @@ export const LOOKS = {
   throne: {
     rock: [0.38, 0.28, 0.3],
     ground: [42, 28, 28],
-    veins: [255, 50, 15, 1.2],
+    veins: [255, 50, 15, 0.8],
     fog: 0x160303,
     haze: 0.9,
     sky: 0x601c12,
@@ -414,7 +417,9 @@ export function lookFor(def, floor, rand) {
   const base = LOOKS[def.look] || LOOKS.maw;
   const j = (v, k) => v * (1 + (rand() - 0.5) * k);
   const look = { ...base, ...(def.lookOverrides || {}) };
-  look.rock = base.rock.map((v) => j(v, 0.12));
+  // Kept dark: the torch is bright up close, and the fog does the rest.
+  look.rock = base.rock.map((v) => j(v, 0.12) * 0.85);
+  look.hemi = base.hemi * 1.3;
   look.ground = base.ground.map((v) => Math.round(j(v, 0.12)));
   look.ceiling = j(base.ceiling, 0.1);
   look.hang = j(base.hang, 0.3);

@@ -182,6 +182,16 @@ export const Assets = {
     scene.traverse((o) => {
       if (o.isSkinnedMesh) skinned = true;
       if (o.userData.rig) rig = o.userData.rig;
+      // Generated materials come fully metallic (a metalness texture under a
+      // factor of 1), which a torchlit cave with nothing to reflect renders
+      // black. Creatures are skin, fur and cloth: matte.
+      if (o.isMesh) {
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          m.metalnessMap = null;
+          m.metalness = 0;
+          m.needsUpdate = true;
+        }
+      }
     });
     const box = boundsOf(scene);
     const size = box.getSize(_v);
@@ -202,6 +212,18 @@ export const Assets = {
     const gltf = await load(entry.model, available);
     if (!gltf) return;
     const scene = gltf.scene;
+    // Scenery is stone, bone and wood: matte, like the creatures. Weapons keep
+    // their metal (they are seen up close in the torchlight).
+    if (!entry.weapon) {
+      scene.traverse((o) => {
+        if (!o.isMesh) return;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          m.metalnessMap = null;
+          m.metalness = 0;
+          m.needsUpdate = true;
+        }
+      });
+    }
     const holder = new THREE.Group();
     holder.add(scene);
     let box = boundsOf(holder);

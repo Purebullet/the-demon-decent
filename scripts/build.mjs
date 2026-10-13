@@ -32,7 +32,7 @@ const EXPERIENCE = {
   entry: 'main.js',
   name: 'The Demon Descent',
   description:
-    'A first-person dark-fantasy roguelike. Step into the pit and fight down twenty floors of caverns: ghouls, chain fiends, flame-horned brutes and two demon lords. One life, no armour; your deepest floor goes on the weekly table.',
+    'A first-person dark-fantasy roguelike. Step into the pit and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and two demon lords. One life, no armour; your deepest floor goes on the weekly table.',
   maxPlayers: 8,
   credits: [{ work: 'Game, code, sound and stand-in models', by: 'made for this lot; sounds synthesized in code' }],
 };
@@ -79,7 +79,7 @@ async function buildExperience() {
   await writeFile(join(out, 'main.js'), "// Project 0 entry: see src/experience.js.\nimport start from './src/experience.js';\n\nexport default start;\n");
   const models = await listModels();
   const credits = [...EXPERIENCE.credits];
-  if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com) from original concept art' });
+  if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com); creatures rigged and animated in code' });
   await writeFile(join(out, 'experience.json'), `${JSON.stringify({ ...EXPERIENCE, credits }, null, 2)}\n`);
   const a = await copyAssets(out);
   await rm(join(dist, 'experience.zip'), { force: true });
@@ -151,7 +151,7 @@ async function missingCreatures() {
 
 const missing = await missingCreatures();
 if (missing.length) {
-  const msg = `No generated model yet for: ${missing.join(', ')} (npm run concepts, then npm run zoodle -- batch).`;
+  const msg = `No generated model yet for: ${missing.join(', ')} (npm run zoodle -- pull, then npm run rig).`;
   const packaging = !process.argv.includes('--serve') && !process.argv.includes('--devkit');
   if (packaging && !process.argv.includes('--allow-missing')) {
     console.error(`${msg}\nRefusing to package the game with placeholder blocks; add --allow-missing for a test build.`);

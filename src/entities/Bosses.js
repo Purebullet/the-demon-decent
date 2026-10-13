@@ -80,7 +80,7 @@ export class Boss extends Enemy {
     this.flap = 0;
     // Lives in the scene, not under the rig, so removing the corpse never
     // changes the light count (which would recompile every shader).
-    this.light = new THREE.PointLight(0xff5a1e, 6, 16, 1.6);
+    this.light = new THREE.PointLight(0xff5a1e, 12, 18, 1.4);
     this.lightHeight = key === 'azrakel' ? 3.6 : 2.6;
     this.yaw = Math.PI;
   }
@@ -92,9 +92,11 @@ export class Boss extends Enemy {
   update(dt, ctx) {
     this.flap = Math.max(0, this.flap - dt * 1.5);
     if (this.alive) this._checkPhase(ctx);
-    if (this.alive) this.light.intensity = 5 + Math.sin(ctx.time * 7) * 1.5 + (this.phase - 1) * 2;
+    if (this.alive) this.light.intensity = 12 + Math.sin(ctx.time * 7) * 2.5 + (this.phase - 1) * 3;
     super.update(dt, ctx);
-    this.light.position.set(this.position.x, this.root.position.y + this.lightHeight, this.position.z);
+    // Hung in front of the body, so the face and chest catch it.
+    const f = this.radius * 1.6;
+    this.light.position.set(this.position.x + Math.sin(this.yaw) * f, this.root.position.y + this.lightHeight, this.position.z + Math.cos(this.yaw) * f);
   }
 
   _checkPhase(ctx) {

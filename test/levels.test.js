@@ -50,3 +50,18 @@ test('every creature in the maps and boss summons has stats and a model slot', a
   for (const t of [...Object.values(ENEMY_TYPES), ...Object.values(BOSS_TYPES)]) assert.ok(CHARACTERS[t.asset], `no model slot for ${t.name}`);
   assert.equal(Object.keys(CHARACTERS).length, 7);
 });
+
+test('every floor has a look, and every look dresses with props that exist', async () => {
+  const { LOOKS } = await import('../src/world/themes.js');
+  const { PROPS } = await import('../src/assets/manifest.js');
+  for (const [i, def] of FLOORS.entries()) assert.ok(LOOKS[def.look], `floor ${i + 1} (${def.name}) has an unknown look "${def.look}"`);
+  for (const [name, look] of Object.entries(LOOKS)) {
+    for (const [id, , where] of look.decor) {
+      assert.ok(PROPS[id], `${name}: no prop "${id}"`);
+      assert.ok(['edge', 'open', 'wall', 'hang'].includes(where), `${name}: ${id} has unknown placement "${where}"`);
+    }
+    for (const id of [...look.pillars, ...Object.keys(look.walls)]) assert.ok(PROPS[id], `${name}: no prop "${id}"`);
+    // Hanging props must leave room to walk under them.
+    assert.ok(look.ceiling >= 6, `${name}: ceiling too low`);
+  }
+});
