@@ -64,6 +64,12 @@ Before publishing a new version, run it in Project 0's own sandbox: `npm run dev
 - **Enemy AI** (`src/ai`): A* on the tile grid with terrain costs, a per-frame search budget in time, and string-pulled paths. A director hands out attack tokens and sends flankers to points behind the player, routed by A* with a penalty on tiles inside the player's view cone. On deep floors, stalker packs take slots on a ring around you and lunge in sequence.
 - **Street view** (`src/lot/buildLot.js`, `scripts/make-lot.mjs`): three LODs made for the lot's box, plus `lot.json` with shaders for the hellfire and the molten cracks, and a script that turns the vortex.
 
+## The player's avatar: the Storm Round
+
+`avatar/` is PureBullet's Project 0 avatar: the rifled storm bullet (a Tripo model) standing 1.8 m tall, its pale channels burning with power that pulses up them, hairline arcs skittering over the shell, and jagged bolts of lightning striking off it, flickering and re-forming (`shell.glsl`, `bolt-move.glsl`, `bolt.glsl`). Blue sparks and orange embers rise round it, it sheds sparks as it flies, and at boost speed it tips over to fly point first, spinning like a fired round. Emotes: Joy (a leap and a burst of arcs), Approval (a nod), Sadness (the power drains, it sags), Indignation (overload: a lightning storm).
+
+`node scripts/make-avatar.mjs` rebuilds `avatar.glb` and `avatar-lod1.glb` from `assets/source/avatar-bullet.glb` (the uploaded model, not in git): it scales and centres the model, writes the lightning ribbons and the clips. `avatar.json` and the shaders are written by hand. `npm run p0 -- avatar avatar --validate` checks the package; without `--validate` it publishes.
+
 ## AI-generated 3D models
 
 Every creature and prop is an AI-generated model from [Zoodle](https://zoodle3d.com); none is modelled in code. A creature without its model shows as a plain grey block while you develop, and `npm run build` refuses to package the game until all seven have one.

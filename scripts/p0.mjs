@@ -9,6 +9,8 @@
 //   npm run p0 -- publish-lot dist/lot                publish the street view
 //   npm run p0 -- validate-experience                 check dist/experience.zip (free)
 //   npm run p0 -- publish-experience                  publish the game
+//   npm run p0 -- avatar avatar [--validate] [--slot 2]  publish your avatar (a folder:
+//                                                     avatar.glb, avatar-lod1.glb, avatar.json, *.glsl)
 //   npm run p0 -- submission <id>                     a review that answered 202
 
 import { readFile, readdir } from 'node:fs/promises';
@@ -93,6 +95,17 @@ const commands = {
     const zip = positional[0] || 'dist/experience.zip';
     form.append('package', await fileBlob(zip, 'application/zip'), basename(zip));
     return call(`/api/agent/lots/${LOT}/experience`, { method: 'POST', form });
+  },
+  // Every file of the avatar package, at the top level.
+  avatar: async () => {
+    const dir = positional[0] || 'avatar';
+    const form = new FormData();
+    for (const f of (await readdir(dir)).sort()) {
+      if (/^avatar(-lod1)?\.glb$|^avatar\.json$|\.(glsl|png|webp)$/.test(f)) form.append('file', await fileBlob(join(dir, f)), f);
+    }
+    const slot = flag('slot');
+    const path = args.includes('--validate') ? '/api/agent/avatar/validate' : `/api/agent/avatar${slot ? `?slot=${slot}` : ''}`;
+    return call(path, { method: 'POST', form });
   },
   submission: () => call(`/api/agent/submissions/${positional[0]}`),
 };
