@@ -20,7 +20,7 @@ import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { extname, join, normalize, resolve, relative } from 'node:path';
 import { makeSounds } from './make-sounds.mjs';
-import { CHARACTERS } from '../src/assets/manifest.js';
+import { CHARACTERS, PROPS } from '../src/assets/manifest.js';
 
 const root = resolve(new URL('..', import.meta.url).pathname);
 const dist = join(root, 'dist');
@@ -83,8 +83,12 @@ async function buildExperience() {
   if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com); creatures rigged and animated in code' });
   await writeFile(join(out, 'experience.json'), `${JSON.stringify({ ...EXPERIENCE, credits }, null, 2)}\n`);
   const a = await copyAssets(out);
-  // PNG textures inside the models as JPEG: half the download.
-  execFileSync('python3', [join(root, 'scripts/shrink-textures.py'), join(out, 'assets/models')], { stdio: 'inherit' });
+  // PNG textures inside the models as JPEG: half the download. Cave scenery,
+  // only ever seen by torchlight, also drops to 512 px textures; creatures,
+  // weapons and the things you walk up to keep 1024.
+  const close = new Set(['sword', 'axe', 'mace', 'potion', 'chest', 'gate', 'throne', 'statue']);
+  const small = Object.entries(PROPS).filter(([id, p]) => !close.has(id) && !p.lot).map(([, p]) => p.model.split('/').pop());
+  execFileSync('python3', [join(root, 'scripts/shrink-textures.py'), `--small=${small.join(',')}`, join(out, 'assets/models')], { stdio: 'inherit' });
   await rm(join(dist, 'experience.zip'), { force: true });
   execFileSync('zip', ['-qr', join(dist, 'experience.zip'), '.'], { cwd: out });
   const zipSize = (await stat(join(dist, 'experience.zip'))).size;

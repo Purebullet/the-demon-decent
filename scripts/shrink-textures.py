@@ -3,10 +3,12 @@
 # cuts a generated model to about half its size with no visible change in the
 # torchlit caves. Run on the package copies (dist/*/assets/models), never on
 # assets/models: `python3 scripts/shrink-textures.py dist/experience/assets/models`.
+# `--small=a.glb,b.glb` also halves those models' textures to 512 px: cave
+# scenery seen only by torchlight.
 import io, json, struct, sys, os
 from PIL import Image
 
-def shrink(path):
+def shrink(path, limit=None):
     data = open(path, 'rb').read()
     jlen = struct.unpack_from('<I', data, 12)[0]
     j = json.loads(data[20:20 + jlen])
@@ -19,6 +21,8 @@ def shrink(path):
         if im.get('mimeType') != 'image/png' or 'bufferView' not in im:
             continue
         img = Image.open(io.BytesIO(chunks[im['bufferView']]))
+        if limit and max(img.size) > limit:
+            img = img.resize((min(img.width, limit), min(img.height, limit)), Image.LANCZOS)
         if img.mode in ('RGBA', 'LA', 'P'):
             img = img.convert('RGBA')
             if img.getextrema()[3][0] < 255:
@@ -42,10 +46,17 @@ def shrink(path):
     open(path, 'wb').write(out)
     return len(data), len(out)
 
+small = set()
+dirs = []
+for arg in sys.argv[1:]:
+    if arg.startswith('--small='):
+        small.update(n for n in arg[8:].split(',') if n)
+    else:
+        dirs.append(arg)
 before = after = 0
-for d in sys.argv[1:]:
+for d in dirs:
     for f in sorted(os.listdir(d)):
         if f.endswith('.glb'):
-            a, b = shrink(os.path.join(d, f))
+            a, b = shrink(os.path.join(d, f), 512 if f in small else None)
             before += a; after += b
 print(f'{before/1e6:.1f} MB -> {after/1e6:.1f} MB')
