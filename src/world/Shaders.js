@@ -125,3 +125,71 @@ export function abyssMaterial() {
     { fog: false },
   );
 }
+
+// A living flame: a camera-facing quad (any orientation of the mesh) whose
+// teardrop shape is torn upward by scrolling noise, white-hot at the root,
+// orange, then red at the licking tips. Additive, no depth write. `uSeed`
+// keeps neighbouring flames out of step; `uIntensity` brightens or dims it.
+export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uIntensity: { value: intensity } },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        // Billboard: the quad's corners laid out in view space around its centre.
+        vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        vec2 scale = vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
+        gl_Position = projectionMatrix * (centre + vec4(position.xy * scale, 0.0, 0.0));
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uSeed;
+      uniform float uIntensity;
+      varying vec2 vUv;
+      ${NOISE}
+      void main() {
+        vec2 uv = vUv;
+        float t = uTime * 1.6 + uSeed * 17.0;
+        // Noise scrolling upward bends and tears the flame.
+        float n = fbm(vec2(uv.x * 3.5, uv.y * 2.4 - t * 1.9));
+        float n2 = fbm(vec2(uv.x * 7.0 + 3.1, uv.y * 4.0 - t * 3.1));
+        float sway = (n - 0.5) * 0.35 * uv.y;
+        vec2 p = vec2((uv.x - 0.5 - sway) * 2.0, uv.y);
+        // Teardrop: wide and round at the root, pinched to a point at the top.
+        float width = mix(0.62, 0.02, pow(uv.y, 0.9)) * (0.8 + 0.4 * n2);
+        float body = 1.0 - smoothstep(width * 0.55, width, abs(p.x));
+        body *= smoothstep(0.0, 0.12, uv.y) * (1.0 - smoothstep(0.55 + 0.3 * n, 1.0, uv.y));
+        float heat = body * (1.15 - uv.y) * (0.75 + 0.5 * n2);
+        vec3 col = mix(vec3(0.7, 0.06, 0.0), vec3(1.0, 0.42, 0.05), smoothstep(0.1, 0.5, heat));
+        col = mix(col, vec3(1.0, 0.86, 0.55), smoothstep(0.55, 0.95, heat));
+        float a = clamp(heat * 1.6, 0.0, 1.0) * uIntensity;
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  });
+}
+
+// A flame object: two crossed noise flames (one smaller, hotter, inside the
+// other). Update `flame.userData.tick(time)` each frame.
+export function makeFlame({ height = 0.6, seed = Math.random() * 10, intensity = 1 } = {}) {
+  const g = new THREE.Group();
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed, intensity }));
+  outer.scale.set(height * 0.62, height, 1);
+  outer.position.y = height * 0.42;
+  const inner = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed: seed + 3.3, intensity: intensity * 0.9 }));
+  inner.scale.set(height * 0.4, height * 0.7, 1);
+  inner.position.y = height * 0.3;
+  for (const m of [outer, inner]) {
+    m.frustumCulled = false;
+    m.renderOrder = 5;
+    g.add(m);
+  }
+  g.userData.tick = (t) => {
+    outer.material.uniforms.uTime.value = t;
+    inner.material.uniforms.uTime.value = t;
+  };
+  return g;
+}

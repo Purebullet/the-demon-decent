@@ -140,7 +140,7 @@ const LOOK =
   'stylized dark fantasy game asset, hand-painted painterly textures like a sculpted fantasy creature, chunky exaggerated shapes, soft sculpted forms, muted charcoal, deep purple and dark crimson tones, single object, no ground, no base plate';
 
 export const PROPS = {
-  sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
+  sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, guard: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
   axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
   mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
   potion: { model: 'assets/models/potion.glb', size: 0.36, maxTris: 1500, prompt: `Small round glass potion flask filled with glowing blood-red liquid, cork stopper, leather cord, ${LOOK}` },

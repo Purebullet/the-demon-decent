@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { rockTextures, fogPuffTexture, textTexture, emberVeinTexture, softDotTexture, makeCanvas } from './Textures.js';
-import { abyssMaterial } from './Shaders.js';
+import { makeFlame, abyssMaterial } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
@@ -12,6 +12,8 @@ import { Assets } from '../assets/AssetLibrary.js';
 
 export const PIT_RADIUS = 7;
 const FALL_RADIUS = 5.6;
+// The fall: a cavern shaft below the funnel, deep enough for five seconds.
+export const SHAFT_BOTTOM = 230;
 const LOT_RADIUS = 34;
 
 export class Surface {
@@ -141,7 +143,7 @@ export class Surface {
   _pit() {
     // Funnel walls dropping into the glow.
     const depth = 46;
-    const g = new THREE.CylinderGeometry(PIT_RADIUS + 0.2, 2.6, depth, 96, 40, true);
+    const g = new THREE.CylinderGeometry(PIT_RADIUS + 0.2, 5.2, depth, 96, 40, true);
     const p = g.attributes.position;
     const v = new THREE.Vector3();
     for (let i = 0; i < p.count; i++) {
@@ -159,32 +161,42 @@ export class Surface {
     const lg = ctx.createLinearGradient(0, 0, 0, 256);
     lg.addColorStop(0, '#000000');
     lg.addColorStop(0.35, '#200400');
-    lg.addColorStop(0.75, '#a02800');
-    lg.addColorStop(1, '#ffb040');
+    lg.addColorStop(0.75, '#5a1600');
+    lg.addColorStop(1, '#a03008');
     ctx.fillStyle = lg;
     ctx.fillRect(0, 0, 4, 256);
     const gradTex = new THREE.CanvasTexture(grad);
     gradTex.colorSpace = THREE.SRGBColorSpace;
+    // The rock texture tiles around and down the shaft (one copy stretched
+    // over 46 m read as vertical metal ribs).
+    const wallMap = this.stoneTex.map.clone();
+    wallMap.repeat.set(10, 9);
+    wallMap.needsUpdate = true;
     const wall = new THREE.Mesh(
       g,
-      new THREE.MeshStandardMaterial({ map: this.stoneTex.map, color: 0x3a3030, roughness: 0.95, side: THREE.BackSide, emissive: 0xffffff, emissiveMap: gradTex }),
+      new THREE.MeshStandardMaterial({ map: wallMap, color: 0x3a3030, roughness: 1, metalness: 0, side: THREE.BackSide, emissive: 0xffffff, emissiveMap: gradTex }),
     );
     wall.position.y = -depth / 2 + 0.2;
     this.group.add(wall);
 
     // Big soft glows inside the hole read as heat haze from any angle and are
     // hidden by the funnel walls everywhere else.
+    // (Seen from above only: hidden once you fall in, see falling().)
+    this.topGlows = [];
     for (const [y, size, op] of [[-5, 15, 0.55], [-16, 11, 0.7], [-30, 8, 0.9]]) {
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: 0xff4a12, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
       glow.position.y = y;
       glow.scale.set(size, size, 1);
       this.group.add(glow);
+      this.topGlows.push(glow);
     }
 
+    this._shaft(depth);
+
     this.abyssMat = abyssMaterial();
-    const abyss = new THREE.Mesh(new THREE.CircleGeometry(3.4, 48), this.abyssMat);
+    const abyss = new THREE.Mesh(new THREE.CircleGeometry(9, 48), this.abyssMat);
     abyss.rotation.x = -Math.PI / 2;
-    abyss.position.y = -depth + 0.5;
+    abyss.position.y = -SHAFT_BOTTOM + 0.5;
     this.group.add(abyss);
 
     // Fake volumetric shaft of heat light rising out of the hole.
@@ -200,7 +212,7 @@ export class Surface {
         void main(){
           float rim = pow(1.0 - abs(dot(vN, vV)), 1.5);
           float fade = smoothstep(1.0, 0.25, vUv.y) * smoothstep(0.0, 0.15, vUv.y);
-          float flick = 0.8 + 0.2 * sin(vUv.y * 20.0 - uTime * 3.0 + vUv.x * 30.0);
+          float flick = 0.85 + 0.15 * sin(vUv.y * 9.0 - uTime * 2.0);
           vec3 c = vec3(1.0, 0.28, 0.05) * (1.0 - rim) * fade * flick * 0.22 * uPulse;
           gl_FragColor = vec4(c, 1.0);
         }`,
@@ -209,6 +221,65 @@ export class Surface {
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 3.0, 30, 32, 1, true), shaftMat);
     shaft.position.y = -15.5;
     this.group.add(shaft);
+    this.topGlows.push(shaft);
+  }
+
+  // Below the funnel the hole opens into a cavern shaft: ragged rock walls
+  // that widen and pinch, ledges of rock jutting in, seams of lava glowing
+  // through the walls, and the furnace light far below.
+  _shaft(top) {
+    const depth = SHAFT_BOTTOM - top + 4;
+    const g = new THREE.CylinderGeometry(1, 1, depth, 64, 90, true);
+    const p = g.attributes.position;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const a = Math.atan2(v.z, v.x);
+      const y = v.y;
+      const n = fbm2(a * 2.2 + 11, y * 0.06, 4, 21);
+      const n2 = fbm2(a * 6 + 3, y * 0.2, 3, 23);
+      // Chambers and throats: the radius breathes with depth.
+      const r = 5.5 + 3.5 * Math.sin(y * 0.045 + 1.3) + (n - 0.5) * 6 + (n2 - 0.5) * 1.6;
+      p.setXYZ(i, Math.cos(a) * r, y, Math.sin(a) * r);
+    }
+    g.computeVertexNormals();
+    const map = this.stoneTex.map.clone();
+    map.repeat.set(8, 40);
+    map.needsUpdate = true;
+    const veins = emberVeinTexture(41, [255, 80, 20], 10).clone();
+    veins.repeat.set(5, 22);
+    veins.needsUpdate = true;
+    const wall = new THREE.Mesh(
+      g,
+      new THREE.MeshStandardMaterial({ map, color: 0x4a3a36, roughness: 1, metalness: 0, side: THREE.BackSide, emissive: 0xffffff, emissiveMap: veins, emissiveIntensity: 0.85 }),
+    );
+    wall.position.y = -top - depth / 2 + 2;
+    this.group.add(wall);
+    // Rock ledges jutting into the shaft, to rush past.
+    const r = this.rand;
+    const rock = new THREE.IcosahedronGeometry(1, 1);
+    const rockMat = new THREE.MeshStandardMaterial({ map: this.stoneTex.map, color: 0x3a2e2a, roughness: 1 });
+    const n = 26;
+    const ledges = new THREE.InstancedMesh(rock, rockMat, n);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    for (let i = 0; i < n; i++) {
+      const y = -top - 8 - (i / n) * (SHAFT_BOTTOM - top - 20);
+      const a = r() * Math.PI * 2;
+      const rad = 4.5 + r() * 2.5;
+      q.setFromEuler(new THREE.Euler(r() * 3, r() * 3, r() * 3));
+      m.compose(new THREE.Vector3(Math.cos(a) * rad, y, Math.sin(a) * rad), q, new THREE.Vector3(1.5 + r() * 2, 0.8 + r(), 1.5 + r() * 2));
+      ledges.setMatrixAt(i, m);
+    }
+    ledges.instanceMatrix.needsUpdate = true;
+    this.group.add(ledges);
+    // Pools of furnace light down the shaft.
+    for (let i = 0; i < 6; i++) {
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: 0xff3a0a, transparent: true, opacity: 0.12 + i * 0.03, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      glow.position.y = -top - 25 - i * ((SHAFT_BOTTOM - top - 30) / 6);
+      glow.scale.set(6, 6, 1);
+      this.group.add(glow);
+    }
   }
 
   _rimShards() {
@@ -416,7 +487,13 @@ export class Surface {
       } else this.group.add(bowl, stand);
       this.circles.push({ x: s * 4.6, z: z - 1, r: 0.5 });
       this.braziers = this.braziers || [];
-      this.braziers.push(new THREE.Vector3(s * 4.6, bowl.position.y + 0.15, z - 1));
+      const coals = new THREE.Vector3(s * 4.6, (gen ? 1.08 : 1.42) + this.heightAt(s * 4.6, z - 1), z - 1);
+      this.braziers.push(coals);
+      const flame = makeFlame({ height: 1.25, seed: s + 4 });
+      flame.position.copy(coals);
+      this.group.add(flame);
+      this.flames = this.flames || [];
+      this.flames.push(flame);
     }
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.9, 1.4), this.darkStone);
     lintel.position.set(-0.3, 6.6 + this.heightAt(0, z), z);
@@ -494,6 +571,14 @@ export class Surface {
     this.group.add(this.hemi, this.moon, this.pitLight, this.pitLight2, ...this.braziersLights);
   }
 
+  // Inside the hole the glows meant to be seen from above would fill the
+  // screen: turn them off for the fall, and light the shaft from below.
+  falling(on) {
+    for (const g of this.topGlows) g.visible = !on;
+    this.pitLight.position.y = on ? -SHAFT_BOTTOM + 20 : -2.5;
+    this.pitLight.distance = on ? 120 : 26;
+  }
+
   inPit(pos) {
     return Math.hypot(pos.x, pos.z) < FALL_RADIUS;
   }
@@ -552,7 +637,12 @@ export class Surface {
         turbulence: 2.5,
       });
     }
-    for (const b of this.braziers) if (Math.random() < dt * 30) spawnFlame(add, b, { size: 0.5, rise: 2, spread: 0.4, life: 0.8 });
+    for (const f of this.flames || []) f.userData.tick(this.time ?? performance.now() / 1000);
+    // Sparks and a little smoke over the flames.
+    for (const b of this.braziers) {
+      if (Math.random() < dt * 9) add.emit({ x: b.x + (Math.random() - 0.5) * 0.4, y: b.y + 0.5, z: b.z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.6, vy: 1.8 + Math.random() * 1.8, vz: (Math.random() - 0.5) * 0.6, life: 1.2 + Math.random(), size: 0.05, sizeEnd: 0.01, color: C.emberHot, colorEnd: C.emberRed, drag: 0.4, turbulence: 2.5 });
+      if (Math.random() < dt * 4) fx.alpha.emit({ x: b.x, y: b.y + 1.3, z: b.z, vy: 0.8, life: 2.5, size: 0.5, sizeEnd: 1.4, color: C.smoke, colorEnd: C.smoke, alpha: 0.35, drag: 0.2, turbulence: 0.6 });
+    }
     // Ash drifting down across the lot.
     if (Math.random() < dt * 20) {
       fx.alpha.emit({ x: (Math.random() - 0.5) * 50, y: 12, z: (Math.random() - 0.5) * 50, vx: 0.4, vy: -0.6, life: 14, size: 0.08, color: C.smoke, colorEnd: C.smoke, alpha: 0.8, drag: 0, turbulence: 0.6 });

@@ -64,15 +64,18 @@ for (const [name, l] of Object.entries(lods)) {
   if (!inside(s)) process.exitCode = 1;
 }
 
-// Live build: the pit and vortex pulse with hellfire, cracks glow near the
-// lip, the vortex and the embers turn on the world clock.
-const { rc, hm } = lods.lod0.dims;
+// Live build: the pit pulses with hellfire, cracks glow near the lip, fog
+// billows up out of the hole and lava spits out of it onto the slopes, all
+// on the world clock so every viewer sees the same.
+const { rc, rb, hm } = lods.lod0.dims;
+const edge = Math.min(width, depth) / 2 - 0.5;
 await writeFile(
   join(out, 'lot.json'),
   `${JSON.stringify(
     {
       materials: {
         Glow: { surface: 'glow.glsl', glow: 2 },
+        Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: 'fog-common.glsl', transparent: true, doubleSided: false, glow: 0.4, uniforms: { rise: +(height * 0.75).toFixed(2), spread: +(rc * 0.9).toFixed(2) } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
       },
       script: 'build.js',
@@ -80,6 +83,50 @@ await writeFile(
     null,
     2,
   )}\n`,
+);
+await writeFile(
+  join(out, 'fog-common.glsl'),
+  `// Shared by the fog's two stages: where a puff is in its slow climb (0 just
+// out of the pit, 1 dissolved high above it). uv.x is the puff's phase.
+float fogAge(vec2 uv) {
+  return fract(p0Time * 0.045 + uv.x);
+}
+float fogHash(vec3 p) {
+  return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+`,
+);
+await writeFile(
+  join(out, 'fog-vertex.glsl'),
+  `// Each puff climbs out of the pit, drifts outward and swells as it rises,
+// its surface churning so it reads as billowing smoke, not a ball.
+vec3 p0Vertex(vec3 position, vec3 normal, vec2 uv) {
+  float k = fogAge(uv);
+  vec3 centre = position - normal * uv.y;
+  vec2 out2 = length(centre.xz) > 0.01 ? normalize(centre.xz) : vec2(1.0, 0.0);
+  centre.xz += out2 * spread * k * k;
+  centre.y += rise * k;
+  float churn = 0.75 + 0.35 * sin(p0Time * 0.9 + dot(normal, vec3(5.1, 3.7, 4.3)) + uv.x * 40.0);
+  float size = uv.y * (0.55 + 2.6 * k) * churn;
+  return centre + normal * size;
+}
+`,
+);
+await writeFile(
+  join(out, 'fog.glsl'),
+  `// Dark smoke lit red from below, soft at its edges, thickest just out of
+// the pit and thinning to nothing as it climbs.
+void p0Surface(inout P0Surface s) {
+  float k = fogAge(s.uv);
+  float facing = max(dot(s.normal, s.view), 0.0);
+  float edge = smoothstep(0.0, 0.6, facing);
+  float life = smoothstep(0.0, 0.08, k) * (1.0 - smoothstep(0.45, 1.0, k));
+  s.alpha = 0.62 * edge * life;
+  s.color = vec3(0.07, 0.055, 0.06);
+  float under = pow(1.0 - k, 3.0) * (0.5 + 0.5 * max(-s.normal.y, 0.0));
+  s.emissive = vec3(1.0, 0.22, 0.04) * under * (0.55 + 0.25 * sin(p0Time * 1.4));
+}
+`,
 );
 await writeFile(
   join(out, 'glow.glsl'),
@@ -119,11 +166,57 @@ void p0Surface(inout P0Surface s) {
 );
 await writeFile(
   join(out, 'build.js'),
-  `// The hellfire vortex turns and the embers circle it, the same for every viewer.
+  `// Now and then the pit spits a gob of lava: it arcs out of the hole, lands
+// on the slope around it, cools and sinks away. Throws come from the world
+// clock and a hash of the throw number, so every viewer sees the same ones.
+const LAVA = 6
+const PERIOD = 2.6
+const FLIGHT = 1.7
+const COOL = 2.2
+const PIT = ${rb.toFixed(2)}
+const LIP = ${rc.toFixed(2)}
+const MOUND = ${hm.toFixed(2)}
+const EDGE = ${edge.toFixed(2)}
+const hash = (n) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453
+  return x - Math.floor(x)
+}
+// Height of the slope at distance r from the middle (the mound's profile).
+const ground = (r) => {
+  if (r <= LIP) return MOUND
+  const k = Math.min(1, (r - LIP) / Math.max(0.1, EDGE - LIP))
+  return MOUND * Math.pow(1 - k, 1.6) + 0.1
+}
 export default function build(b) {
   b.loop((dt, t) => {
-    b.node('Vortex', { rotation: [0, t * 0.6, 0] })
-    b.node('Embers', { rotation: [0, -t * 0.25, 0] })
+    for (let i = 0; i < LAVA; i++) {
+      // Gob i flies on throws i, i + LAVA, ...; a throw starts every PERIOD s.
+      const slot = Math.floor((t / PERIOD - i) / LAVA)
+      const n = slot * LAVA + i
+      const start = n * PERIOD
+      const age = t - start
+      const skip = hash(n * 3.1) < 0.35
+      if (skip || age < 0 || age > FLIGHT + COOL) {
+        b.node('Lava' + i, { scale: [0.001, 0.001, 0.001] })
+        continue
+      }
+      const a = hash(n) * Math.PI * 2
+      const from = [Math.cos(a) * PIT * 0.4, 0.4, Math.sin(a) * PIT * 0.4]
+      const dist = LIP * (1.05 + hash(n + 7.7) * 0.6)
+      const to = [Math.cos(a) * dist, ground(dist), Math.sin(a) * dist]
+      const peak = Math.max(to[1], 0) + 5 + hash(n + 2.2) * 6
+      if (age <= FLIGHT) {
+        const k = age / FLIGHT
+        const y = from[1] + (to[1] - from[1]) * k + 4 * (peak - Math.max(from[1], to[1])) * k * (1 - k)
+        const s = 1 + 0.25 * Math.sin(age * 18)
+        b.node('Lava' + i, { position: [from[0] + (to[0] - from[0]) * k, y, from[2] + (to[2] - from[2]) * k], scale: [s, s * 1.3, s] })
+      } else {
+        // Landed: splats flat, then cools and sinks.
+        const c = (age - FLIGHT) / COOL
+        const w = 1.6 * (1 - c * 0.6)
+        b.node('Lava' + i, { position: [to[0], to[1] - c * 0.3, to[2]], scale: [w, 0.35 * (1 - c), w] })
+      }
+    }
   })
 }
 `,
@@ -133,7 +226,7 @@ await writeFile(
   `${JSON.stringify(
     {
       name: 'The Demon Descent',
-      description: 'A hell-mouth torn open in the city. Enter and fight down twenty floors of caverns: ghouls, chain fiends, flame-horned brutes and two demon lords. One life; your deepest floor goes on the weekly table.',
+      description: 'A hell-mouth torn open in the city. Enter and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and two demon lords. One life; your deepest floor goes on the weekly table.',
     },
     null,
     2,

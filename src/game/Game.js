@@ -3,7 +3,7 @@ import { Input } from '../core/Input.js';
 import { Audio } from '../core/Audio.js';
 import { StateMachine } from '../core/StateMachine.js';
 import { ParticleSystem } from '../world/Particles.js';
-import { Surface } from '../world/Surface.js';
+import { Surface, SHAFT_BOTTOM } from '../world/Surface.js';
 import { Sanctum } from '../world/Sanctum.js';
 import { Level } from '../world/Level.js';
 import { FLOORS, FLOOR_COUNT } from '../world/LevelData.js';
@@ -39,8 +39,21 @@ export class Game {
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.2;
     this.renderer = r;
-    this.pixelRatio = Math.min(host.pixelRatio || 1, 1, 1280 / Math.max(1, host.width));
-    r.setPixelRatio(this.pixelRatio);
+    // The canvas runs at the screen's own resolution, so the interface is
+    // sharp. The 3D view renders into a target at `sceneScale` of that (about
+    // 1280 px wide, less on slow machines) and is upscaled underneath it.
+    // Every clear is opaque black: Project 0's canvas is transparent, and a
+    // see-through frame would show the city behind the game.
+    r.setClearColor(0x000000, 1);
+    this.uiRatio = Math.min(host.pixelRatio || 1, 2);
+    r.setPixelRatio(this.uiRatio);
+    this.sceneScale = Math.min(1, 1280 / Math.max(1, host.width * this.uiRatio));
+    this.sceneTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
+    this.blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.blitScene = new THREE.Scene();
+    const blit = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.sceneTarget.texture, depthTest: false, depthWrite: false }));
+    blit.frustumCulled = false;
+    this.blitScene.add(blit);
     this.slow = 0;
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300);
@@ -121,7 +134,9 @@ export class Game {
       c.aspect = w / h;
       c.updateProjectionMatrix();
     }
-    const ph = h * this.renderer.getPixelRatio();
+    const k = this.uiRatio * this.sceneScale;
+    this.sceneTarget.setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    const ph = h * k;
     this.fx.add.setViewport(ph, this.camera.fov);
     this.fx.alpha.setViewport(ph, this.camera.fov);
     this.hud.resize(w, h);
@@ -169,9 +184,14 @@ export class Game {
       }
     }
     for (const [o, scene, cam] of jobs) {
+      // The world draws into the scene target (a different shader variant
+      // from drawing to the screen); the interface draws to the screen.
+      r.setRenderTarget(scene === this.hud.scene ? null : this.sceneTarget);
       this._drawAlone(r, o, scene, cam);
+      r.setRenderTarget(null);
       await nextFrame();
     }
+    this._drawAlone(r, this.blitScene.children[0], this.blitScene, this.blitCamera);
     for (const o of staged) o.removeFromParent();
     this.compiling = false;
     this.host.log(`[t] warm-up: ${jobs.length} programs in ${Math.round(performance.now() - t0)} ms`);
@@ -325,6 +345,7 @@ export class Game {
 
   _surfaceScene() {
     if (!this.surface) this.surface = new Surface();
+    this.surface.falling(false);
     const s = this._newScene({ fog: 0x0d0606, density: 0.022, background: 0x050203 });
     s.add(this.surface.group);
     this.surface.setScores({ best: this.best, last: this.lastFloor, top: this.table[0] || null });
@@ -390,12 +411,20 @@ export class Game {
     const ctx = this.ctx;
     ctx.time = this.time;
     if (this.falling > 0) {
-      // Over the edge: no control, just the drop.
+      // Over the edge: five seconds of free fall down the cavern shaft, drawn
+      // to its middle, spinning slowly, then the fade into floor 1.
       this.falling += dt;
-      p.position.y -= dt * (4 + this.falling * 14);
-      p.pitch = Math.max(-1.2, p.pitch - dt * 1.2);
+      const fall = this.falling;
+      p.position.y = Math.max(-SHAFT_BOTTOM + 6, p.position.y - dt * (5 + fall * 13));
+      p.position.x += (0 - p.position.x) * Math.min(1, dt * 1.2);
+      p.position.z += (0 - p.position.z) * Math.min(1, dt * 1.2);
+      p.pitch = Math.max(-1.05, p.pitch - dt * 0.9);
+      p.yaw += dt * 0.35;
+      p.shake?.(0.04);
       p.update(dt, { ...ctx, combat: false, input: FROZEN_INPUT });
       this.surface.update(dt, this.fx);
+      this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
+      if (fall > 4.5 && !this.busy) this.goto('floor', { floor: 1 });
       return;
     }
     p.update(dt, ctx);
@@ -404,8 +433,10 @@ export class Game {
     this.surface.update(dt, this.fx);
     if (this.surface.inPit(p.position) && !this.busy) {
       this.falling = 0.001;
+      this.surface.falling(true);
+      this.hud.announcement = null;
+      this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
       this.audio.portal();
-      this.goto('floor', { floor: 1 });
     }
     this.hud.update(dt, p, this.run, {
       floorLabel: `${this.lotLabel} — The Surface`,
@@ -770,9 +801,9 @@ export class Game {
   _adaptQuality(rawDt) {
     if (rawDt > 0.065) this.slow++;
     else this.slow = Math.max(0, this.slow - 0.25);
-    if ((this.slow > 4 || rawDt > 0.25) && this.pixelRatio > 0.5) {
-      this.pixelRatio = Math.max(0.5, this.pixelRatio * 0.75);
-      this.renderer.setPixelRatio(this.pixelRatio);
+    if ((this.slow > 4 || rawDt > 0.25) && this.sceneScale * this.uiRatio > 0.5) {
+      // Only the 3D view loses resolution; the interface stays sharp.
+      this.sceneScale *= 0.75;
       this.slow = 0;
       this._resize();
     }
@@ -801,9 +832,11 @@ export class Game {
       }
       rc.updateMatrixWorld();
     }
+    r.setClearColor(0x000000, 1);
     r.autoClear = true;
     if (this.compiling) {
       // Behind the black fade: draw only the HUD while shaders compile.
+      r.setRenderTarget(null);
       r.clear();
       r.autoClear = false;
       this.hud.render(r, dt);
@@ -814,6 +847,7 @@ export class Game {
       }
       return;
     }
+    r.setRenderTarget(this.sceneTarget);
     r.render(this.scene, rc);
     if (this.viewRoot.visible && this.run && !this.player.dead) {
       this.viewRoot.position.copy(rc.position);
@@ -826,6 +860,9 @@ export class Game {
       r.clearDepth();
       r.render(this.viewScene, this.viewCamera);
     }
+    r.setRenderTarget(null);
+    r.autoClear = true;
+    r.render(this.blitScene, this.blitCamera);
     r.autoClear = false;
     this.hud.render(r, dt);
     r.autoClear = true;

@@ -3,7 +3,7 @@ import { TILE } from './LevelData.js';
 import { parseLevel } from './levelParser.js';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { runeCircleTexture } from './Textures.js';
-import { lavaMaterial, portalMaterial } from './Shaders.js';
+import { lavaMaterial, portalMaterial, makeFlame } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
@@ -102,8 +102,11 @@ export class Level {
         g.add(leg);
       }
       this.group.add(g);
-      const anchor = new THREE.Vector3(b.x, 1.3, b.z);
-      this.braziers.push({ pos: anchor });
+      const anchor = new THREE.Vector3(b.x, generated ? 1.08 : 1.25, b.z);
+      const flame = makeFlame({ height: 1.25, seed: i * 1.7 });
+      flame.position.copy(anchor);
+      this.group.add(flame);
+      this.braziers.push({ pos: anchor, flame });
       if (i < this.maxBrazierLights) {
         const l = new THREE.PointLight(flame, 18, 14, 1.6);
         l.position.set(b.x, 2.2, b.z);
@@ -250,7 +253,8 @@ export class Level {
     }
     const ps = ctx.fx.add;
     for (const b of this.braziers) {
-      if (Math.random() < dt * 30) spawnFlame(ps, b.pos, { size: 0.55, rise: 2, spread: 0.5, life: 0.8 });
+      b.flame.userData.tick(t);
+      if (Math.random() < dt * 8) ps.emit({ x: b.pos.x + (Math.random() - 0.5) * 0.4, y: b.pos.y + 0.5, z: b.pos.z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.6, vy: 1.8 + Math.random() * 1.8, vz: (Math.random() - 0.5) * 0.6, life: 1.2 + Math.random(), size: 0.05, sizeEnd: 0.01, color: C.emberHot, colorEnd: C.emberRed, drag: 0.4, turbulence: 2.5 });
     }
     if (this.exitOpen && Math.random() < dt * 25) {
       const x = this.data.exit;

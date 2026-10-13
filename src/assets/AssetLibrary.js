@@ -220,6 +220,9 @@ export const Assets = {
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
           m.metalnessMap = null;
           m.metalness = 0;
+          // Their roughness maps are glossy for a studio: stone reads as wet metal.
+          m.roughnessMap = null;
+          m.roughness = 0.95;
           m.needsUpdate = true;
         }
       });
@@ -233,7 +236,7 @@ export const Assets = {
       if (size.x >= size.y && size.x >= size.z) scene.rotation.z = Math.PI / 2;
       else if (size.z >= size.y && size.z >= size.x) scene.rotation.x = -Math.PI / 2;
       box = boundsOf(holder);
-      if (thinnerEndIsTop(holder, box)) {
+      if (headIsDown(holder, box, entry.guard)) {
         scene.rotation.z += Math.PI;
         box = boundsOf(holder);
       }
@@ -326,24 +329,26 @@ function missingCharacter(id, rootScale) {
   return { inner, model, clips: {}, entry, height: H / rootScale };
 }
 
-// Compare the spread of vertices near the top and bottom of an upright
-// weapon: the blade or head is the wider end.
-function thinnerEndIsTop(holder, box) {
+// Which end of an upright weapon is the head? An axe or a mace is widest at
+// its head; a sword is widest at its cross-guard, which sits next to the grip,
+// so its blade is the end farther from the widest point (`guard`).
+function headIsDown(holder, box, guard) {
   const h = box.max.y - box.min.y;
-  let top = 0;
-  let bottom = 0;
+  const bins = new Float32Array(20);
   const v = new THREE.Vector3();
   holder.updateMatrixWorld(true);
   holder.traverse((o) => {
     if (!o.isMesh) return;
     const pos = o.geometry.attributes.position;
-    const step = Math.max(1, Math.floor(pos.count / 4000));
+    const step = Math.max(1, Math.floor(pos.count / 6000));
     for (let i = 0; i < pos.count; i += step) {
       v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
-      const r = Math.hypot(v.x, v.z);
-      if (v.y > box.max.y - h * 0.2) top = Math.max(top, r);
-      else if (v.y < box.min.y + h * 0.2) bottom = Math.max(bottom, r);
+      const b = Math.min(19, Math.floor(((v.y - box.min.y) / h) * 20));
+      bins[b] = Math.max(bins[b], Math.hypot(v.x, v.z));
     }
   });
-  return top < bottom;
+  let widest = 0;
+  for (let b = 1; b < 20; b++) if (bins[b] > bins[widest]) widest = b;
+  const widestHigh = widest >= 10;
+  return guard ? widestHigh : !widestHigh;
 }

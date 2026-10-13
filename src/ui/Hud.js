@@ -95,8 +95,8 @@ export class Hud {
   resize(w, h) {
     this.w = Math.max(1, w);
     this.h = Math.max(1, h);
-    // Paint at most ~1400 px wide; the quad stretches it to the screen.
-    this.scale = Math.min(Math.max(1, this.host.pixelRatio || 1), 1400 / this.w);
+    // Painted at the screen's own resolution (up to 2x), so text is crisp.
+    this.scale = Math.min(Math.max(1, this.host.pixelRatio || 1), 2);
     this.canvas.width = Math.round(this.w * this.scale);
     this.canvas.height = Math.round(this.h * this.scale);
     this.texture.dispose();

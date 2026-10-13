@@ -5,6 +5,7 @@ import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion 
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
 import { softDotTexture } from '../world/Textures.js';
+import { makeFlame } from '../world/Shaders.js';
 import { clamp } from '../core/rng.js';
 
 // First-person demon hunter. WASD + mouse look, left click to swing, Space or
@@ -72,17 +73,15 @@ export class Player {
     const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.9 }));
     const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.1, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
     wrap.position.y = 0.24;
-    // Soft additive sprites read as flame; solid cones read as plastic.
-    const sprite = (color, opacity) => new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }));
-    const flame = sprite(0xff6a18, 0.9);
-    flame.position.y = 0.38;
-    flame.scale.set(0.16, 0.26, 1);
-    const core = sprite(0xffd890, 1);
-    core.position.y = 0.34;
-    core.scale.set(0.08, 0.12, 1);
-    g.add(stick, wrap, flame, core);
+    // A living noise flame on the rag wrap, a soft glow around it.
+    const flame = makeFlame({ height: 0.34, seed: 1.7, intensity: 1.15 });
+    flame.position.y = 0.26;
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: 0xff7a24, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.position.y = 0.4;
+    glow.scale.set(0.42, 0.5, 1);
+    g.add(stick, wrap, flame, glow);
     this.flame = flame;
-    this.flameCore = core;
+    this.flameGlow = glow;
     return g;
   }
 
@@ -394,8 +393,8 @@ export class Player {
   _updateTorch(dt, ctx) {
     const t = performance.now() * 0.001;
     const f = 0.85 + Math.sin(t * 13) * 0.08 + Math.sin(t * 7.3) * 0.07;
-    this.flame.scale.set(0.16 * (2 - f), 0.26 * f, 1);
-    this.flameCore.scale.set(0.08, 0.12 * (1.1 - (f - 0.85)), 1);
+    this.flame.userData.tick(t);
+    this.flameGlow.material.opacity = 0.25 + (f - 0.7) * 0.5;
     this.torch.position.y = -0.56 + Math.sin(this.bobT * 2 + 1) * 0.012;
     // World light rides with the torch.
     this.torch.getWorldPosition(_v);

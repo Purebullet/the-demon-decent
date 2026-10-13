@@ -7,11 +7,11 @@ import { mulberry32, fbm2 } from '../core/rng.js';
 // The lot's street view: a hell-mouth diorama that stays inside the lot's
 // box (origin at the middle of the floor, metres, +Y up). A volcanic mound
 // torn open by a glowing pit, a ring of broken teeth leaning over it, ruined
-// columns, and a slow vortex of hellfire rising from the hole with embers
-// circling it. The game itself lives inside, as an experience.
+// columns, billows of fog boiling up out of the hole, and gobs of lava it
+// spits out now and then onto the slopes around it. The game itself lives inside, as an experience.
 //
 // Three levels of detail, as Project 0 asks (skill.md section 3):
-//   LOD0  materials Rock, Ruin, Glow; nodes Vortex and Embers turn (lot.json)
+//   LOD0  materials Rock, Ruin, Glow, Smoke; the Fog shader and the Lava nodes move (lot.json)
 //   LOD1  the same shapes, simplified and static; materials Rock and Glow
 //   LOD2  one mesh, one material, one 256 px texture
 
@@ -148,37 +148,32 @@ function columns(dims, count, rnd, detail) {
   return list;
 }
 
-// Twin ribbons of fire spiralling up out of the pit.
-function vortex(dims, height, { turns, tubular, radial }) {
+// Billows of fog boiling up out of the pit: puffs (spheres) that the Smoke
+// shader lifts, swells and fades on a loop, each on its own phase. Every
+// vertex carries its puff's phase in uv.x and the puff's radius in uv.y; the
+// shader finds the puff's centre as position - normal * radius.
+function fogPuffs(dims, count, rnd, detail) {
   const list = [];
-  const top = height * 0.88;
-  for (let s = 0; s < 2; s++) {
-    const pts = [];
-    for (let i = 0; i <= 64; i++) {
-      const k = i / 64;
-      const a = k * turns * TAU + s * Math.PI;
-      const r = dims.rb * (0.85 - 0.6 * k) + 0.05;
-      pts.push(new THREE.Vector3(Math.cos(a) * r, 0.3 + k * (top - 0.3), Math.sin(a) * r));
+  for (let i = 0; i < count; i++) {
+    const a = rnd() * TAU;
+    const r0 = dims.rb * Math.sqrt(rnd()) * 0.9;
+    const rad = dims.S * (0.05 + rnd() * 0.05);
+    const g = new THREE.IcosahedronGeometry(rad, detail);
+    g.translate(Math.cos(a) * r0, rad + 0.3 + rnd() * 0.6, Math.sin(a) * r0);
+    const phase = i / count + rnd() * 0.05;
+    const uv = new Float32Array(g.attributes.position.count * 2);
+    for (let k = 0; k < uv.length; k += 2) {
+      uv[k] = phase % 1;
+      uv[k + 1] = rad;
     }
-    const curve = new THREE.CatmullRomCurve3(pts);
-    const g = new THREE.TubeGeometry(curve, tubular, dims.S * 0.012 + 0.02, radial, false);
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     list.push(g);
   }
   return list;
 }
 
-function embers(dims, height, count, rnd) {
-  const list = [];
-  const oct = new THREE.OctahedronGeometry(1, 0);
-  for (let i = 0; i < count; i++) {
-    const a = rnd() * TAU;
-    const r = dims.rb * (0.6 + rnd() * 1.6);
-    const y = dims.hm * 0.6 + rnd() * (height * 0.8 - dims.hm * 0.6);
-    const s = dims.S * (0.008 + rnd() * 0.01);
-    list.push(placed(oct, { pos: [Math.cos(a) * r, y, Math.sin(a) * r], rot: [rnd() * 3, rnd() * 3, 0], scale: [s, s * 1.8, s] }));
-  }
-  return list;
-}
+// Gobs of lava the build's script throws out of the pit (one node each).
+export const LAVA_COUNT = 6;
 
 function pitFloor(dims, segs) {
   const g = new THREE.CircleGeometry(dims.rb * 1.05, segs);
@@ -208,6 +203,7 @@ function materials() {
   return {
     rock: new THREE.MeshStandardMaterial({ name: 'Rock', map: rock.map, roughness: 0.95, metalness: 0 }),
     ruin: new THREE.MeshStandardMaterial({ name: 'Ruin', map: ruin.map, roughness: 0.9, metalness: 0 }),
+    smoke: new THREE.MeshStandardMaterial({ name: 'Smoke', color: 0x2a2224, roughness: 1, metalness: 0, transparent: true, opacity: 0.6, depthWrite: false }),
     glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1.6, roughness: 0.6, color: 0x220400 }),
   };
 }
@@ -228,9 +224,14 @@ export function buildLod0(width, depth, height) {
   root.add(mesh('Ground', rock, M.rock));
   root.add(mesh('Ruins', merge(columns(dims, 7, rnd, 12)), M.ruin));
   root.add(mesh('Pit', prep(pitFloor(dims, 48)), M.glow));
-  const v = mesh('Vortex', merge(vortex(dims, height, { turns: 3.2, tubular: 220, radial: 7 })), M.glow);
-  const e = mesh('Embers', merge(embers(dims, height, 60, rnd)), M.glow);
-  root.add(v, e);
+  root.add(mesh('Fog', merge(fogPuffs(dims, 26, rnd, 2)), M.smoke));
+  for (let i = 0; i < LAVA_COUNT; i++) {
+    // Each gob sits at the lot's origin; the script moves the node.
+    const g = new THREE.IcosahedronGeometry(dims.S * 0.016 + 0.12, 1);
+    const m = mesh(`Lava${i}`, prep(g), M.glow);
+    m.scale.setScalar(0.001);
+    root.add(m);
+  }
   return { root, dims };
 }
 
@@ -243,7 +244,7 @@ export function buildLod1(width, depth, height) {
   // Rock and ruins share one material at this distance.
   const rock = merge([mound(dims, { segs: 56, rings: 7, lift: 0.35 }), ...shards(dims, 18, rnd, height), ...columns(dims, 7, rnd, 6)]);
   root.add(mesh('Ground', rock, M.rock));
-  root.add(mesh('Glow', merge([pitFloor(dims, 20), ...vortex(dims, height, { turns: 3.2, tubular: 60, radial: 4 }), ...embers(dims, height, 16, mulberry32(9))]), M.glow));
+  root.add(mesh('Glow', prep(pitFloor(dims, 20)), M.glow));
   return { root, dims };
 }
 
@@ -270,7 +271,7 @@ export function buildLod2(width, depth, height) {
     return p;
   };
   const rockGeo = toHalf(mound(dims, { segs: 24, rings: 3, lift: 1.0 }), false);
-  const fire = [pitFloor(dims, 10), ...vortex(dims, height, { turns: 2, tubular: 16, radial: 3 })].map((x) => toHalf(x, true));
+  const fire = [pitFloor(dims, 10)].map((x) => toHalf(x, true));
   const spikes = shards(dims, 8, rnd, height).map((x) => toHalf(x, false));
   const root = new THREE.Group();
   root.name = 'HellMouth';
