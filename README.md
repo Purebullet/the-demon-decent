@@ -2,7 +2,7 @@
 
 A brutal dark-fantasy, first-person roguelike for **Project 0 lot #265**, built with Three.js.
 
-From the street, the lot is a hell-mouth: a volcanic mound torn open by a glowing pit, with a vortex of hellfire rising out of it. Enter the lot and the game opens as its own world: the surface lot with a jagged crater in dark-stone ruins, fog, embers and a red glow pulsing from below. Step over the edge and descend through 20 hand-built floors. You get one life: no armour, no regeneration, only potions and dodging. Die and you lose everything and climb back out at the surface. Your deepest floor goes on the lot's weekly score table.
+From the street, the lot is a hell-mouth: a volcanic mound torn open by a glowing pit, with a vortex of hellfire rising out of it. Enter the lot and the game opens as its own world: the surface lot with a jagged crater in dark-stone ruins, fog, embers and a red glow pulsing from below. Step over the edge and descend through 20 hand-built floors. You get one life: no armour, no regeneration, only potions, timing and steel. Die and you lose everything and climb back out at the surface. Your deepest floor goes on the lot's weekly score table.
 
 ## Play
 
@@ -16,8 +16,10 @@ npm run build      # dist/experience/ + dist/experience.zip (Project 0) and dist
 | Control | Action |
 | --- | --- |
 | W A S D, mouse | Move, aim (click to capture the mouse; drag to look also works) |
-| Left click (hold to chain) | Melee attack |
-| Space / Shift | Dodge (invulnerability frames) |
+| Left click | Light attack; click again as the arc lands for a Perfect Chain |
+| Hold left button | Draw back a heavy blow, released when you let go |
+| Right button | Block |
+| Double-tap A / D / S (or Space) | Phantom Step dodge, once learned |
 | E | Drink a health potion |
 | 1 2 3 | Demon spells: Hellfire Nova, Shade Step, Blood Siphon |
 | F | Take a weapon, wake a sanctum altar |
@@ -54,8 +56,10 @@ Before publishing a new version, run it in Project 0's own sandbox: `npm run dev
 - **Floors** (`src/world/LevelData.js`): 20 ASCII maps with per-floor tuning (hp, damage, speed, windup, cooldown, attack slots, swarm, aggro, fog, loot) and a `look`. Pyre Witches join on floor 4 and Cinder Hounds on floor 6. Floor 10 is Gorvath, floor 20 is Azrakel. Floors 11–19 add lava, spike traps, fire vents, burrowed ambushers and swarm tactics, with faster enemies and tighter attack windups. `npm test` checks that every map is enclosed and that every enemy, potion and exit can be reached.
 - **Cavern looks** (`src/world/themes.js`, `src/world/Dressing.js`): each floor names one of 15 looks, which sets its palette, fog, light, glow colour, ceiling height, glowing floor veins and which generated props dress it: the fungus-lit Gullet, blue-crystal Weeping Tunnels, the bone-strewn Ossuary, the Chain Halls of gibbets and hanging chains, sulphur-yellow Brimstone, the stalagmite jaws of the Hollow of Teeth, ember-split Cinder, the stakes of the Flayed Maze, the statues of the Threshold of Ash, Gorvath's Crucible, the Molten Vein, the egg-clutched Writhing Pit, the violet Screaming Deep, the Last Gate and Azrakel's throne room. The floor's own seed varies tint, height and placement, so floors sharing a look still differ. Walls are stacked generated boulders and slabs, with stalactites, rubble, set pieces on pillar tiles, and props along the walls, from the ceiling and across the floor; a hell-gate stands behind every exit. Everything repeated is instanced per 12 m chunk, and chunks beyond the fog are hidden.
 - **Sanctums** (`src/world/Sanctum.js`): between floors you can wake one of three altars: the Blood Well (+max health or +potion capacity), the Magic Circle (learn or upgrade a spell), or the Burning Sigil (+damage or +attack speed).
-- **Combat hitboxes** (`src/physics`): the weapon blade is an oriented box swept along its swing arc. The sweep is sub-stepped and includes the camera's own motion, so a fast swing or a mouse flick can't skip through a target. It is tested with a separating-axis test against per-body-part hurtboxes; head hits crit. Enemy attacks are strike volumes that are only active on their strike frames.
-- **Weapons**: swords are balanced alternating slashes, axes are slow heavy chops, and maces are overheads that break poise and knock enemies back. Weapons drop in four tiers.
+- **Combat** (`src/combat`, design and formulas in [docs/COMBAT.md](docs/COMBAT.md)): no stamina; timing is the limit. Presses on the beat flow into Perfect Chains, mashing fumbles and exposes you, nothing is queued. Counter-hits land in a demon's glowing windup; guarded blows bounce. Swords build momentum, axes sunder and shatter guards, maces knock demons into stumbles. Relics and weapon enchantments turn perfect timing into procs (freeze, life steal, hellfire, chain lightning, bleeding, soul rends, echo strikes).
+- **Combat hitboxes** (`src/physics`): the weapon blade is a thin oriented box along its centre line, placed where the viewmodel shows it, swept along its swing arc. The sweep is sub-stepped and includes the camera's own motion, so a fast swing or a mouse flick can't skip through a target. It is tested with a separating-axis test against per-body-part hurtboxes; head hits crit; each hit kicks a spring through the creature's body along the angle and weight of the blow. Enemy attacks are strike volumes that are only active on their strike frames.
+- **Weapons**: four tiers, and from the second tier on a weapon may carry an enchantment (its own proc).
+- **Icons** (`npm run icons`): the skill, relic and weapon icons are generated 3D models rendered into one atlas (`assets/icons/atlas.webp`).
 - **Enemy AI** (`src/ai`): A* on the tile grid with terrain costs, a per-frame search budget, and string-pulled paths. A director hands out attack tokens and sends flankers to points behind the player, routed by A* with a penalty on tiles inside the player's view cone. On deep floors, stalker packs take slots on a ring around you and lunge in sequence.
 - **Street view** (`src/lot/buildLot.js`, `scripts/make-lot.mjs`): three LODs made for the lot's box, plus `lot.json` with shaders for the hellfire and the molten cracks, and a script that turns the vortex.
 
