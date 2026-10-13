@@ -21,7 +21,7 @@ vec3 p0Vertex(vec3 position, vec3 normal, vec2 uv) {
   } else if (id >= BOLT_TRAIL_FIRST) {
     vec3 root = p - vec3(0.0, along * BOLT_FOLD, 0.0);
     vec3 dir = normalize(vec3(root.x * 1.8, -1.0, root.z * 1.8));
-    float len = (0.35 + 0.75 * p0Speed) * (0.75 + 0.5 * srHash(vec3(id, 2.0, 7.0)));
+    float len = 0.35 + 0.75 * p0Speed;
     p = root + dir * along * len;
     rate = 12.0;
     amp = sin(along * 3.14159) * (0.05 + 0.04 * p0Speed) * len;

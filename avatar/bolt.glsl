@@ -20,11 +20,14 @@ void p0Surface(inout P0Surface s) {
   float fade = 1.0;
   if (exhaust < 0.5) {
     float h1 = srHash(vec3(id, 3.0, 1.0));
-    float period = trail > 0.5 ? 0.45 + 0.25 * h1 : 1.8 + 1.4 * h1;
-    float dur = trail > 0.5 ? period * (0.6 + 0.3 * p0Speed) : 0.75;
-    float phase = p0Time / period + srHash(vec3(id, 9.0, 2.0));
+    // The trail bolts share one beat, staggered evenly and out of order
+    // round the base, so at any moment the lit ones are spread all round.
+    float period = trail > 0.5 ? 0.5 : 1.8 + 1.4 * h1;
+    float dur = trail > 0.5 ? period * (0.65 + 0.25 * p0Speed) : 0.75;
+    float offset = trail > 0.5 ? fract((id - BOLT_TRAIL_FIRST) * 0.375) : srHash(vec3(id, 9.0, 2.0));
+    float phase = p0Time / period + offset;
     float t = fract(phase) * period;
-    float chance = trail > 0.5 ? 0.9 * speed : (0.35 + 0.6 * storm) * (1.0 - max(speed, lift));
+    float chance = trail > 0.5 ? speed : (0.35 + 0.6 * storm) * (1.0 - max(speed, lift));
     float strikes = step(1.0 - chance, srHash(vec3(id, floor(phase), 5.0)));
     // It grows out of the body (slowly, at rest), holds, and fades away.
     float grow = clamp(t / (trail > 0.5 ? 0.08 : 0.3), 0.0, 1.0);

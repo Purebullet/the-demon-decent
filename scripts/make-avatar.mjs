@@ -103,8 +103,9 @@ function mulberry32(a) {
 //   tip     2  short sparks off the spiral point
 //   side    6  short bolts striking out from the body
 //   wrap    3  arcs from one point on the body round to another
-//   trail   5  out of the base, behind it in flight: in flight the round
-//              leans nose first, so its base points back. At rest they are
+//   trail   8  out of the base, behind it in flight, evenly round it (every
+//              45 degrees, one length): in flight the round leans nose
+//              first, so its base points back. At rest they are
 //              stored folded flat up against the base (inside the bounds,
 //              never drawn); bolt-move.glsl unfurls them as you fly.
 //   exhaust 5  straight down out of the base, in their own mesh (Exhaust)
@@ -117,19 +118,23 @@ function mulberry32(a) {
 // (boltDecode in bolt-common.glsl). Not the UVs: Project 0's optimisation
 // (gltfpack) strips texture coordinates from a material without textures,
 // and rescales them on the rest.
-const KINDS = { tip: 2, side: 6, wrap: 3, trail: 5, exhaust: 5 };
+const KINDS = { tip: 2, side: 6, wrap: 3, trail: 8, exhaust: 5 };
 const TRAIL_FIRST = KINDS.tip + KINDS.side + KINDS.wrap;
 const EXHAUST_FIRST = TRAIL_FIRST + KINDS.trail;
 const BOLTS = EXHAUST_FIRST + KINDS.exhaust;
 const FOLD = 0.3;
 
-// Bolt, distance along (0..1) and edge (0/1) as a unit vector, coarse
-// enough to survive 8-bit quantization: polar angle from +Y for the
-// distance, the angle round Y for bolt and edge (BOLTS x 2 sectors).
-const POLE = 0.15;
+// Bolt, distance along (0..1) and edge (0/1) as a unit vector that
+// survives coarse normal compression: the angle round Y picks the bolt (one
+// sector each, wide); the angle from +Y says the edge (the upper or lower
+// band) and the distance along within it, never near the poles, where the
+// angle round would be unreliable.
+const BAND = [0.5, 1.45];
+const BAND2 = [Math.PI - 1.45, Math.PI - 0.5];
 function boltEncode(bolt, along, edge) {
-  const th = POLE + along * (Math.PI - 2 * POLE);
-  const ph = ((bolt * 2 + edge + 0.5) / (BOLTS * 2)) * Math.PI * 2;
+  const [a, b] = edge ? BAND2 : BAND;
+  const th = a + along * (b - a);
+  const ph = ((bolt + 0.5) / BOLTS) * Math.PI * 2;
   return new THREE.Vector3(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph));
 }
 
@@ -181,9 +186,8 @@ function lightning(from, to) {
       ctrl = new THREE.Vector3(Math.cos(tm) * rm * 1.5, ym, Math.sin(tm) * rm * 1.5);
       len = start.distanceTo(end);
     } else {
-      // Out of the base: stored folded straight up against it.
-      const t = (b - TRAIL_FIRST) / KINDS.trail;
-      const a = t * Math.PI * 2 + r() * 0.6;
+      // Out of the base, evenly round it: stored folded straight up against it.
+      const a = ((b - TRAIL_FIRST) / KINDS.trail) * Math.PI * 2;
       const y = -HALF + 0.04;
       start = new THREE.Vector3(Math.cos(a) * radiusAt(y) * 0.7, y, Math.sin(a) * radiusAt(y) * 0.7);
       end = start.clone().addScaledVector(up, FOLD);
@@ -419,24 +423,25 @@ await writeFile(
 // normal; see boltEncode there. The vertex stage decodes it and hands it to
 // the surface stage in vBolt = (bolt, along, edge).
 #define BOLT_COUNT ${BOLTS}.0
-#define BOLT_POLE ${POLE}
 // Bolts from BOLT_TRAIL_FIRST stream out of the base in flight, stored
 // folded BOLT_FOLD m straight up against it; from BOLT_EXHAUST_FIRST they
 // are the lift-off jet (the Exhaust mesh, shown by its clip).
 #define BOLT_TRAIL_FIRST ${TRAIL_FIRST}.0
+#define BOLT_TRAIL_COUNT ${KINDS.trail}.0
 #define BOLT_EXHAUST_FIRST ${EXHAUST_FIRST}.0
 #define BOLT_FOLD ${FOLD}
 varying vec3 vBolt;
 vec3 boltDecode(vec3 n) {
   n = normalize(n);
-  float along = clamp((acos(clamp(n.y, -1.0, 1.0)) - BOLT_POLE) / (3.14159265 - 2.0 * BOLT_POLE), 0.0, 1.0);
-  float u = fract(atan(n.z, n.x) / 6.28318531 + 1.0);
-  float code = floor(u * 2.0 * BOLT_COUNT);
-  float bolt = floor(code * 0.5);
-  return vec3(bolt, along, code - 2.0 * bolt);
+  float th = acos(clamp(n.y, -1.0, 1.0));
+  float edge = step(1.5707963, th);
+  float lo = mix(${BAND[0]}, ${BAND2[0].toFixed(6)}, edge);
+  float along = clamp((th - lo) / ${(BAND[1] - BAND[0]).toFixed(6)}, 0.0, 1.0);
+  float bolt = floor(fract(atan(n.z, n.x) / 6.28318531 + 1.0) * BOLT_COUNT);
+  return vec3(bolt, along, edge);
 }
 `,
 );
-const made = [await build('avatar.glb', { tris: 0, texSize: 1024 }), await build('avatar-lod1.glb', { tris: 3950, texSize: 512 })];
+const made = [await build('avatar.glb', { tris: 0, texSize: 1024 }), await build('avatar-lod1.glb', { tris: 3800, texSize: 512 })];
 await rm(tmp, { recursive: true, force: true });
 for (const m of made) console.log(`avatar/${m.file}  ${(m.bytes / 1024).toFixed(0)} KB, ${m.tris} triangles`);
