@@ -313,10 +313,13 @@ export class NavGrid {
 // Spreads A* work over frames: each agent holds at most one pending request,
 // and only `budget` searches run per frame, so a 30-strong swarm repathing at
 // once never causes a hitch.
+// Paths are found a few per frame, within a time budget (ms), so a crowd
+// asking at once never stalls a frame: the rest wait their turn.
 export class PathService {
-  constructor(nav, budget = 6) {
+  constructor(nav, budget = 6, ms = 1.5) {
     this.nav = nav;
     this.budget = budget;
+    this.ms = ms;
     this.queue = [];
     this.pending = new Map();
   }
@@ -343,7 +346,8 @@ export class PathService {
 
   update() {
     let done = 0;
-    while (done < this.budget && this.queue.length) {
+    const until = performance.now() + this.ms;
+    while (done < this.budget && this.queue.length && (done === 0 || performance.now() < until)) {
       const req = this.queue.shift();
       if (req.cancelled) continue;
       this.pending.delete(req.agent);

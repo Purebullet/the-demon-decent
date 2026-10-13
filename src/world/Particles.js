@@ -203,10 +203,14 @@ export class ParticleSystem {
     this.count = n;
     const geo = this.points.geometry;
     geo.setDrawRange(0, n);
-    this.posAttr.needsUpdate = true;
-    this.colAttr.needsUpdate = true;
-    this.sizeAttr.needsUpdate = true;
-    this.alphaAttr.needsUpdate = true;
+    // Upload only the live particles, not the whole pool.
+    if (n > 0) {
+      for (const [attr, k] of [[this.posAttr, 3], [this.colAttr, 3], [this.sizeAttr, 1], [this.alphaAttr, 1]]) {
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, n * k);
+        attr.needsUpdate = true;
+      }
+    }
   }
 
   _copy(from, to) {

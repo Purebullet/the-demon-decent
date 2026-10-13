@@ -13,6 +13,8 @@ import { mulberry32 } from '../core/rng.js';
 // blocks: collision and navigation come from the tile grid.
 
 const CHUNK = 6 * TILE;
+// Wall rock beyond this far (m) is drawn from a coarse copy of the model.
+const LOD_NEAR = 14;
 
 const DIRS = [
   [1, 0],
@@ -197,7 +199,10 @@ export class Dressing {
     const W = d.cols * TILE;
     const H = d.rows * TILE;
     const floorTex = rockTextures(3 + (this.level.floor % 4), L.ground);
-    const floorMat = new THREE.MeshStandardMaterial({ map: floorTex.map.clone(), bumpMap: floorTex.bump.clone(), bumpScale: 3, roughness: 0.95 });
+    // Lambert, like the scenery: matte rock lit per pixel for less.
+    // (A touch brighter: no sheen of its own any more.)
+    const floorMat = new THREE.MeshLambertMaterial({ map: floorTex.map.clone(), bumpMap: floorTex.bump.clone(), bumpScale: 3, color: 0xffffff });
+    floorMat.color.multiplyScalar(1.18);
     floorMat.map.repeat.set(W / 7, H / 7);
     floorMat.bumpMap.repeat.set(W / 7, H / 7);
     floorMat.map.needsUpdate = floorMat.bumpMap.needsUpdate = true;
@@ -213,7 +218,7 @@ export class Dressing {
     floor.position.set(W / 2, 0, H / 2);
 
     const ceilTex = rockTextures(5, L.ground.map((v) => Math.round(v * 0.5)));
-    const ceilMat = new THREE.MeshStandardMaterial({ map: ceilTex.map, bumpMap: ceilTex.bump, bumpScale: 3, roughness: 1 });
+    const ceilMat = new THREE.MeshLambertMaterial({ map: ceilTex.map, bumpMap: ceilTex.bump, bumpScale: 3 });
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, H), ceilMat);
     ceil.rotation.x = Math.PI / 2;
     ceil.position.set(W / 2, this.ceiling, H / 2);
@@ -231,8 +236,7 @@ export class Dressing {
       const material = this.mat(id).clone();
       material.normalMap = null;
       material.color.multiplyScalar(0.62);
-      material.roughness = 1;
-      shapes.push({ id, weight, ...u, material, list: [] });
+      shapes.push({ id, weight, ...u, lod: clusterLod(u.geometry, 4), material, list: [] });
     }
     if (!shapes.length) {
       const fallback = rockTextures(1, L.ground);
@@ -277,7 +281,7 @@ export class Dressing {
         shape.list.push(m.compose(p, q, s).clone());
       }
     }
-    for (const sh of shapes) this._instances(sh.geometry, sh.material, sh.list);
+    for (const sh of shapes) this._instances(sh.geometry, sh.material, sh.list, sh.lod);
   }
 
   // The group for the chunk of the map around (x, z).
@@ -289,34 +293,62 @@ export class Dressing {
     if (!c) {
       const group = new THREE.Group();
       this.group.add(group);
-      c = { group, x: (cx + 0.5) * CHUNK, z: (cz + 0.5) * CHUNK };
+      c = { group, x: (cx + 0.5) * CHUNK, z: (cz + 0.5) * CHUNK, lods: [], far: false };
       this.chunks.set(key, c);
     }
     return c.group;
   }
 
-  // One instanced mesh per chunk for a list of placements.
-  _instances(geometry, material, list) {
+  // One instanced mesh per chunk for a list of placements, switching to a
+  // coarse copy of the model (`lod`, made here if not given) when its chunk
+  // is far away.
+  _instances(geometry, material, list, lod = undefined) {
     if (!list.length || !geometry || !material) return;
+    if (lod === undefined) lod = this._lodOf(geometry);
     const byChunk = new Map();
     for (const mm of list) {
-      const g = this._chunk(mm.elements[12], mm.elements[14]);
-      if (!byChunk.has(g)) byChunk.set(g, []);
-      byChunk.get(g).push(mm);
+      const key = `${Math.floor(mm.elements[12] / CHUNK)},${Math.floor(mm.elements[14] / CHUNK)}`;
+      this._chunk(mm.elements[12], mm.elements[14]);
+      if (!byChunk.has(key)) byChunk.set(key, []);
+      byChunk.get(key).push(mm);
     }
-    for (const [g, part] of byChunk) {
+    for (const [key, part] of byChunk) {
+      const c = this.chunks.get(key);
       const inst = new THREE.InstancedMesh(geometry, material, part.length);
       part.forEach((mm, k) => inst.setMatrixAt(k, mm));
       inst.instanceMatrix.needsUpdate = true;
       inst.computeBoundingSphere();
-      g.add(inst);
+      c.group.add(inst);
+      if (lod) c.lods.push({ inst, hi: geometry, lo: lod });
     }
   }
 
-  // Hide the chunks the fog has swallowed (`range` metres from the viewer).
+  _lodOf(geometry) {
+    const tris = (geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3;
+    if (tris < 280) return null;
+    this.lodCache ||= new Map();
+    if (!this.lodCache.has(geometry)) this.lodCache.set(geometry, clusterLod(geometry, tris > 1500 ? 6 : 4));
+    return this.lodCache.get(geometry);
+  }
+
+  // Hide the chunks the fog has swallowed (`range` metres from the viewer),
+  // and draw the far ones' walls coarse.
   cull(x, z, range) {
     const r2 = (range + CHUNK * 0.75) ** 2;
-    for (const c of this.chunks.values()) c.group.visible = (c.x - x) ** 2 + (c.z - z) ** 2 < r2;
+    const near2 = (LOD_NEAR + CHUNK * 0.7) ** 2;
+    for (const c of this.chunks.values()) {
+      const d2 = (c.x - x) ** 2 + (c.z - z) ** 2;
+      c.group.visible = d2 < r2;
+      const far = d2 > near2;
+      if (far === c.far) continue;
+      c.far = far;
+      for (const l of c.lods) l.inst.geometry = far ? l.lo : l.hi;
+    }
+  }
+
+  // The ground mist, off on slow machines.
+  setMist(on) {
+    for (const m of this.mistMeshes || []) m.visible = on;
   }
 
   // Stalactites: the generated stalagmite turned upside down.
@@ -372,7 +404,9 @@ export class Dressing {
       s.set(k, k * 0.6, k);
       list.push(m.compose(p, q, s).clone());
     }
-    this._instances(this.rockShape.geometry, this.rockShape.material, list);
+    // Pebbles: the coarse rock is plenty, near or far.
+    const pebble = this.rockShape.lod || this.rockShape.geometry;
+    this._instances(pebble, this.rockShape.material, list, null);
   }
 
   // A prop placed whole (cloned, themed), or null when it was not generated.
@@ -594,7 +628,7 @@ export class Dressing {
       depthWrite: false,
       fog: true,
       side: THREE.DoubleSide,
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uColor: { value: tint }, uLayer: { value: 0 } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uColor: { value: tint }, uLayer: { value: 0 }, uNoise: { value: null } }]),
       vertexShader: /* glsl */ `
         #include <fog_pars_vertex>
         varying vec3 vWorld;
@@ -614,14 +648,12 @@ export class Dressing {
         uniform float uTime;
         uniform vec3 uColor;
         uniform float uLayer;
+        uniform sampler2D uNoise;
         varying vec3 vWorld;
         varying float vDepth;
         varying float vSlope;
-        float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float n2(vec2 p) {
-          vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(h(i), h(i + vec2(1.0, 0.0)), u.x), mix(h(i + vec2(0.0, 1.0)), h(i + vec2(1.0, 1.0)), u.x), u.y);
-        }
+        // Smooth value noise, tiling every 16 units, from a small texture.
+        float n2(vec2 p) { return texture2D(uNoise, p / 16.0).r; }
         void main() {
           vec2 p = vWorld.xz * 0.11 + uLayer * 7.3;
           float t = uTime * (0.05 + uLayer * 0.02);
@@ -636,14 +668,18 @@ export class Dressing {
         }`,
     });
     const heights = [0.45, 1.25];
+    const noise = mistNoise();
+    this.mistMeshes = [];
     this.mist = heights.map((y, i) => {
       const mat = this.mistMat.clone();
       mat.uniforms.uLayer.value = i;
+      mat.uniforms.uNoise.value = noise;
       const sheet = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat);
       sheet.rotation.x = -Math.PI / 2;
       sheet.position.set(W / 2, y, H / 2);
       sheet.renderOrder = 2;
       this.group.add(sheet);
+      this.mistMeshes.push(sheet);
       return mat;
     });
   }
@@ -662,4 +698,98 @@ export class Dressing {
     }
     return out;
   }
+}
+
+// A coarse copy of a model for far away: its vertices snapped together on a
+// grid `cells` across the model's longest side, triangles that collapse
+// dropped (vertex clustering). A 300-triangle boulder keeps about a third.
+function clusterLod(geo, cells) {
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  const n = pos.count;
+  const index = geo.index ? geo.index.array : Array.from({ length: n }, (_, i) => i);
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const size = bb.getSize(new THREE.Vector3());
+  const cell = Math.max(size.x, size.y, size.z) / cells;
+  const ids = new Map();
+  const sums = [];
+  const of = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const key = `${Math.floor((x - bb.min.x) / cell)},${Math.floor((y - bb.min.y) / cell)},${Math.floor((z - bb.min.z) / cell)}`;
+    let id = ids.get(key);
+    if (id === undefined) {
+      id = sums.length;
+      ids.set(key, id);
+      sums.push({ x: 0, y: 0, z: 0, n: 0, u: uv ? uv.getX(i) : 0, v: uv ? uv.getY(i) : 0 });
+    }
+    const c = sums[id];
+    c.x += x;
+    c.y += y;
+    c.z += z;
+    c.n++;
+    of[i] = id;
+  }
+  const tris = [];
+  for (let t = 0; t < index.length; t += 3) {
+    const a = of[index[t]];
+    const b = of[index[t + 1]];
+    const c = of[index[t + 2]];
+    if (a !== b && b !== c && a !== c) tris.push(a, b, c);
+  }
+  // Flat-shaded: each triangle its own corners.
+  const out = new Float32Array(tris.length * 3);
+  const outUv = new Float32Array(tris.length * 2);
+  tris.forEach((id, k) => {
+    const c = sums[id];
+    out[k * 3] = c.x / c.n;
+    out[k * 3 + 1] = c.y / c.n;
+    out[k * 3 + 2] = c.z / c.n;
+    outUv[k * 2] = c.u;
+    outUv[k * 2 + 1] = c.v;
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  if (uv) g.setAttribute('uv', new THREE.BufferAttribute(outUv, 2));
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
+
+// Tiling value noise (64 x 64, smoothly interpolated by the sampler) for the
+// ground mist.
+let mistTex = null;
+function mistNoise() {
+  if (mistTex) return mistTex;
+  const N = 64;
+  const data = new Uint8Array(N * N * 4);
+  const rnd = mulberry32(911);
+  const grid = Array.from({ length: 16 * 16 }, () => rnd());
+  const at = (x, y) => grid[((y + 16) % 16) * 16 + ((x + 16) % 16)];
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const gx = (x / N) * 16;
+      const gy = (y / N) * 16;
+      const ix = Math.floor(gx);
+      const iy = Math.floor(gy);
+      const fx = gx - ix;
+      const fy = gy - iy;
+      const ux = fx * fx * (3 - 2 * fx);
+      const uy = fy * fy * (3 - 2 * fy);
+      const v = (at(ix, iy) * (1 - ux) + at(ix + 1, iy) * ux) * (1 - uy) + (at(ix, iy + 1) * (1 - ux) + at(ix + 1, iy + 1) * ux) * uy;
+      const k = (y * N + x) * 4;
+      data[k] = data[k + 1] = data[k + 2] = Math.round(v * 255);
+      data[k + 3] = 255;
+    }
+  }
+  mistTex = new THREE.DataTexture(data, N, N);
+  mistTex.wrapS = mistTex.wrapT = THREE.RepeatWrapping;
+  mistTex.magFilter = THREE.LinearFilter;
+  mistTex.minFilter = THREE.LinearMipmapLinearFilter;
+  mistTex.generateMipmaps = true;
+  mistTex.needsUpdate = true;
+  return mistTex;
 }
