@@ -16,6 +16,8 @@ import { clamp } from '../core/rng.js';
 const EYE = 1.65;
 const RADIUS = 0.4;
 const WALK = 5.2;
+// Speed of the step a blow carries you forward (decays to about 0.9 m).
+const LUNGE = 7;
 const DODGE_SPEED = 12.5;
 const DODGE_TIME = 0.3;
 const DODGE_IFRAMES = 0.26;
@@ -210,7 +212,8 @@ export class Player {
   _move(dt, ctx) {
     const dir = this.moveDirection(_dir);
     let speed = WALK;
-    if (this.swing) speed *= 0.6;
+    // Rooted while swinging: the blow's own lunge is the only movement.
+    if (this.swing) speed = 0;
     if (this.drinkT > 0) speed *= 0.45;
     const blend = 1 - Math.exp(-14 * dt);
     this.vel.x += (dir.x * speed - this.vel.x) * blend;
@@ -319,6 +322,9 @@ export class Player {
       if (!s.sounded) {
         s.sounded = true;
         ctx.audio?.swing(this.run.weapon.type);
+        // The blow carries you a step forward.
+        this.knock.x += Math.sin(this.yaw) * -LUNGE;
+        this.knock.z += Math.cos(this.yaw) * -LUNGE;
       }
       const k = smooth((s.t - W) / A);
       this._sweep(s, s.prevK, k, ctx);
@@ -337,7 +343,7 @@ export class Player {
       pivot.quaternion.slerpQuaternions(_quat, this.idleQuat, k);
       // Combo: a buffered click cancels the tail of the recovery.
       const wantsNext = this.queued || (this.input?.mouseDown[0] ?? false);
-      if (wantsNext && s.t - W - A > R * 0.4 && this.drinkT <= 0) this._startSwing(ctx);
+      if (wantsNext && s.t - W - A > R * 0.75 && this.drinkT <= 0) this._startSwing(ctx);
     } else {
       this.swing = null;
     }

@@ -16,9 +16,10 @@ export const WEAPON_TYPES = {
   sword: {
     label: 'Sword',
     damage: 22,
-    windup: 0.1,
-    active: 0.15,
-    recover: 0.2,
+    // About a second a swing: committed blows, not spam.
+    windup: 0.24,
+    active: 0.2,
+    recover: 0.56,
     knockback: 3,
     stagger: 28,
     blade: [0.05, 1.12], // hitbox span along the blade, metres from the grip
@@ -34,9 +35,9 @@ export const WEAPON_TYPES = {
   axe: {
     label: 'Axe',
     damage: 42,
-    windup: 0.3,
-    active: 0.17,
-    recover: 0.36,
+    windup: 0.5,
+    active: 0.24,
+    recover: 0.72,
     knockback: 4.5,
     stagger: 55,
     blade: [0.55, 1.15],
@@ -51,9 +52,9 @@ export const WEAPON_TYPES = {
   mace: {
     label: 'Mace',
     damage: 30,
-    windup: 0.22,
-    active: 0.17,
-    recover: 0.3,
+    windup: 0.4,
+    active: 0.22,
+    recover: 0.62,
     knockback: 9,
     stagger: 120,
     blade: [0.55, 1.0],

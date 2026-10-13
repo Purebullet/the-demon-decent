@@ -1,5 +1,7 @@
 
-// Base stats for the regular enemies. Floor tuning (LevelData.js) multiplies
+// Base stats for the regular enemies. Health is set so a Gaunt Stalker on
+// the first floor takes five blows of the starting sword (22 damage).
+// Floor tuning (LevelData.js) multiplies
 // hp, damage, speed, windup and cooldown on top of these.
 //
 // Attack volumes are boxes in the enemy's local space (+Z is forward) that
@@ -13,7 +15,7 @@ export const ENEMY_TYPES = {
     // range, and on deep floors surround you and lunge together.
     name: 'Gaunt Stalker',
     asset: 'ghoul',
-    hp: 38,
+    hp: 105,
     dmg: 8,
     speed: 4.1,
     radius: 0.4,
@@ -35,7 +37,7 @@ export const ENEMY_TYPES = {
     // that drags you in.
     name: 'Shadow Fiend',
     asset: 'fiend',
-    hp: 72,
+    hp: 120,
     dmg: 13,
     speed: 3.4,
     radius: 0.5,
@@ -54,7 +56,7 @@ export const ENEMY_TYPES = {
   brute: {
     name: 'Flame-Horned Brute',
     asset: 'brute',
-    hp: 170,
+    hp: 260,
     dmg: 22,
     speed: 2.6,
     radius: 0.65,
@@ -75,7 +77,7 @@ export const ENEMY_TYPES = {
     // range. Too quick to outrun; dodge the pounce and punish the landing.
     name: 'Cinder Hound',
     asset: 'hound',
-    hp: 34,
+    hp: 65,
     dmg: 9,
     speed: 6.2,
     radius: 0.45,
@@ -98,7 +100,7 @@ export const ENEMY_TYPES = {
     // her if you close in. Fragile once you reach her.
     name: 'Pyre Witch',
     asset: 'witch',
-    hp: 58,
+    hp: 100,
     dmg: 12,
     speed: 3.1,
     radius: 0.45,

@@ -280,6 +280,23 @@ export function buildGltfCharacter(id, rootScale = 1) {
     mixer.update(0);
   }
 
+  // Ragdoll flop over the death clip: head, arms, legs and tail keep swinging
+  // loosely after the body hits the floor and settle like dead weight.
+  const floppy = bones
+    .filter((b) => /^(Neck|Head|Left|Right|Tail|Hat)/.test(b.name) && !/Toe|Tip|End|Horn|StaffTip|Heart/.test(b.name))
+    .map((b, i) => ({ bone: b, phase: i * 1.7, axis: new THREE.Vector3(Math.sin(i * 2.3), Math.cos(i * 1.3) * 0.5, Math.cos(i * 2.3)).normalize(), amp: /Arm|Hand|Head|Tail/.test(b.name) ? 0.55 : 0.3 }));
+  const _fq = new THREE.Quaternion();
+  function flop(st) {
+    // Strongest around the moment of impact (about 0.6 s into the fall).
+    const after = Math.max(0, st - 0.45);
+    const k = Math.exp(-after * 2.6) * Math.min(1, st / 0.3);
+    if (k < 0.01) return;
+    for (const f of floppy) {
+      _fq.setFromAxisAngle(f.axis, Math.sin(st * 13 + f.phase) * f.amp * k);
+      f.bone.quaternion.multiply(_fq);
+    }
+  }
+
   const ext = new THREE.Box3().setFromObject(inst.inner).getSize(new THREE.Vector3());
   const reach = Math.hypot(ext.x, ext.z) / 2;
 
@@ -292,6 +309,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
 
     if (mixer) {
       drive(e, dt, t);
+      if (e.state === 'dying') flop(e.stateT);
       // Attacks without a clip of their own still get a body lean.
       pose.rotation.x = attacking && !clips[e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0;
     } else if (!rigged) {
@@ -327,6 +345,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
     // Long beasts reach further from their centre than they are tall.
     hitRadius: Math.max(H * 0.6, reach),
     ownDeath: !!clips.death && !!mixer,
+    fallsForward: inst.rig?.death === 'forward',
     generated: true,
     rigged,
   };

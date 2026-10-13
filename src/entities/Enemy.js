@@ -452,6 +452,7 @@ export class Enemy {
     if (!this.alive || this.state === 'burrowed') return 0;
     this.health -= amount;
     this.flash = 1;
+    this.lastHit = { x: dir.x, z: dir.z, knockback };
     const mass = this.type.mass || 1;
     this.knock.x += (dir.x * knockback) / mass;
     this.knock.z += (dir.z * knockback) / mass;
@@ -482,23 +483,63 @@ export class Enemy {
     ctx.director.releaseToken(this);
     ctx.pathService.cancel(this);
     this.attack = null;
-    // A model with its own death clip falls for 1.6 s, lies still, then sinks.
-    this.setState('dying', this.model.ownDeath ? 3.2 : 1.6);
+    // A model with its own death clip is thrown along the killing blow, falls
+    // and flops (see _updateDying), lies there for a while, then sinks.
+    this.setState('dying', this.model.ownDeath ? CORPSE_TIME : 1.6);
     this.deathYaw = this.yaw;
-    burst(ctx.fx.alpha, tmpV.set(this.position.x, 1, this.position.z), { count: 40, speed: 4, color: C.blood, colorEnd: C.bloodDark, size: 0.16, life: 0.9 });
+    const hit = this.lastHit || { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw), knockback: 3 };
+    const mass = this.isBoss ? 30 : this.type.mass || 1;
+    const fling = (3 + hit.knockback * 0.5) / Math.sqrt(mass);
+    this.rag = { vx: hit.x * fling, vz: hit.z * fling, vy: (this.isBoss ? 0 : 2.6) / Math.sqrt(mass), y: 0, landed: false };
+    // Topple away from the blow: a body that falls backward turns its back
+    // to the hit, one that falls forward faces along it.
+    if (this.model.ownDeath && !this.isBoss && Math.hypot(hit.x, hit.z) > 0.1) {
+      const along = Math.atan2(hit.x, hit.z);
+      this.deathYaw = this.model.fallsForward ? along : along + Math.PI;
+    }
+    burst(ctx.fx.alpha, tmpV.set(this.position.x, 1, this.position.z), { count: 60, speed: 5, color: C.blood, colorEnd: C.bloodDark, size: 0.18, life: 1.1 });
     ctx.audio?.death(this.typeKey, this.position);
+    ctx.audio?.kill?.();
+    ctx.shake?.(this.isBoss ? 1 : 0.4);
+    ctx.hitStop?.(0.09);
     ctx.onEnemyKilled?.(this);
   }
 
   _updateDying(dt, ctx) {
     const k = Math.min(1, this.stateT / this.stateDur);
-    const fall = Math.min(1, this.stateT / 0.45);
-    // Models with their own death clip fall by themselves.
-    this.root.rotation.set(this.model.ownDeath ? 0 : -fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
-    const sink = this.model.ownDeath ? (this.stateT - 2.2) / 1.0 : (k - 0.55) / 0.45;
-    this.root.position.y = -Math.max(0, sink) * 1.5 * (this.type.scale || 1);
     for (const e of this.emitters) e.rate *= 1 - Math.min(1, dt * 3);
-    this._applyKnockback(dt, ctx);
+    if (!this.model.ownDeath) {
+      const fall = Math.min(1, this.stateT / 0.45);
+      this.root.rotation.set(-fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
+      this.root.position.y = -Math.max(0, (k - 0.55) / 0.45) * 1.5 * (this.type.scale || 1);
+      this._applyKnockback(dt, ctx);
+      if (k >= 1) this.removed = true;
+      return;
+    }
+    // Thrown by the blow: slides and hops along the floor (walls stop it),
+    // bounces once, then lies where it fell until it sinks away.
+    const r = this.rag;
+    this.yaw += (this.deathYaw - this.yaw) * Math.min(1, dt * 10);
+    this.root.rotation.set(0, this.yaw, 0);
+    ctx.world.move(this.position, this.radius * 0.6, r.vx * dt, r.vz * dt);
+    r.vy -= 22 * dt;
+    r.y += r.vy * dt;
+    if (r.y <= 0) {
+      r.y = 0;
+      if (Math.abs(r.vy) > 1.5) {
+        r.vy = -r.vy * 0.28;
+        if (!r.landed) ctx.shake?.(0.08);
+        r.landed = true;
+      } else r.vy = 0;
+      const f = Math.exp(-7 * dt);
+      r.vx *= f;
+      r.vz *= f;
+    }
+    const sink = (this.stateT - (CORPSE_TIME - 1.5)) / 1.5;
+    this.root.position.y = r.y - Math.max(0, sink) * 1.5 * (this.type.scale || 1);
     if (k >= 1) this.removed = true;
   }
 }
+
+// How long a body stays on the floor (with its death clip), sinking at the end.
+const CORPSE_TIME = 9;

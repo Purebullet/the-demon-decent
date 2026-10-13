@@ -58,8 +58,14 @@ export class Audio {
   swing(type) {
     this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.7 });
   }
+  // Steel into flesh: a wet slash (one of three, so repeats don't drone),
+  // with the weapon's own impact under it.
   hit(type) {
-    this.play(type === 'sword' ? 'hit_sword' : 'hit_heavy', { volume: 0.9, gap: 0.04 });
+    this.play(`flesh_${1 + Math.floor(Math.random() * 3)}`, { volume: 1, gap: 0.04, rate: 0.92 + Math.random() * 0.16 });
+    this.play(type === 'sword' ? 'hit_sword' : 'hit_heavy', { volume: 0.45, gap: 0.04 });
+  }
+  kill() {
+    this.play('kill', { volume: 1, gap: 0.05 });
   }
   hurt() {
     this.play('hurt', { gap: 0.15 });

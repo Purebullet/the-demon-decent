@@ -107,6 +107,20 @@ const SOUNDS = {
     noise(o, { type: 'lowpass', freq: 3500, freqEnd: 300, decay: 0.12, gain: 0.5 });
     tone(o, { type: 'triangle', freq: 1800, freqEnd: 1500, decay: 0.1, gain: 0.06 });
   },
+  // A blade through meat: a fast tearing hiss, a wet squelch that gurgles
+  // (noise chopped by a fast wobble), and a dull thud underneath.
+  flesh_1: (o) => flesh(o, 1),
+  flesh_2: (o) => flesh(o, 0.82),
+  flesh_3: (o) => flesh(o, 1.2),
+  // The kill: a heavy body blow, bone cracking, a burst of spray, and a low
+  // boom that rolls off.
+  kill: (o) => {
+    tone(o, { freq: 85, freqEnd: 28, attack: 0.004, decay: 0.7, gain: 0.8 });
+    noise(o, { type: 'lowpass', freq: 2200, freqEnd: 120, decay: 0.35, gain: 0.7 });
+    for (let i = 0; i < 4; i++) noise(o, { type: 'highpass', freq: 2500 + i * 600, decay: 0.025, gain: 0.35, delay: 0.03 + i * 0.035 });
+    squelch(o, { delay: 0.06, dur: 0.45, gain: 0.55, freq: 700 });
+    noise(o, { freq: 3000, freqEnd: 900, q: 0.8, attack: 0.02, decay: 0.5, gain: 0.25, delay: 0.08 });
+  },
   hit_heavy: (o) => {
     tone(o, { freq: 110, freqEnd: 38, decay: 0.22, gain: 0.65 });
     noise(o, { type: 'lowpass', freq: 1600, freqEnd: 200, decay: 0.16, gain: 0.55 });
@@ -174,6 +188,25 @@ const SOUNDS = {
     tone(o, { freq: 50, freqEnd: 36, decay: 0.2, gain: 0.5, delay: 0.22 });
   },
 };
+
+function squelch(o, { delay = 0, dur = 0.2, gain = 0.5, freq = 900 }) {
+  const start = Math.floor(delay * RATE);
+  const n = Math.floor(dur * RATE);
+  const f = biquad('bandpass', 2.5);
+  for (let i = 0; i < n && start + i < o.length; i++) {
+    const t = i / RATE;
+    const wob = 0.5 + 0.5 * Math.sin(2 * Math.PI * (38 + 25 * rnd()) * t);
+    const cutoff = freq * (0.6 + 0.8 * wob) * (1 - t / dur * 0.6);
+    o[start + i] += f(rnd() * 2 - 1, cutoff) * gain * 2.5 * env(t, 0.01, dur) * wob;
+  }
+}
+
+function flesh(o, k) {
+  noise(o, { freq: 5000 * k, freqEnd: 1400 * k, q: 1.1, attack: 0.004, decay: 0.09, gain: 0.5 });
+  squelch(o, { delay: 0.02, dur: 0.22, gain: 0.6, freq: 900 * k });
+  tone(o, { freq: 120 * k, freqEnd: 45, decay: 0.16, gain: 0.5, delay: 0.01 });
+  noise(o, { type: 'lowpass', freq: 1200 * k, freqEnd: 200, decay: 0.1, gain: 0.35, delay: 0.015 });
+}
 
 function growl(o, f) {
   tone(o, { type: 'sawtooth', freq: f, freqEnd: f * 0.7, attack: 0.08, decay: 0.55, gain: 0.3, lp: 700 });

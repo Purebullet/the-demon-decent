@@ -537,7 +537,7 @@ function writeRigged(def, glb, mesh, skel, skin, welded, clips, boxes) {
   });
   const markers = Object.fromEntries(skel.bones.filter((b) => b.marker).map((b) => [b.name, b.parent.name]));
   j.nodes = [
-    { name: def.id, children: [1, base], extras: { rig: { plan: def.plan, hurtboxes: boxes, markers } } },
+    { name: def.id, children: [1, base], extras: { rig: { plan: def.plan, death: def.death || 'back', hurtboxes: boxes, markers } } },
     { name: `${def.id}-body`, mesh: 0, skin: 0 },
     ...boneNodes,
   ];
