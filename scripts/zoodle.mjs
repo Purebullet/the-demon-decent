@@ -5,8 +5,11 @@
 //   node scripts/zoodle.mjs status                 what is generated, what is missing
 //   node scripts/zoodle.mjs list                   your finished Zoodle creations
 //   node scripts/zoodle.mjs pull ghoul=<id> ...    download existing creations into slots (free);
-//                                                   a character's Zoodle animations come too
-//   node scripts/zoodle.mjs pull                   re-download every slot recorded in assets/zoodle.json
+//                                                   a character's Zoodle animations come too, and
+//                                                   one without any is saved as the static source
+//                                                   that `npm run rig` rigs and animates
+//   node scripts/zoodle.mjs pull                   re-download every prop recorded in assets/zoodle.json
+//                                                   and every creature's source (ids in the manifest)
 //   node scripts/zoodle.mjs objects [slot ...]     generate props from their text prompts
 //   node scripts/zoodle.mjs batch [slot ...]       generate creatures from their approved concept images
 //
@@ -28,6 +31,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { CHARACTERS, PROPS } from '../src/assets/manifest.js';
+import { RIGS } from './rigs.mjs';
 
 const BASE = 'https://zoodle3d.com';
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -163,7 +167,9 @@ async function list() {
 
 async function pull() {
   const rec = await loadRecord();
-  const pairs = names.length ? names.map((n) => n.split('=')) : Object.entries(rec.slots).map(([s, v]) => [s, v.id]);
+  const pairs = names.length
+    ? names.map((n) => n.split('=').map((v, i) => (i && /^\d+$/.test(v) ? Number(v) : v)))
+    : [...Object.entries(rec.slots).map(([s, v]) => [s, v.id]), ...Object.values(RIGS).map((r) => [r.slot, r.zoodle])];
   if (!pairs.length) console.log('Nothing recorded yet. Use: pull ghoul=<zoodle id> ...');
   for (const [slot, id] of pairs) {
     if (!SLOTS[slot] || !id) throw new Error(`Use slot=<id>; slots: ${Object.keys(SLOTS).join(', ')}`);
@@ -174,9 +180,19 @@ async function pull() {
       await save(slot, await api(BATCH.model(r.job, r.item, SLOTS[slot].tris || 8000), { raw: true }));
       continue;
     }
-    const clips = CHARACTERS[slot] ? await pullAnimations(slot, id) : 0;
-    // A rigged animation GLB carries the mesh too; without one, the static game model.
-    if (!clips) await save(slot, await api(`/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
+    if (CHARACTERS[slot]) {
+      if (await pullAnimations(slot, id)) continue;
+      // No Zoodle animations: the static model is the rig script's source.
+      const rig = Object.values(RIGS).find((x) => x.slot === slot);
+      if (!rig) {
+        console.log(`  ${slot} uses the ${CHARACTERS[slot].model} model; pull its creature instead`);
+        continue;
+      }
+      await saveFile(rig.source, await api(`/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
+      console.log(`  now: npm run rig -- ${slot}`);
+      continue;
+    }
+    await save(slot, await api(propModel(slot, id), { raw: true }));
     rec.slots[slot] = { ...rec.slots[slot], id };
     await saveRecord(rec);
   }
@@ -204,6 +220,12 @@ async function pullAnimations(slot, id) {
   return taken.size;
 }
 
+// A prop's game model, decimated by Zoodle to the prop's budget (free).
+const propModel = (slot, id) => {
+  const t = SLOTS[slot].maxTris;
+  return `/api/v1/characters/${encodeURIComponent(id)}/game-model${t ? `?maxTris=${t}` : ''}`;
+};
+
 async function objects() {
   const slots = chooseSlots(PROPS);
   const rec = await loadRecord();
@@ -216,31 +238,55 @@ async function objects() {
     console.log('Dry run. Each object costs Z-Coins; add --spend to generate.');
     return;
   }
+  // Submit at most 5 a minute (the API's creation limit), then poll them all.
+  // A slot already submitted (recorded as pending) is picked up again rather
+  // than paid for twice; a 503 (generator down, nothing charged) is retried.
+  const pending = new Map();
+  let submitted = 0;
   for (const s of todo) {
-    console.log(`${s}: generating`);
-    // Prompts are 3-500 characters; at most 5 creations a minute.
-    const made = await api('/api/v1/objects', { method: 'POST', body: { prompt: SLOTS[s].prompt.slice(0, 500), name: s, faceLimit: 10000 } });
-    console.log(`  cost ${made.cost ?? '?'}, balance ${made.balance ?? '?'}`);
+    const r = rec.slots[s];
+    if (r?.source === 'objects' && r.status === 'pending') {
+      pending.set(s, `/api/v1/objects/${encodeURIComponent(r.id)}`);
+      continue;
+    }
+    let made;
+    for (let attempt = 0; ; attempt++) {
+      if (submitted || attempt) await sleep(attempt ? 60000 : 13000);
+      try {
+        // Prompts are 3-500 characters.
+        made = await api('/api/v1/objects', { method: 'POST', body: { prompt: SLOTS[s].prompt.slice(0, 500), name: s, faceLimit: 10000 } });
+        break;
+      } catch (e) {
+        if (!/-> 503/.test(e.message) || attempt >= 10) throw e;
+        console.log(`${s}: generator unavailable, retrying in a minute`);
+      }
+    }
+    submitted++;
     const id = pick(made, 'id', 'object.id', 'objectId');
     if (!id) throw new Error(`No object id in response: ${JSON.stringify(made).slice(0, 300)}`);
+    console.log(`${s}: generating as ${id} (cost ${made.cost ?? '?'}, balance ${made.balance ?? '?'})`);
     rec.slots[s] = { id, source: 'objects', status: 'pending' };
     await saveRecord(rec);
-    const statusPath = pick(made, 'statusUrl', 'object.statusUrl') || `/api/v1/objects/${encodeURIComponent(id)}`;
-    let obj = made;
-    for (let i = 0; ; i++) {
+    pending.set(s, pick(made, 'statusUrl', 'object.statusUrl') || `/api/v1/objects/${encodeURIComponent(id)}`);
+  }
+  for (let i = 0; pending.size; i++) {
+    if (i > 240) throw new Error(`Timed out waiting for ${[...pending.keys()].join(', ')}; ids are recorded, run objects again to resume`);
+    await sleep(8000);
+    for (const [s, statusPath] of pending) {
+      const obj = await api(statusPath);
       const st = pick(obj, 'status', 'object.status');
-      if (st === 'completed') break;
-      if (st === 'failed' || st === 'error') throw new Error(`${s}: generation failed: ${JSON.stringify(obj).slice(0, 300)}`);
-      if (i > 240) throw new Error(`${s}: timed out waiting; id ${id} is recorded, retry with: pull ${s}=${id}`);
-      await sleep(5000);
-      obj = await api(statusPath);
-      process.stdout.write(`  ${pick(obj, 'status', 'object.status')}\r`);
+      if (st === 'failed' || st === 'error') {
+        console.log(`${s}: generation failed: ${JSON.stringify(obj).slice(0, 300)}`);
+        rec.slots[s].status = 'failed';
+        pending.delete(s);
+      } else if (st === 'completed') {
+        console.log(`${s}: done`);
+        await save(s, await api(propModel(s, rec.slots[s].id), { raw: true }));
+        rec.slots[s].status = 'done';
+        pending.delete(s);
+      }
+      await saveRecord(rec);
     }
-    const modelPath = pick(obj, 'gameModelUrl', 'object.gameModelUrl') || `/api/v1/characters/${encodeURIComponent(id)}/game-model`;
-    await save(s, await api(modelPath, { raw: true }));
-    rec.slots[s].status = 'done';
-    await saveRecord(rec);
-    await sleep(13000);
   }
 }
 

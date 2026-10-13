@@ -141,12 +141,14 @@ export class Game {
     const staged = this._stageExtras();
     const jobs = [];
     const seen = new Set();
+    const textures = new Set();
     const collect = (scene, cam) => {
       scene.updateMatrixWorld(true);
       scene.traverse((o) => {
         if (!o.material || !(o.isMesh || o.isPoints || o.isSprite || o.isLine)) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-          const key = [m.type, m.customProgramCacheKey?.(), m.vertexShader?.length, m.fragmentShader?.length, !!m.map, !!m.emissiveMap, !!m.bumpMap, m.vertexColors, m.transparent, m.blending, m.side, m.fog, o.isInstancedMesh, o.isSkinnedMesh].join('|');
+          for (const t of [m.map, m.normalMap, m.emissiveMap, m.bumpMap, m.roughnessMap, m.metalnessMap]) if (t) textures.add(t);
+          const key = [m.type, m.customProgramCacheKey?.(), m.vertexShader?.length, m.fragmentShader?.length, !!m.map, !!m.emissiveMap, !!m.bumpMap, !!m.normalMap, !!m.roughnessMap, !!m.metalnessMap, m.vertexColors, m.transparent, m.blending, m.side, m.fog, o.isInstancedMesh, o.isSkinnedMesh].join('|');
           if (seen.has(key)) continue;
           seen.add(key);
           jobs.push([o, scene, cam]);
@@ -158,6 +160,14 @@ export class Game {
     collect(this.hud.scene, this.hud.camera);
     const r = this.renderer;
     const nextFrame = () => new Promise((res) => setTimeout(res, 16));
+    // Upload every texture too, not only the first per shader.
+    for (const t of textures) {
+      try {
+        r.initTexture(t);
+      } catch {
+        // Uploading early is an optimisation only.
+      }
+    }
     for (const [o, scene, cam] of jobs) {
       this._drawAlone(r, o, scene, cam);
       await nextFrame();
@@ -416,13 +426,13 @@ export class Game {
       this.best = floor;
       if (floor > 1) this.newRecord = true;
     }
-    const depth = (floor - 1) / 19;
-    const fogColor = new THREE.Color(0x0a0505).lerp(new THREE.Color(0x1f0402), depth);
-    const s = this._newScene({ fog: fogColor, density: def.fog, background: fogColor.getHex() });
+    // The floor's look sets the fog and the ambient light (world/themes.js).
     const level = new Level(floor, def, { light: this.slow > 0 });
+    const look = level.look;
+    const s = this._newScene({ fog: look.fog, density: def.fog * (look.haze || 1), background: look.fog });
     this.level = level;
     s.add(level.group);
-    s.add(new THREE.HemisphereLight(new THREE.Color(0x4a3030).lerp(new THREE.Color(0x6a2010), depth), 0x0a0202, 0.75));
+    s.add(new THREE.HemisphereLight(look.sky, look.earth, look.hemi));
 
     this.enemies = [];
     this.effects = new Effects(s, this.fx);

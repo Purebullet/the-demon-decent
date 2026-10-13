@@ -2,12 +2,17 @@ import * as THREE from 'three';
 import { Assets } from '../assets/AssetLibrary.js';
 import { Hurtbox, AnchoredHurtbox } from '../physics/Hitbox.js';
 import { attackWeights, FLAMES } from './poses.js';
+import { attackClipTime } from './clipPhases.js';
 
 // Wraps an AI-generated GLB creature for the game: root, joints, body-part
 // hurtboxes, fire emitters and an animate() driven by the AI state.
 //
-// Rigged models (with a skeleton and clips): hurtboxes ride the head, chest,
-// hips and forearm bones, and clips are driven from the AI state.
+// Rigged models (with a skeleton and clips, see scripts/rig.mjs): hurtboxes
+// ride the head, chest, hips and forearm bones, sized from the mesh, and the
+// AI state drives the clips. Clip time comes from the game, not the clock:
+// walking and running follow the stride phase, so feet keep pace with the
+// ground, and an attack clip follows its windup, strike and recovery, so a
+// claw lands exactly while the strike volume is live.
 //
 // Static meshes (what Zoodle's game models are): a vertex-shader deformer
 // bends the body around the hips, so the torso rears back on a telegraph,
@@ -90,8 +95,8 @@ export function buildGltfCharacter(id, rootScale = 1) {
     if (o.isBone) bones.push(o);
   });
   const find = (pattern) => {
-    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
-    return bones.find((b) => re.test(norm(b.name))) || null;
+    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i');
+    return bones.find((b) => b.name === pattern) || bones.find((b) => re.test(norm(b.name))) || null;
   };
   const head = find(BONES.head);
   const chest = find(BONES.chest);
@@ -133,7 +138,18 @@ export function buildGltfCharacter(id, rootScale = 1) {
 
   let hurtboxes;
   const bentAnchors = [];
-  if (rigged) {
+  if (rigged && inst.rig?.hurtboxes) {
+    // Measured from the mesh by the rig script, in model units.
+    const k = inst.unit;
+    hurtboxes = inst.rig.hurtboxes
+      .map((h) => {
+        const b = find(h.bone);
+        if (!b) return null;
+        const v = (a) => new THREE.Vector3(a[0] * k, a[1] * k, a[2] * k);
+        return new AnchoredHurtbox(b, root, v(h.offset), v(h.half), { name: h.name, multiplier: h.multiplier });
+      })
+      .filter(Boolean);
+  } else if (rigged) {
     hurtboxes = [
       new AnchoredHurtbox(head, root, V(0, 0.03, 0.01), V(0.085, 0.09, 0.09), { name: 'head', multiplier: 1.5 }),
       new AnchoredHurtbox(chest, root, V(0, 0, 0), V(0.18, 0.15, 0.12), { name: 'torso' }),
@@ -197,29 +213,75 @@ export function buildGltfCharacter(id, rootScale = 1) {
   });
 
   // ---- Clips (rigged models only) ----
+  // Every clip is played with time set by the game and blended by weights
+  // that ease toward their targets, so changes of state never pop.
   const clips = inst.clips;
   const mixer = rigged && Object.keys(clips).length ? new THREE.AnimationMixer(inst.model) : null;
-  const actions = {};
-  if (mixer) for (const [slot, clip] of Object.entries(clips)) actions[slot] = mixer.clipAction(clip);
-  let current = null;
-  let currentSlot = '';
-  let lastAttack = null;
-  let lastState = '';
+  const layers = new Map();
+  const layer = (name) => {
+    if (!mixer || !clips[name]) return null;
+    let l = layers.get(name);
+    if (!l) {
+      const action = mixer.clipAction(clips[name]);
+      action.play();
+      action.paused = true;
+      action.setEffectiveWeight(0);
+      l = { action, weight: 0, target: 0, time: 0, duration: clips[name].duration };
+      layers.set(name, l);
+    }
+    return l;
+  };
+  const TAU = Math.PI * 2;
+  const frac = (v) => v - Math.floor(v);
 
-  function play(slot, { once = false, duration = 0, fade = 0.18 } = {}) {
-    const a = actions[slot];
-    if (!a) return false;
-    if (currentSlot === slot && !once) return true;
-    a.reset();
-    a.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
-    a.clampWhenFinished = once;
-    a.timeScale = duration > 0 ? a.getClip().duration / duration : 1;
-    a.play();
-    if (current && current !== a) current.crossFadeTo(a, fade, false);
-    current = a;
-    currentSlot = slot;
-    return true;
+  function drive(e, dt, t) {
+    for (const l of layers.values()) l.target = 0;
+    const set = (name, u, w = 1) => {
+      const l = layer(name);
+      if (!l) return false;
+      l.target += w;
+      l.time = Math.min(0.999, Math.max(0, u)) * l.duration;
+      return true;
+    };
+    let rate = 9;
+    const k = Math.min(1, e.stateT / Math.max(1e-3, e.stateDur));
+    const attacking = e.state === 'windup' || e.state === 'strike' || e.state === 'recover';
+    if (e.state === 'dying') {
+      rate = 14;
+      set('death', e.stateT / 1.6) || set('hit', 1);
+    } else if (e.state === 'stagger') {
+      rate = 16;
+      set('hit', k);
+    } else if (attacking && e.attack && (clips[e.attack.name] || clips.attack)) {
+      rate = 14;
+      set(clips[e.attack.name] ? e.attack.name : 'attack', attackClipTime(e.state, k));
+    } else {
+      // Idle, walk and run blended by speed; feet follow the stride phase.
+      const mv = e.moveBlend;
+      const stride = frac(e.walkPhase / TAU);
+      const run = clips.run ? Math.min(1, Math.max(0, (mv - 0.5) / 0.3)) : 0;
+      const walk = Math.min(1, mv / 0.25) * (1 - run);
+      if (walk > 0) set('walk', stride, walk);
+      if (run > 0) set('run', stride, run);
+      set('idle', frac(t / (clips.idle?.duration || 3) + e.seed), Math.max(0, 1 - walk - run));
+    }
+    let total = 0;
+    for (const l of layers.values()) {
+      l.weight += (l.target - l.weight) * Math.min(1, dt * rate);
+      if (l.weight < 0.002 && l.target === 0) l.weight = 0;
+      total += l.weight;
+    }
+    for (const l of layers.values()) {
+      const w = total > 0 ? l.weight / total : 0;
+      l.action.enabled = w > 0;
+      l.action.setEffectiveWeight(w);
+      l.action.time = l.time;
+    }
+    mixer.update(0);
   }
+
+  const ext = new THREE.Box3().setFromObject(inst.inner).getSize(new THREE.Vector3());
+  const reach = Math.hypot(ext.x, ext.z) / 2;
 
   const tmp = new THREE.Vector3();
   function animate(e, dt, t) {
@@ -229,21 +291,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
     const stagger = e.state === 'stagger' ? Math.sin(Math.min(1, e.stateT / e.stateDur) * Math.PI) : 0;
 
     if (mixer) {
-      if (e.state === 'dying') play('death', { once: true, fade: 0.1 });
-      else if (e.state === 'stagger') {
-        if (lastState !== 'stagger') play('hit', { once: true, duration: e.stateDur, fade: 0.08 });
-      } else if (attacking && actions.attack) {
-        if (e.attack !== lastAttack || (e.state === 'windup' && lastState !== 'windup')) {
-          const a = e.attack;
-          play('attack', { once: true, duration: e.stateDur + a.strike + a.recover, fade: 0.1 });
-        }
-      } else if (mv > 0.55 && actions.run) play('run');
-      else if (mv > 0.08 && actions.walk) play('walk');
-      else play('idle') || play('walk');
-      if (current && (currentSlot === 'walk' || currentSlot === 'run')) current.timeScale = 0.6 + mv * 0.7;
-      mixer.update(dt);
-      // Clip-less moves still get a body lean.
-      pose.rotation.x = attacking && !actions.attack ? -0.25 * raise + 0.4 * swing : 0;
+      drive(e, dt, t);
+      // Attacks without a clip of their own still get a body lean.
+      pose.rotation.x = attacking && !clips[e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0;
     } else if (!rigged) {
       const sweep = /sweep|gust|lash/.test(e.attack?.name || '');
       const sw = Math.sin(e.walkPhase);
@@ -256,8 +306,6 @@ export function buildGltfCharacter(id, rootScale = 1) {
       pose.position.y = Math.abs(sw) * 0.03 * H * mv;
       for (const b of bentAnchors) bendPoint(b.rest, b.anchor.position);
     }
-    lastAttack = e.attack;
-    lastState = e.state;
 
     if (anchors.length) pose.updateMatrixWorld(true);
     for (const a of anchors) {
@@ -276,8 +324,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
     fire,
     animate,
     height: H,
-    hitRadius: H * 0.6,
-    ownDeath: !!actions.death,
+    // Long beasts reach further from their centre than they are tall.
+    hitRadius: Math.max(H * 0.6, reach),
+    ownDeath: !!clips.death && !!mixer,
     generated: true,
     rigged,
   };

@@ -14,7 +14,8 @@
     "p0": "NODE_USE_ENV_PROXY=1 node scripts/p0.mjs",
     "lot": "node scripts/make-lot.mjs",
     "devkit:check": "node scripts/devkit-check.mjs",
-    "concepts": "NODE_USE_ENV_PROXY=1 node scripts/concepts.mjs"
+    "concepts": "NODE_USE_ENV_PROXY=1 node scripts/concepts.mjs",
+    "rig": "node scripts/rig.mjs"
   },
   "dependencies": {
     "three": "0.186.1"

@@ -1,22 +1,23 @@
 // Every 3D asset slot in the game, filled by AI-generated, medium-poly GLBs
-// from Zoodle. Creatures come from an approved concept image (image-to-3D
-// batch, see scripts/concepts.mjs and scripts/zoodle.mjs); props from their
-// text prompt. No creature is modelled in code: one without its GLB shows a
+// from Zoodle. No creature is modelled in code: one without its GLB shows a
 // plain "missing model" block in development, and `npm run build` refuses to
 // package the game until every creature has its model.
 //
-// Sizes are in metres. Characters are scaled so their height matches, then
-// stood on y = 0 facing +Z (`yaw` corrects a model that faces elsewhere).
-// `tris` is the triangle budget the model is exported at. Rigged characters
-// get hitboxes on their bones and play their animation clips (saved as
-// <id>-<clip>.glb by `npm run zoodle -- pull`).
+// Creatures are Zoodle characters (`zoodle` is the character id). Zoodle's
+// game models are static, so `npm run zoodle -- pull` saves them to
+// assets/source/ and `npm run rig` gives each one a skeleton, skin weights
+// and its animation clips (scripts/rig.mjs, joints in scripts/rigs.mjs),
+// written to `model`. The two bosses are two of the creatures grown huge, so
+// they share their model with them, `tint`ed.
 //
-// `fire` puts flame emitters on bones (`bone` is a name pattern) at an offset
-// given as a fraction of the character's height. `at` is the same point in
-// root space, used when the model has no skeleton. Flames are particles in the
-// game, so the concept art is drawn without them.
-
-const STYLE = 'dark fantasy, realistic, highly detailed PBR textures, game-ready, clean topology';
+// Sizes are in metres. Characters are scaled so their height matches, then
+// stood on y = 0 facing +Z. Rigged models carry their own hurtboxes and
+// marker bones (horn tips, a staff's head).
+//
+// `fire` puts flame emitters on bones (`bone` is a name pattern, any case)
+// at an offset given as a fraction of the character's height. `at` is the
+// same point in root space, used when the model has no skeleton. Flames are
+// particles in the game, so the models are made without them.
 
 // What image-to-3D needs from a concept: one whole figure in a neutral pose,
 // nothing in front of it and nothing glowing in the air around it.
@@ -24,91 +25,98 @@ const SHEET =
   'Single creature concept for a 3D game model. Whole body from the top of the head to the feet, nothing cropped, centred, ' +
   'plain flat light grey background, soft even studio light, no cast shadow, no ground, no scenery, no text, no frame, no watermark. ' +
   'No fire, flames, smoke, sparks or magic effects anywhere: glowing parts are drawn as solid glowing material. ' +
-  'Realistic, highly detailed dark fantasy creature with painted PBR materials, sharp focus';
+  'Stylized dark fantasy creature with hand-painted textures, sharp focus';
 const BIPED = 'Front three-quarter view, standing upright in a relaxed A-pose, arms held a little away from the body, legs slightly apart, feet flat';
 const BEAST = 'Side three-quarter view, standing square on all four legs, legs slightly apart, head level, tail held straight out';
 
 export const CHARACTERS = {
   ghoul: {
-    name: 'Husk Ghoul',
+    // Zoodle "Gaunt Wolf-Beast": the swarming pack of the upper floors.
+    name: 'Gaunt Stalker',
+    zoodle: 204,
     model: 'assets/models/ghoul.glb',
-    height: 1.45,
-    tris: 10000,
-    reference: 'assets/reference/ghoul.png',
-    look: 'Emaciated grey ghoul, hairless bulbous head with long pointed bat ears, pale glowing eyes, wide mouth of needle teeth, visible ribs and a sagging belly, long thin arms ending in hooked claws, mottled grey-purple skin, hunched shoulders',
-    pose: BIPED,
+    height: 1.3,
+    body: 'beast',
+    look: 'Gaunt starving wolf-beast with very long thin legs and long clawed toes, a shaggy mane of dark blue and moss-green fur over the shoulders and neck, bare dark grey hide on the ribs and legs, pointed ears, glowing yellow eyes, a long bushy blue and green tail',
+    pose: BEAST,
     fire: [],
   },
   fiend: {
-    name: 'Chain Fiend',
+    // Zoodle "Shadow Beast": the flanker.
+    name: 'Shadow Fiend',
+    zoodle: 209,
     model: 'assets/models/fiend.glb',
-    height: 2.1,
-    tris: 15000,
-    reference: 'assets/reference/fiend.png',
-    look: 'Muscular purple-skinned demon, a mane of long ragged glowing green hair, four swept-back bone horns, glowing cyan eyes, fanged reptilian snout, bone spikes on the shoulders, iron chains across the chest and wrists, brown loincloth with a skull belt, clawed digitigrade feet, a hooked iron sickle on a chain hanging from its right hand',
+    height: 2.2,
+    look: 'Hunched, heavily muscled demon of dark purple-grey stone-like plated hide, huge curled ram horns, glowing red eyes, a jutting jaw of white tusks, very long arms with hooked claws, digitigrade clawed feet',
     pose: BIPED,
-    fire: [{ bone: 'head', offset: [0, 0.06, -0.04], at: [0, 0.97, -0.03], kind: 'green', rate: 40 }],
+    fire: [],
   },
   brute: {
+    // Zoodle "Horned Monster": the bruiser.
     name: 'Flame-Horned Brute',
+    zoodle: 203,
     model: 'assets/models/brute.glb',
-    height: 2.5,
-    tris: 15000,
-    reference: 'assets/reference/brute.jpg',
-    look: 'Hulking brown-skinned demon with a skull-like face and red glowing eyes, thick curved horns with glowing ember-orange tips, spiked shoulders and back, a glowing molten X-shaped scar on the chest, iron chain belt with a large ring buckle, tattered dark leather loincloth, chains wrapped on the forearms, clawed hands, holding a spiked bone club',
+    height: 2.3,
+    look: 'Fat hulking ogre-demon with crimson skin and olive-green belly and blotches, a huge shaggy mane of dark purple fur over the back and shoulders, short branching antler horns, glowing yellow eyes, a heavy brow and tusked underbite, long arms with big clawed hands, short thick legs',
     pose: BIPED,
     fire: [
-      { bone: 'head', offset: [-0.07, 0.07, 0.01], at: [-0.07, 0.99, 0.02], kind: 'horn', rate: 30 },
-      { bone: 'head', offset: [0.07, 0.07, 0.01], at: [0.07, 0.99, 0.02], kind: 'horn', rate: 30 },
-      { bone: 'head', offset: [-0.05, 0.03, 0], at: [-0.05, 0.95, 0.02], kind: 'hornBlue', rate: 16 },
-      { bone: 'head', offset: [0.05, 0.03, 0], at: [0.05, 0.95, 0.02], kind: 'hornBlue', rate: 16 },
+      { bone: 'LeftHorn', at: [0.1, 0.91, 0.08], kind: 'horn', rate: 26 },
+      { bone: 'RightHorn', at: [-0.1, 0.91, 0.08], kind: 'horn', rate: 26 },
     ],
   },
   hound: {
+    // Zoodle "Demon Hound": the fast pack hunter of the hotter floors.
     name: 'Cinder Hound',
+    zoodle: 210,
     model: 'assets/models/hound.glb',
-    height: 1.15,
-    tris: 10000,
+    height: 1.25,
     body: 'beast',
-    look: 'Skinless hellhound, lean wolf-like body of exposed dark red muscle and patches of black scorched hide, cracks of glowing molten orange along the spine and ribs, long narrow skull with bared teeth and no lips, glowing yellow eyes, a ridge of short bone spikes down the back, long clawed paws, thin whip-like tail',
+    look: 'Snarling hellhound with crimson skin under a bristling mane of dark brown spiked fur, a gaping jaw of yellowed fangs, pointed ears, a studded iron collar with heavy chains wrapped around its body and dragging on the ground, a thick curled tail',
     pose: BEAST,
-    fire: [{ at: [0, 0.95, 0.05], kind: 'ember', rate: 10 }],
+    fire: [{ bone: 'Waist', offset: [0, 0.1, 0], at: [0, 0.62, 0], kind: 'ember', rate: 10 }],
   },
   witch: {
+    // Zoodle "Demon Witch": the caster.
     name: 'Pyre Witch',
+    zoodle: 206,
     model: 'assets/models/witch.glb',
-    height: 2.0,
-    tris: 15000,
-    look: 'Gaunt, hunched hag-demon with charred ash-grey skin, long matted black hair, small curled goat horns, eyes sewn shut with glowing orange stitches, a ragged black hooded robe hanging in tatters, a necklace of small skulls, very long clawed fingers, holding upright in her right hand a tall gnarled bone staff topped with a blackened horned skull whose eye sockets glow orange',
-    pose: BIPED,
-    fire: [{ bone: 'righthand|hand_r|r_hand|hand.r', offset: [0, 0.5, 0], at: [0.28, 1.04, 0.08], kind: 'torch', rate: 34, name: 'staffTip' }],
-  },
-  gorvath: {
-    // Boss of floor 10.
-    name: 'Gorvath, the Flame-Horned',
-    model: 'assets/models/gorvath.glb',
-    height: 4.75,
-    tris: 20000,
-    look: 'Colossal demon warlord, skull-like face with a heavy jaw of tusks, enormous curved horns with glowing ember tips, dense spikes on the shoulders and back, a molten heart glowing orange through a cracked chest, blackened iron plates riveted into the shoulders, iron chain belt with a ring buckle, tattered leather loincloth, clawed hands, holding a huge spiked bone club',
+    height: 2.1,
+    look: 'Old, scary, skinny hunched witch with dark red wrinkled skin, glowing orange eyes, a tall crooked pointed hat whose tip curls and burns, a necklace of fangs, long tattered dark robes, holding a gnarled staff topped with a glowing orange crystal in her right hand',
     pose: BIPED,
     fire: [
-      { bone: 'head', offset: [-0.07, 0.07, 0.01], at: [-0.07, 0.99, 0.02], kind: 'horn', rate: 40 },
-      { bone: 'head', offset: [0.07, 0.07, 0.01], at: [0.07, 0.99, 0.02], kind: 'horn', rate: 40 },
-      { bone: 'spine2|chest|spine', offset: [0.02, 0.0, 0.08], at: [0.02, 0.72, 0.1], kind: 'heart', rate: 20 },
+      { bone: 'StaffTip', at: [-0.13, 0.9, 0.12], kind: 'torch', rate: 30, name: 'staffTip' },
+      { bone: 'HatEnd', at: [0.02, 0.95, -0.06], kind: 'horn', rate: 10 },
+    ],
+  },
+  gorvath: {
+    // Boss of floor 10: the brute, grown huge and burning.
+    name: 'Gorvath, the Flame-Horned',
+    zoodle: 203,
+    model: 'assets/models/brute.glb',
+    tint: [1, 0.72, 0.62],
+    height: 4.4,
+    look: 'The Horned Monster grown colossal',
+    pose: BIPED,
+    fire: [
+      { bone: 'LeftHorn', at: [0.1, 0.91, 0.08], kind: 'horn', rate: 44 },
+      { bone: 'RightHorn', at: [-0.1, 0.91, 0.08], kind: 'horn', rate: 44 },
+      { bone: 'Chest', offset: [0, 0.02, 0.12], at: [0, 0.55, 0.15], kind: 'heart', rate: 14 },
     ],
   },
   azrakel: {
-    // Final boss of floor 20.
-    name: 'Azrakel, the Winged Archfiend',
-    model: 'assets/models/azrakel.glb',
-    height: 4.9,
-    tris: 20000,
-    reference: 'assets/reference/archfiend.jpg',
-    look: 'Towering winged archdemon with a skeletal grinning face, enormous curved ram horns, huge tattered bat wings half spread, gaunt muscular brown body with small spikes and iron rings, a heart glowing orange through the chest, chain belt over a long ragged dark robe, holding a tall wooden staff topped with an iron fire basket full of glowing coals',
+    // Final boss of floor 20: the shadow fiend, grown huge, blood-red and burning.
+    name: 'Azrakel, the Archfiend',
+    zoodle: 209,
+    model: 'assets/models/fiend.glb',
+    tint: [1, 0.55, 0.52],
+    height: 4.8,
+    look: 'The Shadow Beast grown colossal',
     pose: BIPED,
     fire: [
-      { bone: 'spine2|chest|spine', offset: [0.02, 0.0, 0.06], at: [0.02, 0.7, 0.08], kind: 'heart', rate: 30 },
-      { bone: 'righthand|hand_r|r_hand|hand.r', offset: [0, 0.42, 0], at: [0.3, 1.0, 0.1], kind: 'torch', rate: 40, name: 'staffTip' },
+      { bone: 'LeftHorn', at: [0.1, 0.92, 0.09], kind: 'horn', rate: 40 },
+      { bone: 'RightHorn', at: [-0.1, 0.92, 0.09], kind: 'horn', rate: 40 },
+      { bone: 'Heart', at: [0, 0.66, 0.12], kind: 'heart', rate: 30 },
+      { bone: 'StaffTip', at: [-0.19, 0.27, 0.05], kind: 'torch', rate: 30, name: 'staffTip' },
     ],
   },
 };
@@ -120,19 +128,46 @@ export function conceptPrompt(id) {
 }
 
 // Props: `size` is the target height (or length for weapons, measured along
-// their longest axis, which is turned to point up).
+// their longest axis, which is turned to point up). `maxTris` is the budget
+// Zoodle decimates the download to: scenery that is instanced hundreds of
+// times (wall rocks, stalactites) stays very light.
+//
+// Every prop is drawn in the creatures' look (stylized, hand-painted, chunky
+// shapes, muted charcoal, purple and crimson), so the caverns and the demons
+// read as one world. Props that glow per floor (crystals, fungus, eggs) are
+// generated pale, and each floor's theme tints them (see world/themes.js).
+const LOOK =
+  'stylized dark fantasy game asset, hand-painted painterly textures like a sculpted fantasy creature, chunky exaggerated shapes, soft sculpted forms, muted charcoal, deep purple and dark crimson tones, single object, no ground, no base plate';
+
 export const PROPS = {
-  sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, single object, ${STYLE}` },
-  axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, single object, ${STYLE}` },
-  mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, single object, ${STYLE}` },
-  potion: { model: 'assets/models/potion.glb', size: 0.36, prompt: `Small round glass potion flask filled with glowing blood-red liquid, cork stopper, leather cord, single object, ${STYLE}` },
-  brazier: { model: 'assets/models/brazier.glb', size: 1.3, prompt: `Wrought iron brazier on three clawed legs, bowl filled with glowing coals, single object, ${STYLE}` },
-  pillar: { model: 'assets/models/cave-pillar.glb', size: 6.4, prompt: `Massive natural cave rock column from floor to ceiling, dark volcanic stone with cracks, single object, ${STYLE}` },
-  rock: { model: 'assets/models/cave-rock.glb', size: 2.6, instanced: true, prompt: `Jagged dark volcanic boulder with sharp facets and deep cracks, single object, ${STYLE}` },
-  column: { model: 'assets/models/ruin-column.glb', size: 5.5, prompt: `Broken ancient dark stone column snapped at the top, cracked fluted shaft, square plinth base, weathered gothic ruin, single object, ${STYLE}` },
-  shard: { model: 'assets/models/rock-shard.glb', size: 4, prompt: `Tall jagged obsidian rock spike, sharp broken shard, dark volcanic stone, single object, ${STYLE}` },
-  tree: { model: 'assets/models/dead-tree.glb', size: 6, prompt: `Dead twisted leafless tree, black charred bark, gnarled branches, single object, ${STYLE}` },
-  gravestone: { model: 'assets/models/gravestone.glb', size: 1.2, prompt: `Weathered cracked gothic gravestone, dark stone, single object, ${STYLE}` },
-  skulls: { model: 'assets/models/skull-pile.glb', size: 0.6, prompt: `Small pile of human skulls and bones, single object, ${STYLE}` },
-  well: { model: 'assets/models/blood-well.glb', size: 2.7, prompt: `Ancient round stone well filled with dark blood, iron frame with hanging chains, single object, ${STYLE}` },
+  sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
+  axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
+  mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
+  potion: { model: 'assets/models/potion.glb', size: 0.36, maxTris: 1500, prompt: `Small round glass potion flask filled with glowing blood-red liquid, cork stopper, leather cord, ${LOOK}` },
+  brazier: { model: 'assets/models/brazier.glb', size: 1.3, maxTris: 3000, prompt: `Wrought iron brazier on three clawed demon legs, wide bowl heaped with glowing orange coals, ${LOOK}` },
+  // ---- Cavern scenery (floors 1-20).
+  pillar: { model: 'assets/models/cave-pillar.glb', size: 6.4, maxTris: 2500, prompt: `Massive gnarled natural cave column of dark stone from floor to ceiling, dripping mineral flows, thick at the base and top, narrower in the middle, ${LOOK}` },
+  rock: { model: 'assets/models/cave-rock.glb', size: 2.6, maxTris: 300, instanced: true, prompt: `Large jagged cave boulder of dark stone, broken sharp facets and deep cracks, ${LOOK}` },
+  slab: { model: 'assets/models/cave-slab.glb', size: 3, maxTris: 300, instanced: true, prompt: `Tall broken slab of layered cave rock, stacked stone strata with jagged edges, ${LOOK}` },
+  stalagmite: { model: 'assets/models/stalagmite.glb', size: 2.4, maxTris: 450, instanced: true, prompt: `Cluster of three tall pointed stalagmites of wet dark cave stone with dripping mineral ridges, ${LOOK}` },
+  skulls: { model: 'assets/models/skull-pile.glb', size: 0.6, maxTris: 1200, instanced: true, prompt: `Small pile of human skulls and scattered bones, ${LOOK}` },
+  crystal: { model: 'assets/models/crystal.glb', size: 1.7, maxTris: 1200, glow: true, prompt: `Cluster of jagged pale white glowing crystal shards growing out of a dark rock, sharp translucent points, ${LOOK}` },
+  fungus: { model: 'assets/models/fungus.glb', size: 1.3, maxTris: 1500, glow: true, prompt: `Cluster of eerie cave mushrooms with thin crooked stalks and drooping pale caps covered in glowing spots, ${LOOK}` },
+  eggs: { model: 'assets/models/egg-sacs.glb', size: 1.1, maxTris: 1500, glow: true, prompt: `Cluster of five large oval demon eggs standing upright in a nest of dark roots, smooth pale glossy shells with dark veins, ${LOOK}` },
+  ribcage: { model: 'assets/models/ribcage.glb', size: 3.4, maxTris: 3000, prompt: `Skeleton of a giant beast: a long spine lying on the ground with six huge curved bleached-white rib bones rising from it like an open cage, gaps between the ribs, ${LOOK}` },
+  cage: { model: 'assets/models/gibbet-cage.glb', size: 2.4, maxTris: 2000, prompt: `Rusted iron gibbet cage shaped like a tall birdcage with a slumped human skeleton inside, ${LOOK}` },
+  stakes: { model: 'assets/models/stakes.glb', size: 2, maxTris: 2000, prompt: `Row of sharpened crooked wooden impaling stakes with skulls stuck on top, bound with rope, ${LOOK}` },
+  chains: { model: 'assets/models/hanging-chains.glb', size: 3.2, maxTris: 1600, prompt: `Bundle of heavy rusted iron chains hanging straight down with a large bloody meat hook at the bottom, ${LOOK}` },
+  altar: { model: 'assets/models/altar.glb', size: 1.4, maxTris: 2500, prompt: `Demonic sacrificial stone altar with carved horns at the corners, melted candles and dried blood, ${LOOK}` },
+  obelisk: { model: 'assets/models/obelisk.glb', size: 3.6, maxTris: 1500, glow: true, prompt: `Tall cracked black stone obelisk with a jagged broken top, carved with pale glowing runes, ${LOOK}` },
+  statue: { model: 'assets/models/demon-statue.glb', size: 3.4, maxTris: 3000, prompt: `Tall weathered stone statue of a standing horned demon warrior holding a sword point-down in front of it, on a square pedestal, cracked grey stone, ${LOOK}` },
+  remains: { model: 'assets/models/chained-skeleton.glb', size: 1.1, maxTris: 2500, prompt: `Human skeleton sitting slumped with its arms chained up to an iron ring, tattered rags, ${LOOK}` },
+  gate: { model: 'assets/models/hell-gate.glb', size: 5.2, maxTris: 4000, prompt: `Huge demonic stone archway made of two great curved horns meeting at the top, carved skulls along the arch, open gateway, ${LOOK}` },
+  throne: { model: 'assets/models/throne.glb', size: 4.2, maxTris: 4000, prompt: `Massive demonic throne of black obsidian and bones with huge curved horns rising from the back, ${LOOK}` },
+  // ---- The surface and the sanctums.
+  well: { model: 'assets/models/blood-well.glb', size: 2.7, prompt: `Ancient round stone well filled with dark blood, iron frame with hanging chains, ${LOOK}` },
+  column: { model: 'assets/models/ruin-column.glb', size: 5.5, maxTris: 2500, prompt: `Broken ancient dark stone column snapped at the top, cracked fluted shaft, square plinth base, weathered gothic ruin, ${LOOK}` },
+  shard: { model: 'assets/models/rock-shard.glb', size: 4, maxTris: 1200, prompt: `Tall jagged obsidian rock spike, sharp broken shard, dark volcanic stone, ${LOOK}` },
+  tree: { model: 'assets/models/dead-tree.glb', size: 6, maxTris: 3000, prompt: `Dead twisted leafless tree, black charred bark, gnarled clawing branches, ${LOOK}` },
+  gravestone: { model: 'assets/models/gravestone.glb', size: 1.2, maxTris: 1200, prompt: `Weathered cracked gothic gravestone, dark stone, ${LOOK}` },
 };

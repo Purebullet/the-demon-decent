@@ -86,14 +86,20 @@ async function loadIndex() {
   }
 }
 
-async function load(url, available) {
-  if (!url || !available.has(url)) return null;
-  try {
-    return await loader.loadAsync(resolveUrl(url));
-  } catch (e) {
-    console.warn(`Could not load ${url}: ${e.message}`);
-    return null;
+// One request per file: the bosses share their model with a creature.
+const loading = new Map();
+function load(url, available) {
+  if (!url || !available.has(url)) return Promise.resolve(null);
+  if (!loading.has(url)) {
+    loading.set(
+      url,
+      loader.loadAsync(resolveUrl(url)).catch((e) => {
+        console.warn(`Could not load ${url}: ${e.message}`);
+        return null;
+      }),
+    );
   }
+  return loading.get(url);
 }
 
 function boundsOf(object) {
@@ -113,8 +119,10 @@ const CLIP_PATTERNS = {
 
 function sortClips(animations, extra) {
   const clips = {};
+  // Clips named exactly (the rig script's idle, walk, ..., and one per attack).
+  for (const a of animations) clips[a.name] = a;
   for (const [slot, re] of Object.entries(CLIP_PATTERNS)) {
-    const c = animations.find((a) => re.test(a.name));
+    const c = clips[slot] || animations.find((a) => re.test(a.name));
     if (c) clips[slot] = c;
   }
   // Single-clip files named in the manifest win for their slot.
@@ -170,8 +178,10 @@ export const Assets = {
     }
     const scene = gltf.scene;
     let skinned = false;
+    let rig = null;
     scene.traverse((o) => {
       if (o.isSkinnedMesh) skinned = true;
+      if (o.userData.rig) rig = o.userData.rig;
     });
     const box = boundsOf(scene);
     const size = box.getSize(_v);
@@ -179,6 +189,7 @@ export const Assets = {
     this.characters.set(id, {
       scene,
       skinned,
+      rig,
       clips: sortClips(gltf.animations, extra),
       entry,
       unitScale: entry.height / Math.max(1e-3, size.y),
@@ -226,12 +237,14 @@ export const Assets = {
       if (!o.isMesh) return;
       o.frustumCulled = !o.isSkinnedMesh;
       o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
+      // A boss sharing a creature's model is told apart by its colour.
+      if (a.entry.tint) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.color.multiply(new THREE.Color(...a.entry.tint));
     });
     const inner = new THREE.Group();
     inner.add(model);
     inner.scale.setScalar(a.unitScale / rootScale);
     inner.rotation.y = a.entry.yaw || 0;
-    return { inner, model, clips: a.clips, entry: a.entry, height: a.entry.height / rootScale };
+    return { inner, model, clips: a.clips, rig: a.rig, entry: a.entry, height: a.entry.height / rootScale, unit: a.unitScale / rootScale };
   },
 
   // A normalized copy of a prop. Materials are shared unless `own` is set.

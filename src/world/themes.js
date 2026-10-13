@@ -1,0 +1,425 @@
+// How each floor looks. A floor names its look in LevelData.js (`look`);
+// a look sets the cavern's palette and light and which generated props dress
+// it, so the descent passes through distinct places (dripping fungus caves,
+// an ossuary, chain halls, brimstone, the molten deep, a flesh pit, the
+// throne) while every floor reuses the same handful of models. Within a look,
+// each floor's own seed varies the tint, the props' placement and sizes.
+//
+//   rock      albedo multiplier for the walls, pillars and stalactites
+//   ground    floor colour (0-255) for the painted cave-floor texture
+//   veins     glowing cracks in floor and walls: [r, g, b] (0-255) and strength
+//   fog       fog and background colour; `haze` scales the floor's fog density
+//   sky/earth/hemi  the hemisphere light (colours and intensity)
+//   glow      the colour crystals, fungus, eggs and runes glow in
+//   flame     brazier light colour
+//   ceiling   cavern height in metres (visual only)
+//   walls     weights of the wall rock shapes
+//   hang      stalactites per floor tile
+//   rubble    loose stones per floor tile
+//   decor     [prop, weight, where, scale]: `edge` against the walls, `open`
+//             anywhere on the floor, `hang` from the ceiling, `wall` big
+//             pieces backed into the rock and facing the room
+//   density   decor pieces per wall-side tile
+//   pillars   props that stand on the map's pillar tiles (`o`)
+
+export const LOOKS = {
+  // Floors 1-2: wet violet stone, pale fungus glowing sick green.
+  maw: {
+    rock: [0.52, 0.47, 0.58],
+    ground: [50, 44, 58],
+    veins: null,
+    fog: 0x07070b,
+    haze: 1,
+    sky: 0x313848,
+    earth: 0x060508,
+    hemi: 0.75,
+    glow: 0x58ff9a,
+    flame: 0xff7a30,
+    ceiling: 6.4,
+    walls: { rock: 3, slab: 1 },
+    hang: 0.28,
+    rubble: 0.4,
+    density: 0.32,
+    decor: [
+      ['fungus', 4, 'edge', [0.7, 1.4]],
+      ['stalagmite', 2, 'edge', [0.5, 1.1]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+      ['crystal', 0.7, 'edge', [0.5, 0.9]],
+      ['chains', 0.6, 'hang', [0.8, 1.1]],
+    ],
+    pillars: ['pillar', 'stalagmite'],
+  },
+  weeping: {
+    rock: [0.46, 0.5, 0.6],
+    ground: [44, 48, 60],
+    veins: null,
+    fog: 0x05080c,
+    haze: 1.05,
+    sky: 0x2c3a4c,
+    earth: 0x040608,
+    hemi: 0.75,
+    glow: 0x46d8ff,
+    flame: 0xff7a30,
+    ceiling: 7.2,
+    walls: { rock: 2, slab: 2 },
+    hang: 0.45,
+    rubble: 0.35,
+    density: 0.3,
+    decor: [
+      ['crystal', 3, 'edge', [0.5, 1.1]],
+      ['fungus', 2, 'edge', [0.6, 1.2]],
+      ['stalagmite', 2, 'edge', [0.5, 1.2]],
+      ['remains', 0.6, 'wall', [0.9, 1.1]],
+      ['chains', 0.5, 'hang', [0.8, 1.1]],
+    ],
+    pillars: ['pillar', 'stalagmite'],
+  },
+  // Bone-strewn halls: skulls, ribcages and the chained dead.
+  ossuary: {
+    rock: [0.62, 0.56, 0.54],
+    ground: [62, 54, 50],
+    veins: null,
+    fog: 0x0a0808,
+    haze: 1,
+    sky: 0x40363a,
+    earth: 0x070505,
+    hemi: 0.75,
+    glow: 0xb4ff5a,
+    flame: 0xff8a3a,
+    ceiling: 6.8,
+    walls: { rock: 2, slab: 2 },
+    hang: 0.2,
+    rubble: 0.3,
+    density: 0.42,
+    decor: [
+      ['skulls', 5, 'edge', [0.8, 1.6]],
+      ['skulls', 1.5, 'open', [0.6, 1]],
+      ['remains', 1.5, 'wall', [0.9, 1.15]],
+      ['ribcage', 1, 'wall', [0.8, 1.1]],
+      ['stakes', 1, 'edge', [0.8, 1.1]],
+      ['cage', 0.4, 'hang', [0.9, 1.1]],
+    ],
+    pillars: ['statue', 'pillar'],
+  },
+  // Iron: hanging chains and gibbets, the chained dead, braziers.
+  chains: {
+    rock: [0.55, 0.48, 0.46],
+    ground: [56, 46, 42],
+    veins: null,
+    fog: 0x0b0706,
+    haze: 1,
+    sky: 0x44302a,
+    earth: 0x080404,
+    hemi: 0.75,
+    glow: 0xff8a3a,
+    flame: 0xff7a30,
+    ceiling: 7.6,
+    walls: { rock: 2, slab: 2 },
+    hang: 0.18,
+    rubble: 0.3,
+    density: 0.38,
+    decor: [
+      ['chains', 4, 'hang', [0.9, 1.25]],
+      ['cage', 1.6, 'hang', [0.9, 1.1]],
+      ['remains', 2, 'wall', [0.9, 1.15]],
+      ['stakes', 1, 'edge', [0.8, 1.1]],
+      ['skulls', 1.5, 'edge', [0.8, 1.3]],
+    ],
+    pillars: ['pillar'],
+  },
+  // Sulphur: yellow crystal and choking amber haze.
+  brimstone: {
+    rock: [0.6, 0.5, 0.4],
+    ground: [62, 50, 34],
+    veins: [255, 170, 40, 0.35],
+    fog: 0x120d05,
+    haze: 1.1,
+    sky: 0x4a3a20,
+    earth: 0x080502,
+    hemi: 0.8,
+    glow: 0xffc030,
+    flame: 0xff9a30,
+    ceiling: 7,
+    walls: { rock: 3, slab: 1 },
+    hang: 0.25,
+    rubble: 0.5,
+    density: 0.34,
+    decor: [
+      ['crystal', 4, 'edge', [0.6, 1.3]],
+      ['stalagmite', 2, 'edge', [0.6, 1.2]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+      ['obelisk', 0.5, 'wall', [0.8, 1]],
+    ],
+    pillars: ['crystal', 'pillar'],
+  },
+  // A jaw of stone: stalagmite teeth everywhere, stakes, red light.
+  teeth: {
+    rock: [0.6, 0.42, 0.42],
+    ground: [62, 40, 38],
+    veins: null,
+    fog: 0x0e0505,
+    haze: 1,
+    sky: 0x4a2626,
+    earth: 0x080303,
+    hemi: 0.75,
+    glow: 0xff4a3a,
+    flame: 0xff6a24,
+    ceiling: 6.6,
+    walls: { rock: 2, slab: 1 },
+    hang: 0.55,
+    rubble: 0.35,
+    density: 0.48,
+    decor: [
+      ['stalagmite', 6, 'edge', [0.6, 1.5]],
+      ['stakes', 2, 'edge', [0.8, 1.2]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+      ['crystal', 0.6, 'edge', [0.5, 0.9]],
+    ],
+    pillars: ['stalagmite'],
+  },
+  // Ash-grey stone split by embers; rune stones.
+  cinder: {
+    rock: [0.42, 0.4, 0.42],
+    ground: [46, 42, 42],
+    veins: [255, 90, 20, 0.6],
+    fog: 0x0a0706,
+    haze: 1.05,
+    sky: 0x3a2a26,
+    earth: 0x060303,
+    hemi: 0.75,
+    glow: 0xff7a2a,
+    flame: 0xff6a24,
+    ceiling: 7,
+    walls: { rock: 3, slab: 2 },
+    hang: 0.2,
+    rubble: 0.55,
+    density: 0.3,
+    decor: [
+      ['stalagmite', 2, 'edge', [0.6, 1.2]],
+      ['obelisk', 1.2, 'wall', [0.8, 1.05]],
+      ['skulls', 2, 'edge', [0.8, 1.3]],
+      ['crystal', 1, 'edge', [0.5, 1]],
+    ],
+    pillars: ['obelisk', 'pillar'],
+  },
+  // Raw red rock, stakes and gibbets.
+  flayed: {
+    rock: [0.66, 0.38, 0.38],
+    ground: [66, 34, 34],
+    veins: null,
+    fog: 0x100404,
+    haze: 1.05,
+    sky: 0x4c2222,
+    earth: 0x090202,
+    hemi: 0.78,
+    glow: 0xff3a2a,
+    flame: 0xff5a20,
+    ceiling: 6.6,
+    walls: { rock: 2, slab: 2 },
+    hang: 0.25,
+    rubble: 0.3,
+    density: 0.42,
+    decor: [
+      ['stakes', 4, 'edge', [0.8, 1.25]],
+      ['cage', 1, 'hang', [0.9, 1.1]],
+      ['chains', 1.5, 'hang', [0.9, 1.2]],
+      ['remains', 1.2, 'wall', [0.9, 1.15]],
+      ['skulls', 2, 'edge', [0.8, 1.3]],
+    ],
+    pillars: ['pillar', 'stalagmite'],
+  },
+  // Grey ash, silent statues and rune stones.
+  ash: {
+    rock: [0.5, 0.48, 0.5],
+    ground: [52, 50, 52],
+    veins: null,
+    fog: 0x0b0a0c,
+    haze: 1.1,
+    sky: 0x3c3a44,
+    earth: 0x060608,
+    hemi: 0.72,
+    glow: 0xc8a0ff,
+    flame: 0xff7a30,
+    ceiling: 7.8,
+    walls: { rock: 2, slab: 3 },
+    hang: 0.2,
+    rubble: 0.6,
+    density: 0.28,
+    decor: [
+      ['statue', 1.4, 'wall', [0.85, 1.05]],
+      ['obelisk', 1.2, 'wall', [0.8, 1]],
+      ['skulls', 2, 'edge', [0.8, 1.3]],
+      ['stalagmite', 2, 'edge', [0.6, 1.2]],
+    ],
+    pillars: ['statue', 'obelisk', 'pillar'],
+  },
+  // Gorvath's arena: fire, braziers and statues around the lava.
+  crucible: {
+    rock: [0.5, 0.36, 0.32],
+    ground: [56, 36, 28],
+    veins: [255, 80, 15, 0.9],
+    fog: 0x140603,
+    haze: 0.9,
+    sky: 0x5a2a16,
+    earth: 0x0a0302,
+    hemi: 0.85,
+    glow: 0xff6a20,
+    flame: 0xff6a20,
+    ceiling: 9,
+    walls: { rock: 2, slab: 2 },
+    hang: 0.25,
+    rubble: 0.4,
+    density: 0.3,
+    decor: [
+      ['statue', 1.5, 'wall', [0.95, 1.15]],
+      ['stakes', 1.5, 'edge', [0.9, 1.2]],
+      ['skulls', 2, 'edge', [0.9, 1.4]],
+      ['chains', 1, 'hang', [1, 1.3]],
+    ],
+    pillars: ['statue', 'pillar'],
+  },
+  // Obsidian split by molten rivers; red crystal.
+  molten: {
+    rock: [0.34, 0.3, 0.34],
+    ground: [38, 30, 32],
+    veins: [255, 70, 10, 1.1],
+    fog: 0x160502,
+    haze: 0.95,
+    sky: 0x5c2410,
+    earth: 0x0c0302,
+    hemi: 0.85,
+    glow: 0xff3a10,
+    flame: 0xff5a1a,
+    ceiling: 7.4,
+    walls: { rock: 3, slab: 1 },
+    hang: 0.3,
+    rubble: 0.45,
+    density: 0.34,
+    decor: [
+      ['crystal', 3, 'edge', [0.6, 1.3]],
+      ['stalagmite', 2, 'edge', [0.6, 1.3]],
+      ['stakes', 1, 'edge', [0.8, 1.2]],
+      ['cage', 0.8, 'hang', [0.9, 1.1]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+    ],
+    pillars: ['crystal', 'pillar', 'obelisk'],
+  },
+  // A living pit: egg clutches, fungus and bones in raw pink rock.
+  flesh: {
+    rock: [0.66, 0.42, 0.46],
+    ground: [64, 36, 42],
+    veins: [255, 40, 70, 0.45],
+    fog: 0x120408,
+    haze: 1.05,
+    sky: 0x50223a,
+    earth: 0x0a0206,
+    hemi: 0.8,
+    glow: 0xff5a8a,
+    flame: 0xff5a30,
+    ceiling: 6.4,
+    walls: { rock: 3, slab: 1 },
+    hang: 0.35,
+    rubble: 0.25,
+    density: 0.46,
+    decor: [
+      ['eggs', 5, 'edge', [0.7, 1.4]],
+      ['fungus', 2, 'edge', [0.7, 1.3]],
+      ['ribcage', 1.2, 'wall', [0.9, 1.2]],
+      ['remains', 0.8, 'wall', [0.9, 1.1]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+    ],
+    pillars: ['pillar', 'stalagmite'],
+  },
+  // The screaming deep: violet crystal, rune stones and statues.
+  void: {
+    rock: [0.42, 0.36, 0.52],
+    ground: [42, 34, 54],
+    veins: [170, 60, 255, 0.5],
+    fog: 0x0a0612,
+    haze: 1.05,
+    sky: 0x3a2a5a,
+    earth: 0x05030a,
+    hemi: 0.8,
+    glow: 0xb45aff,
+    flame: 0xff6a30,
+    ceiling: 8,
+    walls: { rock: 2, slab: 3 },
+    hang: 0.35,
+    rubble: 0.35,
+    density: 0.34,
+    decor: [
+      ['crystal', 4, 'edge', [0.7, 1.4]],
+      ['obelisk', 1.4, 'wall', [0.85, 1.05]],
+      ['statue', 1, 'wall', [0.9, 1.1]],
+      ['skulls', 1, 'edge', [0.8, 1.2]],
+    ],
+    pillars: ['crystal', 'obelisk', 'statue'],
+  },
+  // Before Azrakel: a processional of statues and rune stones.
+  gate: {
+    rock: [0.44, 0.34, 0.36],
+    ground: [48, 34, 36],
+    veins: [255, 60, 20, 0.8],
+    fog: 0x120404,
+    haze: 1,
+    sky: 0x50201c,
+    earth: 0x0a0202,
+    hemi: 0.85,
+    glow: 0xff4020,
+    flame: 0xff5a20,
+    ceiling: 9,
+    walls: { rock: 2, slab: 3 },
+    hang: 0.25,
+    rubble: 0.35,
+    density: 0.3,
+    decor: [
+      ['statue', 2, 'wall', [0.95, 1.15]],
+      ['obelisk', 1.4, 'wall', [0.9, 1.1]],
+      ['stakes', 1, 'edge', [0.9, 1.2]],
+      ['chains', 1, 'hang', [1, 1.3]],
+      ['crystal', 1, 'edge', [0.6, 1.1]],
+    ],
+    pillars: ['statue', 'obelisk'],
+  },
+  // Azrakel's hall: the throne, red crystal, molten floor.
+  throne: {
+    rock: [0.38, 0.28, 0.3],
+    ground: [42, 28, 28],
+    veins: [255, 50, 15, 1.2],
+    fog: 0x160303,
+    haze: 0.9,
+    sky: 0x601c12,
+    earth: 0x0c0202,
+    hemi: 0.9,
+    glow: 0xff2a10,
+    flame: 0xff4a18,
+    ceiling: 10,
+    walls: { rock: 2, slab: 3 },
+    hang: 0.3,
+    rubble: 0.35,
+    density: 0.3,
+    decor: [
+      ['crystal', 2.5, 'edge', [0.8, 1.5]],
+      ['statue', 1.5, 'wall', [1, 1.2]],
+      ['obelisk', 1, 'wall', [0.9, 1.1]],
+      ['skulls', 1.5, 'edge', [0.9, 1.4]],
+    ],
+    pillars: ['obelisk', 'statue', 'crystal'],
+  },
+};
+
+// The look of one floor, varied by the floor's own seed: a few percent of
+// hue and light, so two floors of the same look are never quite alike.
+export function lookFor(def, floor, rand) {
+  const base = LOOKS[def.look] || LOOKS.maw;
+  const j = (v, k) => v * (1 + (rand() - 0.5) * k);
+  const look = { ...base, ...(def.lookOverrides || {}) };
+  look.rock = base.rock.map((v) => j(v, 0.12));
+  look.ground = base.ground.map((v) => Math.round(j(v, 0.12)));
+  look.ceiling = j(base.ceiling, 0.1);
+  look.hang = j(base.hang, 0.3);
+  look.density = j(base.density, 0.2);
+  // The deep (floors 11+) runs hotter: faint molten veins where none are set.
+  if (!look.veins && floor > 10) look.veins = [255, 70, 20, 0.35];
+  return look;
+}

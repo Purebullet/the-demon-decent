@@ -1,0 +1,144 @@
+{
+  "slots": {
+    "rock": {
+      "id": 212,
+      "source": "objects",
+      "status": "done"
+    },
+    "slab": {
+      "id": 213,
+      "source": "objects",
+      "status": "done"
+    },
+    "stalagmite": {
+      "id": 214,
+      "source": "objects",
+      "status": "done"
+    },
+    "pillar": {
+      "id": 215,
+      "source": "objects",
+      "status": "done"
+    },
+    "skulls": {
+      "id": 216,
+      "source": "objects",
+      "status": "done"
+    },
+    "crystal": {
+      "id": 217,
+      "source": "objects",
+      "status": "done"
+    },
+    "fungus": {
+      "id": 218,
+      "source": "objects",
+      "status": "done"
+    },
+    "eggs": {
+      "id": 242,
+      "source": "objects",
+      "status": "done"
+    },
+    "ribcage": {
+      "id": 241,
+      "source": "objects",
+      "status": "done"
+    },
+    "cage": {
+      "id": 221,
+      "source": "objects",
+      "status": "done"
+    },
+    "stakes": {
+      "id": 222,
+      "source": "objects",
+      "status": "done"
+    },
+    "chains": {
+      "id": 223,
+      "source": "objects",
+      "status": "done"
+    },
+    "altar": {
+      "id": 224,
+      "source": "objects",
+      "status": "done"
+    },
+    "obelisk": {
+      "id": 225,
+      "source": "objects",
+      "status": "done"
+    },
+    "statue": {
+      "id": 240,
+      "source": "objects",
+      "status": "done"
+    },
+    "remains": {
+      "id": 227,
+      "source": "objects",
+      "status": "done"
+    },
+    "gate": {
+      "id": 228,
+      "source": "objects",
+      "status": "done"
+    },
+    "throne": {
+      "id": 229,
+      "source": "objects",
+      "status": "done"
+    },
+    "brazier": {
+      "id": 230,
+      "source": "objects",
+      "status": "done"
+    },
+    "potion": {
+      "id": 231,
+      "source": "objects",
+      "status": "done"
+    },
+    "sword": {
+      "id": 232,
+      "source": "objects",
+      "status": "done"
+    },
+    "axe": {
+      "id": 233,
+      "source": "objects",
+      "status": "done"
+    },
+    "mace": {
+      "id": 234,
+      "source": "objects",
+      "status": "done"
+    },
+    "well": {
+      "id": 235,
+      "source": "objects",
+      "status": "done"
+    },
+    "column": {
+      "id": 236,
+      "source": "objects",
+      "status": "done"
+    },
+    "shard": {
+      "id": 237,
+      "source": "objects",
+      "status": "done"
+    },
+    "tree": {
+      "id": 238,
+      "source": "objects",
+      "status": "done"
+    },
+    "gravestone": {
+      "id": 239,
+      "source": "objects",
+      "status": "done"
+    }
+  }
+}

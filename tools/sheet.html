@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Model sheet</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+</head>
+<body>
+<!-- Every generated model in assets/models on one sheet, labelled
+     (tools/sheet.html?cols=7). -->
+<script type="module">
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  const q = new URLSearchParams(location.search);
+  const files = (await (await fetch('../assets/models/index.json').catch(() => fetch('/assets/models/index.json'))).json());
+  const cols = +q.get('cols') || 7;
+  const S = 220;
+  const rows = Math.ceil(files.length / cols);
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setSize(cols * S, rows * (S + 18));
+  r.setScissorTest(true);
+  document.body.appendChild(r.domElement);
+  const label = document.createElement('canvas');
+  label.width = cols * S;
+  label.height = rows * (S + 18);
+  label.style.cssText = 'position:absolute;left:0;top:0';
+  document.body.appendChild(label);
+  const ctx = label.getContext('2d');
+  ctx.fillStyle = '#ddd';
+  ctx.font = '13px sans-serif';
+  const loader = new GLTFLoader();
+  for (const [i, f] of files.entries()) {
+    const gltf = await loader.loadAsync(`../assets/models/${f}`);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.2));
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    sun.position.set(2, 4, 3);
+    scene.add(sun, gltf.scene);
+    const box = new THREE.Box3().setFromObject(gltf.scene, true);
+    const c = box.getCenter(new THREE.Vector3());
+    const R = Math.max(...box.getSize(new THREE.Vector3()).toArray()) * 0.62;
+    const cam = new THREE.OrthographicCamera(-R, R, R, -R, 0.01, 100);
+    cam.position.copy(c).add(new THREE.Vector3(0.7, 0.4, 0.7).normalize().multiplyScalar(R * 4));
+    cam.lookAt(c);
+    const x = (i % cols) * S;
+    const yTop = Math.floor(i / cols) * (S + 18);
+    r.setViewport(x, label.height - yTop - S - 18, S, S);
+    r.setScissor(x, label.height - yTop - S - 18, S, S);
+    r.setClearColor(i % 2 ? 0x2a2a2e : 0x313136);
+    r.render(scene, cam);
+    ctx.fillText(f.replace('.glb', ''), x + 6, yTop + S + 13);
+  }
+  window.done = true;
+</script>
+</body>
+</html>

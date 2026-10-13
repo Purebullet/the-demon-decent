@@ -2,40 +2,21 @@ import * as THREE from 'three';
 import { TILE } from './LevelData.js';
 import { parseLevel } from './levelParser.js';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
-import { rockTextures, emberVeinTexture, runeCircleTexture } from './Textures.js';
+import { runeCircleTexture } from './Textures.js';
 import { lavaMaterial, portalMaterial } from './Shaders.js';
-import { C, spawnFlame, burst } from './Particles.js';
+import { C, spawnFlame } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
+import { lookFor } from './themes.js';
+import { Dressing } from './Dressing.js';
 
 // Builds one cavern floor from its hand-authored map and runs its hazards.
-// Visuals are instanced where possible; collision and navigation come
-// straight from the parsed tile grid, so what you see is what blocks you.
+// The scenery is dressed in the floor's look (Dressing.js, themes.js);
+// collision and navigation come straight from the parsed tile grid, so what
+// you see is what blocks you.
 
-const CEIL = 6.4;
 const SPIKE_PERIOD = 2.6;
 const VENT_PERIOD = 4.2;
-
-function boulderGeometry(seed) {
-  const g = new THREE.IcosahedronGeometry(1, 2);
-  const p = g.attributes.position;
-  const r = mulberry32(seed);
-  const bumps = Array.from({ length: 6 }, () => new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize());
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const n = v.clone().normalize();
-    let d = 1;
-    for (const b of bumps) d += Math.max(0, n.dot(b)) ** 3 * 0.25 - 0.06;
-    // Hash per position so shared vertices of the same corner move together.
-    const h = Math.sin(v.x * 12.9898 + v.y * 78.233 + v.z * 37.719 + seed) * 43758.5453;
-    d += (h - Math.floor(h) - 0.5) * 0.12;
-    v.copy(n).multiplyScalar(d);
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  g.computeVertexNormals();
-  return g;
-}
 
 export class Level {
   // `light`: fewer dynamic lights, for slow machines and software rendering.
@@ -55,13 +36,18 @@ export class Level {
     this.time = 0;
     this.depth = (floorNumber - 1) / 19;
     this.rand = mulberry32(floorNumber * 7919);
+    this.look = lookFor(def, floorNumber, mulberry32(floorNumber * 7919 + 17));
     this.spikeTiles = d.spikes.map((s) => ({ ...s, phase: ((s.c + s.r) % 4) * 0.3, hitPlayer: false, hitEnemies: new Set(), lastCycle: -1 }));
     this.ventTiles = d.vents.map((v, i) => ({ ...v, phase: (i * 1.37) % VENT_PERIOD, tick: 0 }));
     this.lavaSet = new Set(d.lava.map((l) => l.r * d.cols + l.c));
 
-    this._buildRock();
+    this.dressing = new Dressing(this, this.look, { light });
+    // Beyond this the fog has swallowed everything (exp2 fog at 3%).
+    this.viewRange = Math.sqrt(3.5) / Math.max(0.01, def.fog * (this.look.haze || 1));
+    this.group.add(this.dressing.group);
     this._buildProps();
     this._buildHazards();
+    this._buildGlowLights();
     this._buildExit();
   }
 
@@ -91,185 +77,14 @@ export class Level {
     return best;
   }
 
-  _rockMaterial(seed, darker = 1) {
-    const deep = this.depth;
-    const tint = [Math.round(62 + deep * 25), Math.round(52 - deep * 18), Math.round(48 - deep * 18)];
-    const { map, bump } = rockTextures(seed, tint);
-    return new THREE.MeshStandardMaterial({
-      map,
-      bumpMap: bump,
-      bumpScale: 3,
-      roughness: 0.95,
-      color: new THREE.Color(darker, darker, darker),
-      emissive: deep > 0.45 ? 0xffffff : 0x000000,
-      emissiveMap: deep > 0.45 ? emberVeinTexture(17, [255, 60, 10], 18) : null,
-      emissiveIntensity: deep > 0.45 ? (deep - 0.45) * 1.6 : 0,
-    });
-  }
-
-  _buildRock() {
-    const d = this.data;
-    const W = d.cols * TILE;
-    const H = d.rows * TILE;
-    const r = this.rand;
-
-    const floorMat = this._rockMaterial(3);
-    floorMat.map = floorMat.map.clone();
-    floorMat.map.repeat.set(W / 7, H / 7);
-    floorMat.map.needsUpdate = true;
-    floorMat.bumpMap = floorMat.bumpMap.clone();
-    floorMat.bumpMap.repeat.set(W / 7, H / 7);
-    floorMat.bumpMap.needsUpdate = true;
-    if (floorMat.emissiveMap) {
-      floorMat.emissiveMap = floorMat.emissiveMap.clone();
-      floorMat.emissiveMap.repeat.set(W / 9, H / 9);
-      floorMat.emissiveMap.needsUpdate = true;
-    }
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, H), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(W / 2, 0, H / 2);
-    this.group.add(floor);
-
-    const ceilMat = this._rockMaterial(5, 0.45);
-    ceilMat.emissiveIntensity *= 0.3;
-    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, H), ceilMat);
-    ceil.rotation.x = Math.PI / 2;
-    ceil.position.set(W / 2, CEIL, H / 2);
-    this.group.add(ceil);
-
-    // Boulder walls along every solid tile that borders open ground.
-    const edge = [];
-    for (let row = 0; row < d.rows; row++) {
-      for (let c = 0; c < d.cols; c++) {
-        const ch = d.tiles[row][c];
-        if (ch !== '#') continue;
-        let borders = false;
-        for (let dr = -1; dr <= 1 && !borders; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            if (d.nav.isWalkable(c + dc, row + dr)) {
-              borders = true;
-              break;
-            }
-          }
-        }
-        if (borders) edge.push({ c, r: row });
-      }
-    }
-    const wallMat = this._rockMaterial(1, 0.9);
-    for (const k of ['map', 'bumpMap', 'emissiveMap']) {
-      if (!wallMat[k]) continue;
-      wallMat[k] = wallMat[k].clone();
-      wallMat[k].repeat.set(3, 3);
-      wallMat[k].needsUpdate = true;
-    }
-    // A generated cave rock replaces the stand-in boulders when present.
-    let wallGeoMat = wallMat;
-    let geos = [boulderGeometry(1), boulderGeometry(2), boulderGeometry(3)];
-    const rock = Assets.propGeometry('rock');
-    if (rock) {
-      const g = rock.geometry.clone();
-      g.computeBoundingBox();
-      g.center();
-      const sz = g.boundingBox.getSize(new THREE.Vector3());
-      g.scale(2 / sz.x, 2 / sz.y, 2 / sz.z);
-      geos = [g];
-      wallGeoMat = rock.material;
-    }
-    const buckets = geos.map(() => []);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    const s = new THREE.Vector3();
-    const p = new THREE.Vector3();
-    for (const t of edge) {
-      const cx = (t.c + 0.5) * TILE;
-      const cz = (t.r + 0.5) * TILE;
-      for (let layer = 0; layer < 3; layer++) {
-        p.set(cx + (r() - 0.5) * 0.4, layer === 0 ? 1.1 : layer === 1 ? 3.3 : 5.6, cz + (r() - 0.5) * 0.4);
-        e.set((r() - 0.5) * 0.5, r() * Math.PI * 2, (r() - 0.5) * 0.5);
-        q.setFromEuler(e);
-        const w = 1.3 + r() * 0.35;
-        s.set(w, 1.5 + r() * 0.6, w * (0.9 + r() * 0.2));
-        m.compose(p, q, s);
-        buckets[Math.floor(r() * geos.length)].push(m.clone());
-      }
-    }
-    geos.forEach((g, i) => {
-      const inst = new THREE.InstancedMesh(g, wallGeoMat, buckets[i].length);
-      buckets[i].forEach((mm, k) => inst.setMatrixAt(k, mm));
-      inst.instanceMatrix.needsUpdate = true;
-      this.group.add(inst);
-    });
-
-    // Stalactites and floor debris.
-    const stal = [];
-    const debris = [];
-    for (const t of d.floorTiles) {
-      if (r() < 0.22) {
-        p.set(t.x + (r() - 0.5) * 1.6, CEIL - 0.1, t.z + (r() - 0.5) * 1.6);
-        q.setFromEuler(e.set(0, r() * 6, 0));
-        const k = 0.15 + r() * 0.25;
-        s.set(k, 0.6 + r() * 1.8, k);
-        stal.push(m.compose(p, q, s).clone());
-      }
-      if (r() < 0.35 && !this.lavaSet.has(t.r * d.cols + t.c)) {
-        p.set(t.x + (r() - 0.5) * 1.7, 0.02, t.z + (r() - 0.5) * 1.7);
-        q.setFromEuler(e.set(r() * 3, r() * 6, r() * 3));
-        const k = 0.06 + r() * 0.16;
-        s.set(k, k * 0.7, k);
-        debris.push(m.compose(p, q, s).clone());
-      }
-    }
-    // Base flush with the ceiling, point hanging down.
-    const stalGeo = new THREE.ConeGeometry(1, 1, 6);
-    stalGeo.rotateX(Math.PI);
-    stalGeo.translate(0, -0.5, 0);
-    const stalMesh = new THREE.InstancedMesh(stalGeo, wallMat, stal.length);
-    stal.forEach((mm, k) => stalMesh.setMatrixAt(k, mm));
-    const debrisMesh = new THREE.InstancedMesh(geos[0], wallGeoMat, debris.length);
-    debris.forEach((mm, k) => debrisMesh.setMatrixAt(k, mm));
-    this.group.add(stalMesh, debrisMesh);
-
-    // Pillars.
-    const pillarGeo = new THREE.CylinderGeometry(0.85, 1.1, CEIL, 9, 8);
-    const pp = pillarGeo.attributes.position;
-    for (let i = 0; i < pp.count; i++) {
-      const y = pp.getY(i);
-      const k = 1 + Math.sin(y * 3.1 + i) * 0.06 + Math.sin(y * 1.3) * 0.08;
-      pp.setX(i, pp.getX(i) * k);
-      pp.setZ(i, pp.getZ(i) * k);
-    }
-    pillarGeo.computeVertexNormals();
-    for (const pl of d.pillars) {
-      const o = Assets.instanceProp('pillar') || new THREE.Mesh(pillarGeo, wallMat);
-      o.position.set(pl.x, o.isMesh ? CEIL / 2 : 0, pl.z);
-      o.rotation.y = r() * 6;
-      this.group.add(o);
-    }
-
-    // Skull piles, only when a generated model exists.
-    if (Assets.hasProp('skulls')) {
-      for (const t of d.floorTiles) {
-        if (r() > 0.05 || this.lavaSet.has(t.r * d.cols + t.c)) continue;
-        const o = Assets.instanceProp('skulls');
-        o.position.set(t.x + (r() - 0.5) * 1.2, 0, t.z + (r() - 0.5) * 1.2);
-        o.rotation.y = r() * 6;
-        this.group.add(o);
-      }
-    }
-  }
-
   _buildProps() {
     const d = this.data;
     const iron = new THREE.MeshStandardMaterial({ color: 0x26221f, metalness: 0.8, roughness: 0.5 });
     const coal = new THREE.MeshStandardMaterial({ color: 0x331008, emissive: 0xff4a10, emissiveIntensity: 1.6 });
     this.braziers = [];
+    const flame = this.look.flame;
     d.braziers.forEach((b, i) => {
-      const generated = Assets.instanceProp('brazier');
-      if (generated) {
-        generated.position.set(b.x, 0, b.z);
-        this.group.add(generated);
-      }
+      const generated = this.dressing._place('brazier', b.x, b.z, { yaw: this.rand() * Math.PI * 2 });
       const g = new THREE.Group();
       g.visible = !generated;
       g.position.set(b.x, 0, b.z);
@@ -290,7 +105,7 @@ export class Level {
       const anchor = new THREE.Vector3(b.x, 1.3, b.z);
       this.braziers.push({ pos: anchor });
       if (i < this.maxBrazierLights) {
-        const l = new THREE.PointLight(0xff6a20, 18, 14, 1.6);
+        const l = new THREE.PointLight(flame, 18, 14, 1.6);
         l.position.set(b.x, 2.2, b.z);
         this.group.add(l);
         this.lights.push({ light: l, base: 18, seed: i * 3.1 });
@@ -349,6 +164,18 @@ export class Level {
     }
   }
 
+  // Light from the brightest glowing set pieces (crystals, rune stones), with
+  // whatever light budget the braziers and lava left.
+  _buildGlowLights() {
+    const free = Math.min(this.maxLights - this.lights.length, this.maxLights > 2 ? 3 : 1);
+    for (const [i, g] of this.dressing.lightSpots(Math.max(0, free)).entries()) {
+      const l = new THREE.PointLight(this.look.glow, 9, 11, 1.6);
+      l.position.set(g.x, Math.max(1.2, g.y), g.z);
+      this.group.add(l);
+      this.lights.push({ light: l, base: 9, seed: 10 + i * 2.3, slow: true });
+    }
+  }
+
   _buildExit() {
     const x = this.data.exit;
     const g = new THREE.Group();
@@ -363,7 +190,7 @@ export class Level {
     rune.rotation.x = -Math.PI / 2;
     rune.position.y = 0.07;
     g.add(rune);
-    const rockMat = this._rockMaterial(7, 0.7);
+    const rockMat = this.dressing.rockShape.material;
     const r = mulberry32(99);
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
@@ -410,6 +237,7 @@ export class Level {
   update(dt, ctx) {
     this.time += dt;
     const t = this.time;
+    this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.viewRange);
     if (this.lavaMat) this.lavaMat.uniforms.uTime.value = t;
     this.portalMat.uniforms.uTime.value = t;
     this.portalT = Math.min(1, this.portalT + (this.exitOpen ? dt * 0.8 : 0));
@@ -418,7 +246,7 @@ export class Level {
     this.exitRune.material.opacity = 0.25 + this.portalT * 0.6;
     this.exitLight.intensity = 4 + this.portalT * 26 + Math.sin(t * 5) * 2;
     for (const l of this.lights) {
-      l.light.intensity = l.base * (0.85 + Math.sin(t * 9 + l.seed) * 0.08 + Math.sin(t * 23 + l.seed * 2) * 0.05);
+      l.light.intensity = l.slow ? l.base * (0.8 + Math.sin(t * 1.3 + l.seed) * 0.2) : l.base * (0.85 + Math.sin(t * 9 + l.seed) * 0.08 + Math.sin(t * 23 + l.seed * 2) * 0.05);
     }
     const ps = ctx.fx.add;
     for (const b of this.braziers) {

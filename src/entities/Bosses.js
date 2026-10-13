@@ -3,9 +3,9 @@ import { Enemy } from './Enemy.js';
 import { angleDelta, rand } from '../core/rng.js';
 import { C, burst, ring } from '../world/Particles.js';
 
-// Floor 10: Gorvath, the Flame-Horned (the burning-horned demon of the
-// reference art, grown huge). Floor 20: Azrakel, the Winged Archfiend (the
-// winged demon with the torch staff standing behind it).
+// Floor 10: Gorvath, the Flame-Horned (the horned brute, grown huge, its
+// horns ablaze). Floor 20: Azrakel, the Archfiend (the shadow fiend, grown
+// huge and blood-red, fire in its horns and heart).
 //
 // Bosses skip the attack-token system and pick from a phase-dependent move
 // list, never repeating a move three times in a row.
@@ -38,7 +38,7 @@ export const BOSS_TYPES = {
     ],
   },
   azrakel: {
-    name: 'Azrakel, the Winged Archfiend',
+    name: 'Azrakel, the Archfiend',
     asset: 'azrakel',
     scale: 1.45,
     hp: 3600,

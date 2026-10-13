@@ -9,7 +9,9 @@
 
 export const ENEMY_TYPES = {
   ghoul: {
-    name: 'Husk Ghoul',
+    // Gaunt wolf-beasts that hunt in packs: rake with a forepaw, spring from
+    // range, and on deep floors surround you and lunge together.
+    name: 'Gaunt Stalker',
     asset: 'ghoul',
     hp: 38,
     dmg: 8,
@@ -29,7 +31,9 @@ export const ENEMY_TYPES = {
     ],
   },
   fiend: {
-    name: 'Chain Fiend',
+    // Long-armed shadow demon that flanks: wide sweeps, and a reaching grab
+    // that drags you in.
+    name: 'Shadow Fiend',
     asset: 'fiend',
     hp: 72,
     dmg: 13,

@@ -7,9 +7,9 @@
 //   #  rock wall            .  floor             P  player spawn
 //   X  exit portal (opens when the floor is cleared)
 //   o  rock pillar          t  brazier (solid, lit)
-//   g  husk ghoul           c  chain fiend       b  flame-horned brute
+//   g  gaunt stalker        c  shadow fiend      b  flame-horned brute
 //   d  cinder hound         m  pyre witch (keeps her distance, throws fire)
-//   G  burrowed ghoul (ambush, erupts when you pass; floors 11+)
+//   G  burrowed stalker (ambush, erupts when you pass; floors 11+)
 //   B  boss                 h  health potion     w  weapon cache
 //   ~  lava (burns)         ^  spike trap        v  fire vent
 //
@@ -23,12 +23,14 @@
 //   aggro        detection radius in metres
 //   fog          fog density; light = torch radius in metres
 //   loot         drop-chance multiplier
+//   look         how the cavern looks: palette, light and props (world/themes.js)
 
 export const TILE = 2;
 
 export const FLOORS = [
   {
     name: 'The Gullet',
+    look: 'maw',
     hp: 1.0, dmg: 1.0, speed: 1.0, windup: 1.0, cooldown: 1.0, attackers: 2, swarm: false, aggro: 13,
     fog: 0.045, light: 16, loot: 1.2,
     map: [
@@ -53,6 +55,7 @@ export const FLOORS = [
   },
   {
     name: 'The Weeping Tunnels',
+    look: 'weeping',
     hp: 1.08, dmg: 1.05, speed: 1.0, windup: 1.0, cooldown: 1.0, attackers: 2, swarm: false, aggro: 13,
     fog: 0.047, light: 16, loot: 1.1,
     map: [
@@ -76,6 +79,7 @@ export const FLOORS = [
   },
   {
     name: 'The Ossuary',
+    look: 'ossuary',
     hp: 1.16, dmg: 1.1, speed: 1.03, windup: 0.97, cooldown: 0.97, attackers: 2, swarm: false, aggro: 14,
     fog: 0.05, light: 15, loot: 1.0,
     map: [
@@ -100,6 +104,7 @@ export const FLOORS = [
   },
   {
     name: 'The Chain Halls',
+    look: 'chains',
     hp: 1.25, dmg: 1.15, speed: 1.05, windup: 0.95, cooldown: 0.95, attackers: 2, swarm: false, aggro: 14,
     fog: 0.05, light: 15, loot: 1.0,
     map: [
@@ -123,6 +128,7 @@ export const FLOORS = [
   },
   {
     name: 'The Brimstone Fork',
+    look: 'brimstone',
     hp: 1.35, dmg: 1.2, speed: 1.07, windup: 0.93, cooldown: 0.92, attackers: 3, swarm: false, aggro: 14,
     fog: 0.052, light: 15, loot: 1.0,
     map: [
@@ -146,6 +152,7 @@ export const FLOORS = [
   },
   {
     name: 'The Hollow of Teeth',
+    look: 'teeth',
     hp: 1.45, dmg: 1.25, speed: 1.09, windup: 0.91, cooldown: 0.9, attackers: 3, swarm: false, aggro: 15,
     fog: 0.054, light: 15, loot: 1.0,
     map: [
@@ -169,6 +176,7 @@ export const FLOORS = [
   },
   {
     name: 'The Cinder Galleries',
+    look: 'cinder',
     hp: 1.55, dmg: 1.3, speed: 1.11, windup: 0.89, cooldown: 0.88, attackers: 3, swarm: false, aggro: 15,
     fog: 0.055, light: 15, loot: 1.0,
     map: [
@@ -191,6 +199,7 @@ export const FLOORS = [
   },
   {
     name: 'The Flayed Maze',
+    look: 'flayed',
     hp: 1.65, dmg: 1.36, speed: 1.13, windup: 0.87, cooldown: 0.85, attackers: 3, swarm: false, aggro: 12,
     fog: 0.06, light: 14, loot: 1.0,
     map: [
@@ -215,6 +224,7 @@ export const FLOORS = [
   },
   {
     name: 'The Threshold of Ash',
+    look: 'ash',
     hp: 1.75, dmg: 1.42, speed: 1.15, windup: 0.85, cooldown: 0.83, attackers: 3, swarm: false, aggro: 15,
     fog: 0.058, light: 14, loot: 1.1,
     map: [
@@ -237,6 +247,7 @@ export const FLOORS = [
   },
   {
     name: "Gorvath's Crucible",
+    look: 'crucible',
     boss: 'gorvath',
     hp: 1.0, dmg: 1.0, speed: 1.0, windup: 1.0, cooldown: 1.0, attackers: 3, swarm: false, aggro: 40,
     fog: 0.035, light: 16, loot: 1.0,
@@ -264,6 +275,7 @@ export const FLOORS = [
   // ---- The Deep: floors 11-19 change how enemies fight, not just their stats.
   {
     name: 'The Molten Vein',
+    look: 'molten',
     hp: 2.0, dmg: 1.6, speed: 1.28, windup: 0.74, cooldown: 0.72, attackers: 4, swarm: true, aggro: 17,
     fog: 0.05, light: 15, loot: 1.2,
     map: [
@@ -286,6 +298,7 @@ export const FLOORS = [
   },
   {
     name: 'The Spiked Narrows',
+    look: 'teeth',
     hp: 2.1, dmg: 1.66, speed: 1.31, windup: 0.72, cooldown: 0.7, attackers: 4, swarm: true, aggro: 17,
     fog: 0.052, light: 15, loot: 1.2,
     map: [
@@ -308,6 +321,7 @@ export const FLOORS = [
   },
   {
     name: 'The Vent Warrens',
+    look: 'ash',
     hp: 2.2, dmg: 1.72, speed: 1.34, windup: 0.7, cooldown: 0.68, attackers: 4, swarm: true, aggro: 18,
     fog: 0.054, light: 15, loot: 1.2,
     map: [
@@ -330,6 +344,7 @@ export const FLOORS = [
   },
   {
     name: 'The Writhing Pit',
+    look: 'flesh',
     hp: 2.3, dmg: 1.78, speed: 1.37, windup: 0.68, cooldown: 0.66, attackers: 5, swarm: true, aggro: 19,
     fog: 0.05, light: 15, loot: 1.2,
     map: [
@@ -353,6 +368,7 @@ export const FLOORS = [
   },
   {
     name: 'The Cauldron of Chains',
+    look: 'chains',
     hp: 2.4, dmg: 1.84, speed: 1.4, windup: 0.66, cooldown: 0.64, attackers: 5, swarm: true, aggro: 19,
     fog: 0.055, light: 14, loot: 1.25,
     map: [
@@ -375,6 +391,7 @@ export const FLOORS = [
   },
   {
     name: 'The Bonefire Steps',
+    look: 'ossuary',
     hp: 2.5, dmg: 1.9, speed: 1.43, windup: 0.64, cooldown: 0.62, attackers: 5, swarm: true, aggro: 20,
     fog: 0.056, light: 14, loot: 1.25,
     map: [
@@ -397,6 +414,7 @@ export const FLOORS = [
   },
   {
     name: 'The Screaming Deep',
+    look: 'void',
     hp: 2.6, dmg: 1.96, speed: 1.46, windup: 0.62, cooldown: 0.6, attackers: 6, swarm: true, aggro: 21,
     fog: 0.058, light: 14, loot: 1.3,
     map: [
@@ -419,6 +437,7 @@ export const FLOORS = [
   },
   {
     name: 'The Furnace of Sinners',
+    look: 'molten',
     hp: 2.7, dmg: 2.02, speed: 1.49, windup: 0.6, cooldown: 0.58, attackers: 6, swarm: true, aggro: 21,
     fog: 0.06, light: 14, loot: 1.3,
     map: [
@@ -441,6 +460,7 @@ export const FLOORS = [
   },
   {
     name: 'The Last Gate',
+    look: 'gate',
     hp: 2.85, dmg: 2.1, speed: 1.52, windup: 0.58, cooldown: 0.56, attackers: 6, swarm: true, aggro: 22,
     fog: 0.06, light: 14, loot: 1.35,
     map: [
@@ -463,6 +483,7 @@ export const FLOORS = [
   },
   {
     name: 'The Throne of Azrakel',
+    look: 'throne',
     boss: 'azrakel',
     hp: 1.0, dmg: 1.0, speed: 1.0, windup: 1.0, cooldown: 1.0, attackers: 6, swarm: true, aggro: 40,
     fog: 0.03, light: 16, loot: 1.0,

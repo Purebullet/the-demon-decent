@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Model viewer</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+</head>
+<body>
+<!-- Shows one GLB from four sides (front, right, back, top) for checking
+     generated models: tools/model.html?src=../assets/models/ghoul.glb
+     &clip=walk&t=0.5 poses a rigged model at that time of a clip;
+     &grid=1 draws a 0.1 grid in the model's own normalized units. -->
+<script type="module">
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  const q = new URLSearchParams(location.search);
+  const W = +q.get('w') || 1400;
+  const H = +q.get('h') || 420;
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setSize(W, H);
+  r.setScissorTest(true);
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  document.body.appendChild(r.domElement);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 2);
+  sun.position.set(2, 4, 3);
+  scene.add(sun);
+  const gltf = await new GLTFLoader().loadAsync(q.get('src'));
+  // &yaw=<radians> turns the model; &norm=1 scales it to height 1, feet on
+  // y = 0, centred (the frame the rig script places joints in).
+  const model = new THREE.Group();
+  model.add(gltf.scene);
+  model.rotation.y = +q.get('yaw') || 0;
+  scene.add(model);
+  if (q.get('norm')) {
+    model.updateMatrixWorld(true);
+    const b0 = new THREE.Box3().setFromObject(model, true);
+    const k = 1 / (b0.max.y - b0.min.y);
+    const c0 = b0.getCenter(new THREE.Vector3());
+    model.scale.setScalar(k);
+    model.position.set(-c0.x * k, -b0.min.y * k, -c0.z * k);
+  }
+  if (q.get('clip') !== null && gltf.animations.length) {
+    const mixer = new THREE.AnimationMixer(model);
+    const clip = gltf.animations.find((c) => c.name === q.get('clip')) || gltf.animations[+q.get('clip') || 0];
+    mixer.clipAction(clip).play();
+    mixer.setTime(Math.min(0.999, +q.get('t') || 0) * clip.duration);
+  }
+  if (q.get('skel')) {
+    const h = new THREE.SkeletonHelper(model);
+    h.material.depthTest = false;
+    h.material.linewidth = 2;
+    h.renderOrder = 20;
+    scene.add(h);
+  }
+  // &weights=1 paints each vertex by the bone that moves it most.
+  if (q.get('weights')) {
+    model.traverse((o) => {
+      if (!o.isSkinnedMesh) return;
+      const si = o.geometry.attributes.skinIndex;
+      const sw = o.geometry.attributes.skinWeight;
+      const col = new Float32Array(si.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < si.count; i++) {
+        let best = 0;
+        for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
+        const b = si.getComponent(i, best);
+        c.setHSL(((b * 0.618) % 1), 0.75, 0.3 + 0.35 * sw.getComponent(i, best));
+        c.toArray(col, i * 3);
+      }
+      o.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      o.material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    });
+  }
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(model, true);
+  const size = box.getSize(new THREE.Vector3());
+  const c = box.getCenter(new THREE.Vector3());
+  const R = Math.max(size.x, size.y, size.z);
+  if (q.get('grid')) {
+    // Lines every 0.05, brighter every 0.1 (drawn behind the model so they
+    // read through the silhouette edges), centred on the origin.
+    const lines = (plane, z) => {
+      const pts = [];
+      const col = [];
+      for (let i = -20; i <= 20; i++) {
+        const v = i * 0.05;
+        const c = i === 0 ? [1, 0.2, 0.2] : i % 2 ? [0.3, 0.3, 0.3] : [0.55, 0.55, 0.55];
+        pts.push(-1, v, 0, 1, v, 0, v, -1, 0, v, 1, 0);
+        col.push(...c, ...c, ...c, ...c);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true, opacity: 0.55 }));
+      l.renderOrder = 10;
+      if (plane === 'x') l.rotation.y = Math.PI / 2;
+      if (plane === 'y') l.rotation.x = -Math.PI / 2;
+      l.position.z = plane === 'z' ? z : 0;
+      return l;
+    };
+    scene.add(lines('z', 0), lines('x', 0));
+  }
+  const views = [
+    ['front', new THREE.Vector3(0, 0, 1)],
+    ['right', new THREE.Vector3(1, 0, 0)],
+    ['back', new THREE.Vector3(0, 0, -1)],
+    ['three-quarter', new THREE.Vector3(0.7, 0.35, 0.7).normalize()],
+  ];
+  views.push(['top', new THREE.Vector3(0, 1, 0.0001)]);
+  // &views=front,right picks and orders the panels.
+  const pickViews = (q.get('views') || 'front,right,back,three-quarter').split(',');
+  views.splice(0, views.length, ...pickViews.map((n) => views.find((v) => v[0] === n)).filter(Boolean));
+  // &poses=walk:0,walk:0.25,... renders one panel per clip time, seen from
+  // &view (a direction name above, default three-quarter).
+  if (q.get('poses') && gltf.animations.length) {
+    const list = q.get('poses').split(',').map((s) => s.split(':'));
+    scene.add(new THREE.GridHelper(4, 40, 0x6a6a6a, 0x444444));
+    const mixer = new THREE.AnimationMixer(model);
+    const dir = (views.find((v) => v[0] === (q.get('view') || 'three-quarter')) || views[0])[1];
+    const pw = W / list.length;
+    const half = R * 0.62 * Math.max(1, H / pw);
+    list.forEach(([name, t], i) => {
+      mixer.stopAllAction();
+      const clip = gltf.animations.find((c) => c.name === name);
+      if (clip) {
+        const a = mixer.clipAction(clip);
+        a.reset().play();
+        mixer.setTime(Math.min(0.999, +t) * clip.duration);
+      }
+      model.updateMatrixWorld(true);
+      const cam = new THREE.OrthographicCamera((-half * pw) / H, (half * pw) / H, half, -half, 0.01, 100);
+      cam.position.copy(c).addScaledVector(dir, R * 3);
+      cam.lookAt(c);
+      r.setViewport(i * pw, 0, pw, H);
+      r.setScissor(i * pw, 0, pw, H);
+      r.setClearColor(i % 2 ? 0x2a2a2e : 0x303036);
+      r.render(scene, cam);
+    });
+    window.done = true;
+  }
+  const vw = W / views.length;
+  if (!window.done) views.forEach(([, dir], i) => {
+    const half = R * 0.6 * Math.max(1, H / vw);
+    const cam = new THREE.OrthographicCamera((-half * vw) / H, (half * vw) / H, half, -half, 0.01, 100);
+    cam.position.copy(c).addScaledVector(dir, R * 3);
+    cam.lookAt(c);
+    r.setViewport(i * vw, 0, vw, H);
+    r.setScissor(i * vw, 0, vw, H);
+    r.setClearColor(0x2a2a2e);
+    r.render(scene, cam);
+  });
+  window.info = { size: size.toArray(), min: box.min.toArray(), max: box.max.toArray(), anims: gltf.animations.map((a) => a.name) };
+  window.done = true;
+</script>
+</body>
+</html>

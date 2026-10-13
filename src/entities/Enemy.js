@@ -482,7 +482,8 @@ export class Enemy {
     ctx.director.releaseToken(this);
     ctx.pathService.cancel(this);
     this.attack = null;
-    this.setState('dying', 1.6);
+    // A model with its own death clip falls for 1.6 s, lies still, then sinks.
+    this.setState('dying', this.model.ownDeath ? 3.2 : 1.6);
     this.deathYaw = this.yaw;
     burst(ctx.fx.alpha, tmpV.set(this.position.x, 1, this.position.z), { count: 40, speed: 4, color: C.blood, colorEnd: C.bloodDark, size: 0.16, life: 0.9 });
     ctx.audio?.death(this.typeKey, this.position);
@@ -494,7 +495,8 @@ export class Enemy {
     const fall = Math.min(1, this.stateT / 0.45);
     // Models with their own death clip fall by themselves.
     this.root.rotation.set(this.model.ownDeath ? 0 : -fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
-    this.root.position.y = -Math.max(0, (k - 0.55) / 0.45) * 1.5 * (this.type.scale || 1);
+    const sink = this.model.ownDeath ? (this.stateT - 2.2) / 1.0 : (k - 0.55) / 0.45;
+    this.root.position.y = -Math.max(0, sink) * 1.5 * (this.type.scale || 1);
     for (const e of this.emitters) e.rate *= 1 - Math.min(1, dt * 3);
     this._applyKnockback(dt, ctx);
     if (k >= 1) this.removed = true;
