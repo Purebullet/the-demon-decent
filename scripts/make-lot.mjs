@@ -203,7 +203,9 @@ const REST = 2.6
 const FADE = 0.7
 const PIT = ${rb.toFixed(2)}
 // Landing spots on the slopes, [x, y, z], measured when the lot was built.
-const SPOTS = ${JSON.stringify(landing)}
+const SPOTS = [
+${landing.map((s) => '  ' + JSON.stringify(s) + ',').join('\n')}
+]
 const hash = (n) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453
   return x - Math.floor(x)
