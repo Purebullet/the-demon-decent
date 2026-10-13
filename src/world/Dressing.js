@@ -25,7 +25,7 @@ const DIRS = [
 const METAL = { brazier: 0.55, cage: 0.6, chains: 0.6 };
 // Props whose bright parts glow in the floor's glow colour (a brazier's coals
 // in its flame colour), and how strongly.
-const GLOW = { crystal: 1.6, fungus: 1.4, eggs: 1.2, obelisk: 1.5, brazier: 1.2 };
+const GLOW = { crystal: 1.25, fungus: 1.2, eggs: 1.1, obelisk: 1.4, brazier: 1.2 };
 // Rock-like props take the full rock tint; the rest a softer one.
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar']);
 
@@ -200,9 +200,12 @@ export class Dressing {
       const u = unitRock(id);
       if (!u || weight <= 0) continue;
       // The walls fill most of the screen: no normal map, the painted
-      // texture carries their relief.
+      // texture carries their relief; darker than loose rocks, so a wall
+      // right in the torchlight doesn't burn out.
       const material = this.mat(id).clone();
       material.normalMap = null;
+      material.color.multiplyScalar(0.62);
+      material.roughness = 1;
       shapes.push({ id, weight, ...u, material, list: [] });
     }
     if (!shapes.length) {
@@ -218,8 +221,21 @@ export class Dressing {
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
     for (const t of this.wallTiles) {
-      const cx = (t.c + 0.5) * TILE;
-      const cz = (t.r + 0.5) * TILE;
+      // Set back into the rock, away from the open ground beside it, so the
+      // boulders bulge into the room no further than you can walk.
+      let bx = 0;
+      let bz = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (this.d.nav.isWalkable(t.c + dc, t.r + dr)) {
+            bx -= dc;
+            bz -= dr;
+          }
+        }
+      }
+      const bl = Math.hypot(bx, bz) || 1;
+      const cx = (t.c + 0.5) * TILE + (bx / bl) * 0.35;
+      const cz = (t.r + 0.5) * TILE + (bz / bl) * 0.35;
       for (let layer = 0; layer < layers; layer++) {
         // Above head height, fewer and bigger rocks close the wall.
         const high = layer >= 2;
@@ -439,7 +455,7 @@ export class Dressing {
         continue;
       }
       // Along the foot of the wall.
-      const inset = 0.45 + r() * 0.4;
+      const inset = 0.6 + r() * 0.3;
       p.set(t.x + dx * inset + dz * along, 0, t.z + dz * inset + dx * along);
       add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
       if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
