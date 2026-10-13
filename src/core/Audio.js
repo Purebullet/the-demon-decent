@@ -3,6 +3,8 @@
 // fade with distance from the listener. Rapid repeats of the same sound are
 // thinned so a swarm does not turn into noise.
 
+import { SOUND_EXT } from './soundFormat.js';
+
 const DIR = 'assets/sounds/';
 
 export class Audio {
@@ -41,7 +43,7 @@ export class Audio {
     const now = performance.now() / 1000;
     if (now - (this.last.get(name) || 0) < gap) return;
     this.last.set(name, now);
-    this.host.sound.play(this.host.asset(`${DIR}${name}.wav`), { volume: Math.min(1, v), rate: rate * (0.94 + Math.random() * 0.12) });
+    this.host.sound.play(this.host.asset(`${DIR}${name}.${SOUND_EXT}`), { volume: Math.min(1, v), rate: rate * (0.94 + Math.random() * 0.12) });
   }
 
   setLowHealth(k, dt) {

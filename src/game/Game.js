@@ -567,8 +567,20 @@ export class Game {
 
   // ---- Combat feedback: rhythm, counters, guards and procs on the HUD ----
 
+  // Each mechanic is explained once a session, the first time it comes up.
+  _hint(key, markup) {
+    this.hints ||= new Set();
+    if (this.hints.has(key)) return;
+    this.hints.add(key);
+    this.hud.hint(markup);
+  }
+
   _onRhythm(kind, chain = 0) {
     const r = this.run;
+    if (kind === 'swing') this._hint('rhythm', 'Click again <b>the instant your blade finishes its arc</b> for a Perfect Chain');
+    else if (kind === 'perfect' && chain >= 2) this._hint('chain', 'Keep the rhythm: each link of the chain strikes <b>faster, harder</b> and wakes your relics');
+    else if (kind === 'fumble') this._hint('fumble', 'Too early: mashing fumbles the next swing and leaves you <b>exposed</b>');
+    else if (kind === 'heavy') this._hint('heavy', 'A heavy blow cannot be stopped once it falls: <b>commit</b> to it');
     if (kind === 'perfect') {
       if (r) r.best.chain = Math.max(r.best.chain, chain);
       this.hud.rhythm('perfect', chain);
@@ -584,6 +596,8 @@ export class Game {
 
   _onCombat(kind) {
     const r = this.run;
+    if (kind === 'clash') this._hint('guard', 'Guarded: wait for the ward to drop, or break it with an <b>axe</b> or a charged <b>mace</b>');
+    else if (kind === 'counter') this._hint('counter', 'Counter-hit: strike a demon <b>while it glows red</b> winding up');
     if (kind === 'counter') {
       if (r) r.best.counters++;
       this.hud.callout('COUNTER', { color: '#ffb060', size: 1.15 });
@@ -598,6 +612,7 @@ export class Game {
 
   _onProc(id, P) {
     if (this.run) this.run.best.procs++;
+    this._hint('proc', 'Relics wake on <b>perfect chains, counters and head hits</b>: fight in rhythm to set them off');
     this.hud.callout(P.name.toUpperCase(), { color: P.color, size: 1.05, proc: true });
   }
 
@@ -632,7 +647,10 @@ export class Game {
     this.pathService.update();
     if (!intro) {
       this.director.update(dt, this.enemies, p);
-      for (const e of this.enemies) e.update(dt, ctx);
+      for (const e of this.enemies) {
+        e.update(dt, ctx);
+        if (e.state === 'windup' && e.distToPlayer < 4.5 && !this.hints?.has('tell')) this._hint('tell', 'It glows red as it winds up: <b>strike now to counter</b>, block, or step away');
+      }
     }
 
     // Bodies push the player out (except when passing through as a shade).
@@ -935,6 +953,9 @@ export class Game {
         ['Floor reached', run.floor],
         ['Deepest', Math.max(this.best, run.floor)],
         ['Demons slain', run.kills],
+        ['Longest chain', run.best?.chain || 0],
+        ['Counters', run.best?.counters || 0],
+        ['Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
         ['Time', time],
       ],
       ready: false,

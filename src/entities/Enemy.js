@@ -134,8 +134,8 @@ export class Enemy {
     this.radius *= 1.1;
     this.hitRadius *= 1.12;
     this.type = { ...this.type, poise: this.type.poise * 1.6, name: `Elite ${this.type.name}` };
-    const red = new THREE.Color(0.7, 0.06, 0.02);
-    this.baseEmissive = this.baseEmissive.map((b) => ({ c: b.c.clone().lerp(red, 0.65), i: b.i + 0.4 }));
+    const red = new THREE.Color(0.6, 0.05, 0.02);
+    this.baseEmissive = this.baseEmissive.map((b) => ({ c: b.c.clone().lerp(red, 0.4), i: b.i + 0.12 }));
     this._tinted = true;
   }
 

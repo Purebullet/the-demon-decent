@@ -223,6 +223,9 @@ export class Hud {
     this.callouts = [0, 1, 2].map(() => ({ ...this._canvasLayer(768, 112, 7), t: 9, life: 0 }));
     this.announceL = this._canvasLayer(1400, 260, 7);
     this.toastL = this._canvasLayer(560, 260, 7);
+    // A teaching hint above the skills, the first time a mechanic comes up.
+    this.hintL = this._canvasLayer(1400, 110, 7);
+    this.hintT = 0;
     // Numbers that sit on top of the GPU fills: health, cooldown seconds.
     this.topL = this._canvasLayer(1024, 256, 6);
     this.topSig = '';
@@ -376,6 +379,20 @@ export class Hud {
     g.fillText(text, c.cw / 2, c.ch / 2);
     if ('letterSpacing' in g) g.letterSpacing = '0px';
     c.tex.needsUpdate = true;
+  }
+
+  // A hint that stays a while (markup as in prompts).
+  hint(markup) {
+    const L = this.hintL;
+    const g = L.g;
+    g.clearRect(0, 0, L.cw, L.ch);
+    g.font = `34px ${SERIF}`;
+    const plain = markup.replace(/<[^>]+>/g, '');
+    const tw = Math.min(L.cw - 10, g.measureText(plain).width + 70);
+    this._box(g, (L.cw - tw) / 2, 12, tw, L.ch - 24, 'rgba(16,4,3,0.92)', '#8a3a18');
+    this._rich(g, markup, L.cw / 2, L.ch / 2, 34);
+    L.tex.needsUpdate = true;
+    this.hintT = 6;
   }
 
   // Rhythm feedback on the ring: a perfect pulse, a fumbled choke.
@@ -582,7 +599,9 @@ export class Hud {
     const p = i.player;
     const r = i.run;
     const L = this.layout;
-    const play = this.playing && !!r && !!p && !p.dead && this.panel !== 'choice' && this.panel !== 'pause';
+    // `shown`: the HUD is up; `play`: actually fighting (no panel over it).
+    const shown = this.playing && !!r && !!p && !p.dead;
+    const play = shown && this.panel !== 'choice' && this.panel !== 'pause';
 
     // Rhythm ring around the crosshair.
     const fx = this.rhythmFx;
@@ -619,7 +638,7 @@ export class Hud {
       const f = this.slotFx[k];
       const U = f.mesh.material.uniforms;
       const rect = L?.slots?.[k];
-      f.mesh.visible = play && !!rect;
+      f.mesh.visible = shown && !!rect;
       if (!f.mesh.visible) continue;
       let cd = 0;
       let cast = 0;
@@ -647,7 +666,7 @@ export class Hud {
 
     // Health: fill, trailing chip, heal glow, low pulse.
     const H = this.healthFx.material.uniforms;
-    this.healthFx.visible = play && !!L?.health;
+    this.healthFx.visible = shown && !!L?.health;
     if (this.healthFx.visible) {
       const frac = clamp01(r.health / r.maxHealth);
       if (frac < this.chip) {
@@ -706,7 +725,7 @@ export class Hud {
     }
 
     // Numbers over the fills (health, cooldowns): repainted when they change.
-    this.topL.mesh.visible = play && !!L?.top;
+    this.topL.mesh.visible = shown && !!L?.top;
     if (this.topL.mesh.visible) {
       const sig = `${Math.ceil(r.health)}/${r.maxHealth}|${SPELL_IDS.map((id) => (r.spells[id] ? Math.ceil(p.spellCd[id] || 0) : 0)).join(',')}|${this.w}x${this.h}`;
       if (sig !== this.topSig) {
@@ -715,6 +734,17 @@ export class Hud {
       }
       const T = L.top;
       this._place(this.topL.mesh, T.x, T.y, T.w, T.h);
+    }
+
+    // The hint, above the skills.
+    this.hintT = Math.max(0, this.hintT - dt);
+    this.hintL.mesh.visible = play && this.hintT > 0 && !!L?.slots?.length;
+    if (this.hintL.mesh.visible) {
+      const w = Math.min(this.vw * 0.92, 760);
+      const h = (w * this.hintL.ch) / this.hintL.cw;
+      const top = L.slots[0].y - 46 - h;
+      this._place(this.hintL.mesh, this.vw / 2 - w / 2, top, w, h);
+      this.hintL.mesh.material.opacity = Math.min(1, this.hintT / 0.5, (6 - this.hintT) / 0.3);
     }
 
     // Toasts, top right; repainted when they change and while fading.
@@ -1262,6 +1292,7 @@ export class Hud {
       const rows = [
         ['W A S D', 'move', 'Mouse', 'aim'],
         ['Click / hold', 'light / heavy', 'Right button', 'block'],
+        ['Click as it lands', 'Perfect Chain', 'Hit a wind-up', 'counter'],
         ['A A / D D', 'dodge (once learned)', '', ''],
         ['E', 'drink potion', '1 2 3', 'demon spells'],
         ['F', 'take / use', '', ''],
@@ -1280,11 +1311,30 @@ export class Hud {
 
   _paintPause(g) {
     this._dim(g);
+    const relics = Object.entries(this.info.run?.relics || {});
+    const y0 = relics.length ? this.vh * 0.22 : this.vh * 0.45;
     const pw = Math.min(420, this.vw - 40);
-    this._box(g, (this.vw - pw) / 2, this.vh * 0.45 - 62, pw, 112, C.panel, C.edge);
-    this._text(g, 'PAUSED', this.vw / 2, this.vh * 0.45, { size: 40, ls: 4, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
-    this._divider(g, this.vw / 2, this.vh * 0.45 + 14, pw * 0.7);
-    this._label(g, 'Click to return to the dark', this.vw / 2, this.vh * 0.45 + 36, { align: 'center', color: C.bone });
+    this._box(g, (this.vw - pw) / 2, y0 - 62, pw, 112, C.panel, C.edge);
+    this._text(g, 'PAUSED', this.vw / 2, y0, { size: 40, ls: 4, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
+    this._divider(g, this.vw / 2, y0 + 14, pw * 0.7);
+    this._label(g, 'Click to return to the dark', this.vw / 2, y0 + 36, { align: 'center', color: C.bone });
+    if (!relics.length) return;
+    // Your relics, and what each one does.
+    const bw = Math.min(640, this.vw - 40);
+    const rowH = 52;
+    const bx = (this.vw - bw) / 2;
+    let y = y0 + 80;
+    this._box(g, bx, y, bw, relics.length * rowH + 40, C.panel, C.edge);
+    this._label(g, 'Relics carried', this.vw / 2, y + 24, { align: 'center', size: 12 });
+    y += 36;
+    for (const [id, n] of relics) {
+      const R = RELICS[id];
+      if (!R) continue;
+      IconAtlas.draw(g, id, bx + 14, y + 2, 44);
+      this._text(g, n > 1 ? `${R.name}  ×${n}` : R.name, bx + 70, y + 20, { size: 17, color: R.color });
+      this._wrap(g, R.text, bx + 70, y + 40, bw - 90, 12, C.bone);
+      y += rowH;
+    }
   }
 
   _paintChoice(g) {
@@ -1341,7 +1391,7 @@ export class Hud {
     }
     y += 18;
     const stats = e.stats || [];
-    const colW = Math.min(150, (w - 40) / Math.max(1, stats.length));
+    const colW = Math.min(140, (w - 40) / Math.max(1, stats.length));
     stats.forEach(([label, value], k) => {
       const x = w / 2 + (k - (stats.length - 1) / 2) * colW;
       this._label(g, label, x, y, { size: 10, align: 'center' });
