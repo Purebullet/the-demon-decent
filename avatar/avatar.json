@@ -113,14 +113,9 @@
   "emotes": [
     {
       "name": "Joy",
-      "clip": "surge",
-      "burst": {
-        "particle": "arc",
-        "count": 48
-      },
+      "clip": "liftoff",
       "set": {
-        "surge": 1.2,
-        "storm": 0.9
+        "surge": 0.8
       }
     },
     {

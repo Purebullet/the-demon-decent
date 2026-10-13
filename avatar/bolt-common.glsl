@@ -2,11 +2,13 @@
 // bolt, its distance along it and its ribbon edge, in its (object-space)
 // normal; see boltEncode there. The vertex stage decodes it and hands it to
 // the surface stage in vBolt = (bolt, along, edge).
-#define BOLT_COUNT 16.0
+#define BOLT_COUNT 21.0
 #define BOLT_POLE 0.15
-// Bolts from this number on stream out of the base in flight, stored
-// folded BOLT_FOLD m straight up against it.
+// Bolts from BOLT_TRAIL_FIRST stream out of the base in flight, stored
+// folded BOLT_FOLD m straight up against it; from BOLT_EXHAUST_FIRST they
+// are the lift-off jet (the Exhaust mesh, shown by its clip).
 #define BOLT_TRAIL_FIRST 11.0
+#define BOLT_EXHAUST_FIRST 16.0
 #define BOLT_FOLD 0.3
 varying vec3 vBolt;
 vec3 boltDecode(vec3 n) {

@@ -1,34 +1,45 @@
-// When each bolt strikes. Standing still, now and then a short one flickers
-// off the body or an arc runs round it; in flight the trail bolts pour out
-// of the back almost without pause, more the faster you go; a storm (an
-// emote) sets everything off. Vivid electric blue round a pale cyan core,
-// saturated enough to read against the white city as well as the dark.
+// When each bolt strikes.
+//   Standing still: now and then one grows slowly out of the body (or runs
+//   round it), crackles a moment and fades.
+//   Flying: those stop; the trail bolts pour out of the back instead,
+//   more the faster you go.
+//   Lifting off (Joy, or a like): only the jet below (the Exhaust mesh,
+//   which its clip shows and hides).
+//   A storm (Indignation) sets the body's bolts off all together.
+// Vivid electric blue round a pale cyan core, saturated enough to read
+// against the white city as well as the dark.
 void p0Surface(inout P0Surface s) {
   float id = floor(vBolt.x + 0.5);
   float along = vBolt.y;
   float across = abs(vBolt.z - 0.5) * 2.0;
-  float trail = step(BOLT_TRAIL_FIRST, id);
-  float fly = smoothstep(0.03, 0.35, p0Speed);
-  float rate = mix(0.55 + 0.4 * srHash(vec3(id, 3.0, 1.0)), 1.6 + 0.8 * srHash(vec3(id, 4.0, 1.0)), trail);
-  float phase = p0Time * rate + srHash(vec3(id, 9.0, 2.0));
-  float cycle = floor(phase);
-  float k = fract(phase);
-  float window = trail > 0.5 ? (0.55 + 0.35 * p0Speed) * fly : clamp(0.15 + 0.5 * storm + 0.1 * fly, 0.0, 0.95);
-  float chance = trail > 0.5 ? 0.9 : 0.5 + 0.45 * storm;
-  float strikes = step(1.0 - chance, srHash(vec3(id, cycle, 5.0)));
-  float on = step(k, window) * strikes;
-  // It reaches out from the body over the first part of its strike...
-  float reach = clamp(k / max(0.02, window * 0.2), 0.0, 1.0);
-  on *= step(along, reach);
-  // ...and stutters while it holds.
-  on *= step(0.1, srHash(vec3(id, floor(p0Time * 20.0), 3.0)));
+  float exhaust = step(BOLT_EXHAUST_FIRST, id);
+  float trail = step(BOLT_TRAIL_FIRST, id) * (1.0 - exhaust);
+  float speed = smoothstep(0.03, 0.35, p0Speed);
+  float lift = (abs(p0Emote - 1.0) < 0.5 || abs(p0Emote - 10.0) < 0.5) ? 1.0 : 0.0;
+  float on = 1.0;
+  float fade = 1.0;
+  if (exhaust < 0.5) {
+    float h1 = srHash(vec3(id, 3.0, 1.0));
+    float period = trail > 0.5 ? 0.45 + 0.25 * h1 : 1.8 + 1.4 * h1;
+    float dur = trail > 0.5 ? period * (0.6 + 0.3 * p0Speed) : 0.75;
+    float phase = p0Time / period + srHash(vec3(id, 9.0, 2.0));
+    float t = fract(phase) * period;
+    float chance = trail > 0.5 ? 0.9 * speed : (0.35 + 0.6 * storm) * (1.0 - max(speed, lift));
+    float strikes = step(1.0 - chance, srHash(vec3(id, floor(phase), 5.0)));
+    // It grows out of the body (slowly, at rest), holds, and fades away.
+    float grow = clamp(t / (trail > 0.5 ? 0.08 : 0.3), 0.0, 1.0);
+    on = strikes * step(t, dur) * step(along, grow);
+    fade = 1.0 - smoothstep(dur - 0.22, dur, t);
+  }
+  // A little stutter.
+  on *= step(0.08, srHash(vec3(id, floor(p0Time * 18.0), 3.0)));
   float core = 1.0 - smoothstep(0.0, 0.3, across);
   float body = 1.0 - smoothstep(0.35, 1.0, across);
   vec3 col = mix(deep, tint, body * 0.85);
   col = mix(col, vec3(0.78, 0.96, 1.0), core * 0.85);
   s.color = col;
   s.emissive = col * 0.35 * core;
-  s.alpha = on * clamp(core + body * 0.95, 0.0, 1.0) * (1.0 - along * 0.25);
+  s.alpha = on * fade * clamp(core + body * 0.95, 0.0, 1.0) * (1.0 - along * 0.25);
   // Gone means gone, even if the material were drawn opaque.
   if (s.alpha < 0.02) discard;
 }
