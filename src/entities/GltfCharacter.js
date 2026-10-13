@@ -300,18 +300,92 @@ export function buildGltfCharacter(id, rootScale = 1) {
   const ext = new THREE.Box3().setFromObject(inst.inner).getSize(new THREE.Vector3());
   const reach = Math.hypot(ext.x, ext.z) / 2;
 
+  // ---- Hit reactions ----
+  // Every blow kicks a spring per axis (pitch, roll, twist): the body tilts
+  // away along the blow, twists with the blade's sweep, harder the higher
+  // it lands; the chest and head follow through on a rig, the head snapping
+  // hardest when it is the head that was struck. Underdamped, so a body
+  // jolts, rocks back once and settles in about a third of a second.
+  const SPRING_K = 320;
+  const SPRING_C = 15;
+  const spring = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, head: 0 };
+  const _inv = new THREE.Quaternion();
+  const _rq = new THREE.Quaternion();
+  const _pq = new THREE.Quaternion();
+  const _local = new THREE.Vector3();
+  const _sweepL = new THREE.Vector3();
+  function react(e, dir, contact, sweep, force) {
+    _inv.copy(root.quaternion).invert();
+    _local.set(dir.x, 0, dir.z).applyQuaternion(_inv);
+    const len = Math.hypot(_local.x, _local.z);
+    if (len > 1e-4) _local.multiplyScalar(1 / len);
+    // Higher on the body = more leverage.
+    let lever = 0.75;
+    if (contact) {
+      const y = (contact.y - root.position.y) / Math.max(0.5, H * root.scale.y);
+      lever = 0.45 + Math.min(1, Math.max(0, y)) * 0.8;
+      spring.head = Math.max(spring.head, y > 0.78 ? 1 : 0);
+    }
+    const mass = Math.sqrt(e.type?.mass || 1);
+    const v = (2.2 + 3.2 * Math.min(1.5, force)) * lever / mass;
+    spring.vx += _local.z * v;
+    spring.vz += -_local.x * v;
+    if (sweep) {
+      _sweepL.copy(sweep).applyQuaternion(_inv);
+      spring.vy += -_sweepL.x * v * 0.7;
+    }
+  }
+  // Turn a bone by (pitch, twist, roll) about character-space axes, on top
+  // of its animated pose. Clips only key the bones they move, so a bone the
+  // mixer left alone this frame still holds last frame's turn: that is
+  // undone first, so turns never pile up.
+  const applied = new Map();
+  const _e = new THREE.Euler();
+  const _cq = new THREE.Quaternion();
+  function turnBone(bone, x, y, z) {
+    if (!bone) return;
+    let rec = applied.get(bone);
+    if (rec && bone.quaternion.equals(rec.out)) bone.quaternion.copy(rec.base);
+    if (Math.abs(x) + Math.abs(y) + Math.abs(z) < 1e-4) {
+      applied.delete(bone);
+      return;
+    }
+    if (!rec) applied.set(bone, (rec = { base: new THREE.Quaternion(), out: new THREE.Quaternion() }));
+    rec.base.copy(bone.quaternion);
+    // Character-space turn, expressed in the bone's parent space.
+    bone.parent.getWorldQuaternion(_pq);
+    _cq.setFromEuler(_e.set(x, y, z, 'YXZ'));
+    _rq.copy(root.quaternion).multiply(_cq).multiply(_inv.copy(root.quaternion).invert());
+    _rq.premultiply(_inv.copy(_pq).invert()).multiply(_pq);
+    bone.quaternion.premultiply(_rq);
+    rec.out.copy(bone.quaternion);
+  }
+
   const tmp = new THREE.Vector3();
   function animate(e, dt, t) {
+    // Frozen solid: the pose stays exactly where the ice caught it.
+    if (e.state === 'frozen') return;
+    pose.rotation.set(0, 0, 0);
+    const sdt = Math.min(dt, 1 / 30);
+    spring.vx += (-SPRING_K * spring.x - SPRING_C * spring.vx) * sdt;
+    spring.vy += (-SPRING_K * spring.y - SPRING_C * spring.vy) * sdt;
+    spring.vz += (-SPRING_K * spring.z - SPRING_C * spring.vz) * sdt;
+    spring.x += spring.vx * sdt;
+    spring.y += spring.vy * sdt;
+    spring.z += spring.vz * sdt;
+    spring.head = Math.max(0, spring.head - dt * 3);
     const { raise, swing } = attackWeights(e);
     const attacking = e.state === 'windup' || e.state === 'strike' || e.state === 'recover';
     const mv = e.moveBlend;
-    const stagger = e.state === 'stagger' ? Math.sin(Math.min(1, e.stateT / e.stateDur) * Math.PI) : 0;
+    const stagger = e.state === 'stagger' ? Math.sin(Math.min(1, e.stateT / e.stateDur) * Math.PI) * (e.stumbling ? 1.8 : 1) : 0;
+    const guard = e.state === 'guard' ? Math.min(1, e.stateT / 0.1) : 0;
 
     if (mixer) {
       drive(e, dt, t);
       if (e.state === 'dying') flop(e.stateT);
-      // Attacks without a clip of their own still get a body lean.
-      pose.rotation.x = attacking && !clips[e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0;
+      // Attacks without a clip of their own still get a body lean; a guard
+      // rears back behind it; a stumble lurches.
+      pose.rotation.x = (attacking && !clips[e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0) - 0.14 * guard - (e.stumbling ? 0.22 * stagger : 0);
     } else if (!rigged) {
       const sweep = /sweep|gust|lash/.test(e.attack?.name || '');
       const sw = Math.sin(e.walkPhase);
@@ -323,6 +397,18 @@ export function buildGltfCharacter(id, rootScale = 1) {
       U.uStep.value = sw * 0.11 * H * mv;
       pose.position.y = Math.abs(sw) * 0.03 * H * mv;
       for (const b of bentAnchors) bendPoint(b.rest, b.anchor.position);
+    }
+
+    // The hit spring: a little on the whole body, the rest through the chest
+    // and head of a rig.
+    pose.rotation.x += spring.x * (mixer ? 0.35 : 1);
+    pose.rotation.z = spring.z * (mixer ? 0.35 : 1);
+    pose.rotation.y = spring.y * 0.5;
+    if (mixer && (applied.size || Math.abs(spring.x) + Math.abs(spring.y) + Math.abs(spring.z) > 1e-3)) {
+      root.updateMatrixWorld(true);
+      turnBone(chest, spring.x * 0.9, spring.y * 0.8, spring.z * 0.9);
+      const hk = 0.5 + spring.head * 1.2;
+      turnBone(head, spring.x * hk, 0, spring.z * hk);
     }
 
     if (anchors.length) pose.updateMatrixWorld(true);
@@ -341,6 +427,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
     hurtboxes,
     fire,
     animate,
+    react,
     height: H,
     // Long beasts reach further from their centre than they are tall.
     hitRadius: Math.max(H * 0.6, reach),

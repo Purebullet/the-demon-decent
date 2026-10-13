@@ -3,7 +3,8 @@ import { C, burst, ring, spawnFlame } from './Particles.js';
 
 // Ground telegraphs, delayed fire strikes, and projectiles. Everything that
 // can hurt the player here is announced first: a ring that fills up before
-// the blow lands.
+// the blow lands. Also the travelling and timed parts of procs: streams of
+// stolen blood, lightning bolts, and blows that land a moment later.
 
 const ringGeo = new THREE.RingGeometry(0.9, 1, 48);
 const discGeo = new THREE.CircleGeometry(1, 48);
@@ -15,6 +16,7 @@ export class Effects {
     this.fx = fx;
     this.items = [];
     this.projectiles = [];
+    this.tasks = [];
   }
 
   clear() {
@@ -22,6 +24,69 @@ export class Effects {
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     this.items.length = 0;
     this.projectiles.length = 0;
+    this.tasks.length = 0;
+  }
+
+  // Run `fn` after `delay` seconds of game time (hit-stop slows it too).
+  later(delay, fn) {
+    this.tasks.push({ t: 0, dur: delay, done: fn });
+  }
+
+  // A stream flowing from `from` to `to()` (a moving target) along a rising
+  // arc, a burst of particles at its head; `onArrive` fires when it lands.
+  stream(from, to, { color = C.blood, bright = C.emberRed, dur = 0.5, onArrive } = {}) {
+    const a = from.clone();
+    this.tasks.push({
+      t: 0,
+      dur,
+      done: onArrive,
+      tick: (k) => {
+        const b = to();
+        const e = k * k * (3 - 2 * k);
+        // Quadratic arc, lifted in the middle.
+        const mx = (a.x + b.x) / 2;
+        const my = Math.max(a.y, b.y) + 1.4;
+        const mz = (a.z + b.z) / 2;
+        const u = 1 - e;
+        const x = u * u * a.x + 2 * u * e * mx + e * e * b.x;
+        const y = u * u * a.y + 2 * u * e * my + e * e * b.y;
+        const z = u * u * a.z + 2 * u * e * mz + e * e * b.z;
+        for (let i = 0; i < 6; i++) {
+          this.fx.add.emit({ x: x + (Math.random() - 0.5) * 0.2, y: y + (Math.random() - 0.5) * 0.2, z: z + (Math.random() - 0.5) * 0.2, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, vz: (Math.random() - 0.5) * 0.6, life: 0.35, size: 0.22, sizeEnd: 0.04, color: bright, colorEnd: color, drag: 2 });
+        }
+      },
+    });
+  }
+
+  // A jagged bolt of lightning from a to b that crackles twice.
+  bolt(a, b, { color = C.white, edge = C.violet } = {}) {
+    const from = a.clone();
+    const to = b.clone();
+    const draw = () => {
+      const d = from.distanceTo(to);
+      const kinks = 7;
+      let px = from.x;
+      let py = from.y;
+      let pz = from.z;
+      for (let i = 1; i <= kinks; i++) {
+        const k = i / kinks;
+        const j = i === kinks ? 0 : d * 0.08;
+        const nx = from.x + (to.x - from.x) * k + (Math.random() - 0.5) * j;
+        const ny = from.y + (to.y - from.y) * k + (Math.random() - 0.5) * j;
+        const nz = from.z + (to.z - from.z) * k + (Math.random() - 0.5) * j;
+        const n = Math.max(2, Math.ceil(Math.hypot(nx - px, ny - py, nz - pz) / 0.12));
+        for (let q = 0; q < n; q++) {
+          const f = q / n;
+          this.fx.add.emit({ x: px + (nx - px) * f, y: py + (ny - py) * f, z: pz + (nz - pz) * f, life: 0.16, size: 0.16, sizeEnd: 0.05, color, colorEnd: edge, drag: 0 });
+        }
+        px = nx;
+        py = ny;
+        pz = nz;
+      }
+      burst(this.fx.add, to, { count: 10, speed: 4, color, colorEnd: edge, size: 0.08, life: 0.25 });
+    };
+    draw();
+    this.later(0.06, draw);
   }
 
   // A ring + filling disc on the ground. `onDone` fires when it completes.
@@ -66,6 +131,16 @@ export class Effects {
   }
 
   update(dt, ctx) {
+    for (let i = this.tasks.length - 1; i >= 0; i--) {
+      const t = this.tasks[i];
+      t.t += dt;
+      const k = Math.min(1, t.t / Math.max(1e-3, t.dur));
+      t.tick?.(k);
+      if (k >= 1) {
+        this.tasks.splice(i, 1);
+        t.done?.();
+      }
+    }
     for (let i = this.items.length - 1; i >= 0; i--) {
       const t = this.items[i];
       t.t += dt;

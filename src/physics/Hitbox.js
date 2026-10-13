@@ -76,8 +76,21 @@ export class StrikeVolume {
 // target's hurtboxes. Each target is hit at most once per swing (hitSet), and
 // if several parts overlap the part with the highest multiplier wins.
 //
+// With `seg` (the blade's centre line, { a, b }), the hit's point is where the
+// blade actually meets the body: the point on the line nearest the part's
+// centre, pulled into the part. Without it, the part's centre.
+//
 // targets: iterable of { position: Vector3, hitRadius: number, hurtboxes: Hurtbox[], alive }
-export function queryHurtboxes(obb, targets, hitSet, out = []) {
+const _ab = new Vector3();
+const _p = new Vector3();
+export function contactPoint(seg, obb, out) {
+  _ab.subVectors(seg.b, seg.a);
+  const t = Math.max(0, Math.min(1, _p.subVectors(obb.center, seg.a).dot(_ab) / Math.max(1e-8, _ab.lengthSq())));
+  _p.copy(seg.a).addScaledVector(_ab, t);
+  return obb.closestPoint(_p, out);
+}
+
+export function queryHurtboxes(obb, targets, hitSet, out = [], seg = null) {
   const reach = obb.boundingRadius();
   for (const target of targets) {
     if (!target.alive || hitSet.has(target)) continue;
@@ -93,7 +106,7 @@ export function queryHurtboxes(obb, targets, hitSet, out = []) {
     }
     if (best) {
       hitSet.add(target);
-      out.push({ target, part: best, point: best.obb.center.clone() });
+      out.push({ target, part: best, point: seg ? contactPoint(seg, best.obb, new Vector3()) : best.obb.center.clone() });
     }
   }
   return out;

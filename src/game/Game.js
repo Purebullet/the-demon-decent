@@ -23,6 +23,8 @@ import { newRun, NODES } from './Progression.js';
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
 import { Hud } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
+import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
+import { angleDelta } from '../core/rng.js';
 
 // Owns the run and the state machine that moves the player between the
 // surface lot, the 20 floors and the sanctums in between. Everything outside
@@ -336,9 +338,25 @@ export class Game {
         this.flashT = dur;
         this.flashDur = dur;
       },
-      onDamage: (e, amount, crit, point) => this.hud.damageNumber(point || e.position, amount, crit),
+      onDamage: (e, amount, crit, point, kind) => this.hud.damageNumber(point || e.position, amount, crit, kind),
       onPlayerHurt: () => {},
-      onDodge: () => {},
+      onDodge: () => this.hud.callout('EVADED', { color: '#c9a0ff', size: 0.8 }),
+      later: (delay, fn) => (this.effects ? this.effects.later(delay, fn) : setTimeout(fn, delay * 1000)),
+      tells: 1,
+      onRhythm: (kind, chain) => this._onRhythm(kind, chain),
+      onSpellDenied: (id) => this.hud.denySlot(id),
+      onCombat: (kind, point) => this._onCombat(kind, point),
+      onProc: (id, P) => this._onProc(id, P),
+      onRelic: (id, n) => {
+        const R = RELICS[id];
+        this.audio.relic();
+        this.hud.announce(n > 1 ? `${R.name} ×${n}` : R.name, R.text);
+        this.hud.flashRelic(id);
+      },
+      onSkill: () => {
+        this.audio.relic();
+        this.hud.announce('Phantom Step', 'Double-tap A or D to sidestep, S to leap back');
+      },
       toast: (t) => this.hud.toast(t),
       announce: (t, sub) => this.hud.announce(t, sub),
       ...extra,
@@ -470,6 +488,7 @@ export class Game {
     s.add(new THREE.HemisphereLight(look.sky, look.earth, look.hemi));
 
     this.enemies = [];
+    this.eliteCount = 0;
     this.effects = new Effects(s, this.fx);
     this.pickups = new Pickups(s);
     this.director = new AIDirector(level.nav, def);
@@ -532,12 +551,54 @@ export class Game {
   }
 
   _spawnEnemy(type, pos, emerge = false) {
-    const e = this._addEnemy(new Enemy(type, pos, this.level.def));
+    const e = new Enemy(type, pos, this.level.def);
+    // From floor 3 a few demons come as elites (never the summoned).
+    if (!emerge && this.run.floor >= 3 && this.eliteCount < 2 && Math.random() < 0.1 + this.run.floor * 0.006) {
+      e.makeElite();
+      this.eliteCount++;
+    }
+    this._addEnemy(e);
     if (emerge) {
       e.emerge(this.ctx);
       e.becomeAlert?.(this.ctx, false);
     }
     return e;
+  }
+
+  // ---- Combat feedback: rhythm, counters, guards and procs on the HUD ----
+
+  _onRhythm(kind, chain = 0) {
+    const r = this.run;
+    if (kind === 'perfect') {
+      if (r) r.best.chain = Math.max(r.best.chain, chain);
+      this.hud.rhythm('perfect', chain);
+      if (chain >= 2) this.hud.callout(chain >= 5 ? `PERFECT ×${chain} — FLOW` : `PERFECT ×${chain}`, { color: chain >= 4 ? '#fff4d0' : '#ffd070', size: 0.8 + chain * 0.06 });
+      else this.hud.callout('PERFECT', { color: '#ffd070', size: 0.75 });
+    } else if (kind === 'fumble') {
+      this.audio.fumble();
+      this.hud.rhythm('fumble');
+    } else if (kind === 'sluggish') {
+      this.hud.callout('SLUGGISH — EXPOSED', { color: '#8a6a60', size: 0.62 });
+    } else if (kind === 'dodge') this.hud.rhythm('dodge');
+  }
+
+  _onCombat(kind) {
+    const r = this.run;
+    if (kind === 'counter') {
+      if (r) r.best.counters++;
+      this.hud.callout('COUNTER', { color: '#ffb060', size: 1.15 });
+      this.flashLight.color.setHex(0xffa040);
+      this.flashLight.position.copy(this.player.position).setY(1.5);
+      this.flashLight.userData.base = 30;
+      this.flashT = this.flashDur = 0.18;
+    } else if (kind === 'clash') this.hud.callout('GUARDED', { color: '#c05040', size: 0.85 });
+    else if (kind === 'guardBreak') this.hud.callout('GUARD SHATTERED', { color: '#ff8a3a', size: 1.0 });
+    else if (kind === 'crash') this.hud.callout('CRUSHED THROUGH', { color: '#ffa060', size: 0.95 });
+  }
+
+  _onProc(id, P) {
+    if (this.run) this.run.best.procs++;
+    this.hud.callout(P.name.toUpperCase(), { color: P.color, size: 1.05, proc: true });
   }
 
   _onEnemyKilled(e) {
@@ -551,6 +612,8 @@ export class Game {
     if (Math.random() < loot.potion * luck) this.pickups.addPotion(x + off(), z + off());
     if (Math.random() < loot.weapon * luck) this.pickups.addWeapon(x + off(), z + off(), rollWeapon(run.floor, e.isBoss ? 1 : 0));
     if (Math.random() < loot.spell * luck) this.pickups.addSpell(x + off(), z + off());
+    // Elites carry relics, and so do bosses.
+    if ((e.elite && Math.random() < 0.7) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
       this.pickups.addPotion(x + 1.2, z);
@@ -560,6 +623,7 @@ export class Game {
   _updateFloor(dt) {
     const ctx = this.ctx;
     ctx.time = this.time;
+    ctx.tells = relicPassive(this.run, 'tells') ?? 1;
     const p = this.player;
     const level = this.level;
     const intro = this._updateArrival(dt);
@@ -718,25 +782,34 @@ export class Game {
     const p = this.player;
     const show = this.level.exitOpen && !p.dead;
     g.visible = show;
-    if (!show) return;
+    if (!show) {
+      this.guideAngle = null;
+      return;
+    }
     const x = this.level.data.exit;
     this.guideT -= dt;
-    if (this.guideT <= 0) {
-      this.guideT = 0.3;
-      const path = this.level.nav.findPathWorld(p.position.x, p.position.z, x.x, x.z);
-      let target = path?.find((q) => Math.hypot(q.x - p.position.x, q.z - p.position.z) > 2.5) || path?.[path.length - 1] || x;
-      this.guideDir = { x: target.x - p.position.x, z: target.z - p.position.z, dist: Math.hypot(x.x - p.position.x, x.z - p.position.z), target };
+    if (this.guideT <= 0 || !this.guidePath) {
+      this.guideT = 0.25;
+      this.guidePath = this.level.nav.findPathWorld(p.position.x, p.position.z, x.x, x.z) || [x];
     }
-    const d = this.guideDir;
-    const len = Math.hypot(d.x, d.z) || 1;
-    const near = d.dist < 3;
-    g.visible = !near;
-    const ahead = Math.min(2.2, d.dist - 1);
-    const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
-    g.position.set(p.position.x + (d.x / len) * ahead, 0.18 + pulse * 0.06, p.position.z + (d.z / len) * ahead);
-    const want = Math.atan2(d.x, d.z);
-    g.rotation.y += Math.atan2(Math.sin(want - g.rotation.y), Math.cos(want - g.rotation.y)) * Math.min(1, dt * 8);
-    g.material.opacity = 0.55 + pulse * 0.35;
+    // Aim at a point a fixed distance along the path from where you stand:
+    // it slides smoothly round corners rather than hopping between nodes.
+    const target = pointAlongPath(this.guidePath, p.position, 2.6) || x;
+    const dist = Math.hypot(x.x - p.position.x, x.z - p.position.z);
+    this.guideDir = { x: target.x - p.position.x, z: target.z - p.position.z, dist, target };
+    const want = Math.atan2(this.guideDir.x, this.guideDir.z);
+    // A damped turn toward the aim, and the arrow lies along it.
+    if (this.guideAngle == null) this.guideAngle = want;
+    this.guideAngle += angleDelta(this.guideAngle, want) * (1 - Math.exp(-7 * dt));
+    const aheadWant = Math.max(0.6, Math.min(2.2, dist - 1));
+    this.guideAhead = (this.guideAhead ?? aheadWant) + (aheadWant - (this.guideAhead ?? aheadWant)) * (1 - Math.exp(-5 * dt));
+    const fade = Math.min(1, Math.max(0, (dist - 2.2) / 1.2));
+    g.visible = fade > 0.01;
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 3.2);
+    const a = this.guideAngle;
+    g.position.set(p.position.x + Math.sin(a) * this.guideAhead, 0.16 + pulse * 0.025, p.position.z + Math.cos(a) * this.guideAhead);
+    g.rotation.y = a;
+    g.material.opacity = (0.5 + pulse * 0.3) * fade;
   }
 
   // Arrow toward the open exit (along the path), or toward the last few demons.
@@ -1022,3 +1095,36 @@ function makeGuideArrow() {
   return m;
 }
 
+// The point `ahead` metres along a path (a list of {x, z}) from the path
+// point nearest `from`.
+function pointAlongPath(path, from, ahead) {
+  if (!path?.length) return null;
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < path.length; i++) {
+    const d = (path[i].x - from.x) ** 2 + (path[i].z - from.z) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  }
+  // Head for the nearest node if it still lies ahead, else the one after it.
+  let start = best;
+  if (best < path.length - 1) {
+    const sx = path[best + 1].x - path[best].x;
+    const sz = path[best + 1].z - path[best].z;
+    if ((from.x - path[best].x) * sx + (from.z - path[best].z) * sz > 0) start = best + 1;
+  }
+  let px = from.x;
+  let pz = from.z;
+  let left = ahead;
+  for (let i = start; i < path.length; i++) {
+    const q = path[i];
+    const d = Math.hypot(q.x - px, q.z - pz);
+    if (d >= left) return { x: px + ((q.x - px) * left) / d, z: pz + ((q.z - pz) * left) / d };
+    left -= d;
+    px = q.x;
+    pz = q.z;
+  }
+  return { x: px, z: pz };
+}

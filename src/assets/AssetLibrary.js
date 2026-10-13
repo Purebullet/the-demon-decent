@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHARACTERS, PROPS } from './manifest.js';
+import { IconAtlas } from '../ui/IconAtlas.js';
 
 // Loads the AI-generated GLBs listed in the manifest. Only files named in
 // assets/models/index.json are requested (the dev server and the build
@@ -141,9 +142,10 @@ export const Assets = {
     const jobs = [
       ...Object.entries(CHARACTERS).map(([id, e]) => () => this._loadCharacter(id, e, available)),
       ...Object.entries(PROPS)
-        .filter(([, e]) => !e.lot)
+        .filter(([, e]) => !e.lot && !e.icon && !e.relic)
         .map(([id, e]) => () => this._loadProp(id, e, available)),
     ];
+    jobs.push(() => IconAtlas.load(resolveUrl));
     let done = 0;
     await Promise.all(jobs.map((j) => j().finally(() => onProgress?.(++done, jobs.length))));
     const missing = this.missingCharacters();

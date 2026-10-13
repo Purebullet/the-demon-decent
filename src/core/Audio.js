@@ -55,14 +55,44 @@ export class Audio {
   // Each creature borrows the voice nearest its size.
   kind = (k) => (k === 'ghoul' || k === 'hound' ? 'ghoul' : k === 'fiend' || k === 'witch' ? 'fiend' : 'brute');
 
-  swing(type) {
-    this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.7 });
+  // A swing's sound says how it was made: a Perfect Chain cuts deeper with
+  // every link, a sluggish one drags.
+  swing(type, { perfect = false, chain = 0, sluggish = false } = {}) {
+    if (perfect) {
+      this.play('swing_perfect', { volume: 0.8, rate: 1 - 0.05 * chain });
+      this.play('chain', { volume: 0.35 + 0.08 * chain, rate: 1 + 0.06 * chain, gap: 0.02 });
+    } else if (sluggish) this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.45, rate: 0.75 });
+    else this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.7 });
+  }
+  fumble() {
+    this.play('fumble', { volume: 0.6, gap: 0.08 });
+  }
+  clash() {
+    this.play('clash', { volume: 1, gap: 0.05 });
+  }
+  guardBreak() {
+    this.play('guard_break', { volume: 1, gap: 0.1 });
+  }
+  guardUp(pos) {
+    this.play('guard_up', { pos, volume: 0.7, gap: 0.2 });
+  }
+  shatter(pos) {
+    this.play('shatter', { pos, volume: 0.9, gap: 0.1 });
+  }
+  relic() {
+    this.play('relic', { volume: 0.9, gap: 0.5 });
+  }
+  proc(id) {
+    const name = { freeze: 'freeze', lifesteal: 'lifesteal', hellfire: 'eruption', lightning: 'zap', bleed: 'bleed', soulrend: 'soulrend', echo: 'echo', echoHit: 'echo' }[id];
+    if (name) this.play(name, { volume: 0.95, gap: 0.05, rate: id === 'echoHit' ? 1.25 : 1 });
   }
   // Steel into flesh: a wet slash (one of three, so repeats don't drone),
   // with the weapon's own impact under it.
-  hit(type) {
-    this.play(`flesh_${1 + Math.floor(Math.random() * 3)}`, { volume: 1, gap: 0.04, rate: 0.92 + Math.random() * 0.16 });
-    this.play(type === 'sword' ? 'hit_sword' : 'hit_heavy', { volume: 0.45, gap: 0.04 });
+  hit(type, { counter = false, perfect = false, chain = 0 } = {}) {
+    const deep = perfect ? 1 - 0.04 * chain : 1;
+    this.play(`flesh_${1 + Math.floor(Math.random() * 3)}`, { volume: 1, gap: 0.04, rate: (0.92 + Math.random() * 0.16) * deep });
+    this.play(type === 'sword' ? 'hit_sword' : 'hit_heavy', { volume: 0.45, gap: 0.04, rate: deep });
+    if (counter) this.play('counter', { volume: 1, gap: 0.05 });
   }
   smash(kind) {
     this.play(kind === 'barrel' ? 'smash_wood' : 'smash_clay', { volume: 0.9, gap: 0.05, rate: 0.9 + Math.random() * 0.2 });

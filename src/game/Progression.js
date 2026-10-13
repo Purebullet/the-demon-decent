@@ -17,7 +17,12 @@ export function newRun() {
     speedMul: 1,
     weapon: makeWeapon('sword', 0),
     spells: { nova: 0, step: 0, siphon: 0 },
+    // Learned skills (Phantom Step: dodge on a double tap) and carried relics
+    // (id -> how many: combat/Relics.js).
+    skills: {},
+    relics: {},
     kills: 0,
+    best: { chain: 0, counters: 0, procs: 0 },
     startTime: performance.now(),
     dev: false,
   };
@@ -46,10 +51,21 @@ export const NODES = {
           apply: (r) => r.spells[id]++,
         });
       }
-      // Offer two at random.
+      // Offer two at random; until it is learned, one of them is always
+      // Phantom Step.
       for (let i = opts.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [opts[i], opts[j]] = [opts[j], opts[i]];
+      }
+      if (!run.skills.phantomStep) {
+        return [
+          {
+            label: 'Learn Phantom Step [double-tap A / D]',
+            detail: 'Dodge: double-tap A or D to sidestep, S to leap back (or Space), untouchable for an instant.',
+            apply: (r) => (r.skills.phantomStep = true),
+          },
+          ...opts.slice(0, 1),
+        ];
       }
       return opts.slice(0, 2);
     },

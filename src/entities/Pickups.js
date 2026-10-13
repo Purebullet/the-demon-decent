@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { buildWeaponMesh, WEAPON_TYPES } from './Weapons.js';
 import { SPELLS, SPELL_IDS, MAX_SPELL_LEVEL } from './Spells.js';
-import { runeCircleTexture } from '../world/Textures.js';
+import { runeCircleTexture, softDotTexture } from '../world/Textures.js';
 import { C, burst } from '../world/Particles.js';
 import { Assets } from '../assets/AssetLibrary.js';
+import { RELICS, addRelic } from '../combat/Relics.js';
+import { IconAtlas } from '../ui/IconAtlas.js';
 
-// Loot on the cavern floor. Potions and spell sigils are taken by walking
-// over them; weapons need F so a good blade is never swapped by accident.
+// Loot on the cavern floor. Potions, spell sigils, relics and the Phantom
+// Step tome are taken by walking over them; weapons need F so a good blade
+// is never swapped by accident.
 
 const flaskBody = new THREE.SphereGeometry(0.16, 14, 10);
 const flaskNeck = new THREE.CylinderGeometry(0.05, 0.06, 0.14, 10);
@@ -72,6 +75,45 @@ export class Pickups {
     return it;
   }
 
+  // A relic: its painted icon hanging in the air in a halo of its colour.
+  addRelic(x, z, id) {
+    const R = RELICS[id];
+    const g = new THREE.Group();
+    const col = new THREE.Color(R.color);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: col, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.scale.set(1.5, 1.5, 1);
+    g.add(halo);
+    const tex = IconAtlas.texture(id);
+    if (tex) {
+      const icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+      icon.scale.set(0.85, 0.85, 1);
+      g.add(icon);
+    } else {
+      g.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.2), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.5 })));
+    }
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 32), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -0.62;
+    g.add(ring);
+    return this._add('relic', x, z, g, { relic: id, color: col, noSpin: true });
+  }
+
+  // The Phantom Step tome: learn to dodge.
+  addTome(x, z) {
+    const g = new THREE.Group();
+    const col = new THREE.Color(0.75, 0.6, 1);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: col, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.scale.set(1.5, 1.5, 1);
+    g.add(halo);
+    const tex = IconAtlas.texture('dodge');
+    if (tex) {
+      const icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+      icon.scale.set(0.85, 0.85, 1);
+      g.add(icon);
+    }
+    return this._add('tome', x, z, g, { color: col, noSpin: true });
+  }
+
   addSpell(x, z) {
     const g = new THREE.Group();
     const m = new THREE.MeshBasicMaterial({ map: runeCircleTexture('#c060ff'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
@@ -93,7 +135,10 @@ export class Pickups {
       it.t += dt;
       if (!it.starter) {
         it.mesh.position.y = 0.75 + Math.sin(it.t * 2.2) * 0.08;
-        it.mesh.rotation.y += dt * (it.kind === 'spell' ? 1.6 : 0.9);
+        if (!it.noSpin) it.mesh.rotation.y += dt * (it.kind === 'spell' ? 1.6 : 0.9);
+      }
+      if ((it.kind === 'relic' || it.kind === 'tome') && Math.random() < dt * 12) {
+        ctx.fx.add.emit({ x: it.x + (Math.random() - 0.5) * 0.5, y: 0.4 + Math.random() * 0.6, z: it.z + (Math.random() - 0.5) * 0.5, vx: 0, vy: 0.7, vz: 0, life: 0.9, size: 0.12, sizeEnd: 0.02, color: it.color, colorEnd: C.violetDark, drag: 0.5 });
       }
       if (it.kind === 'potion' && Math.random() < dt * 4) {
         ctx.fx.add.emit({ x: it.x, y: 0.9, z: it.z, vx: (Math.random() - 0.5) * 0.3, vy: 0.6, vz: (Math.random() - 0.5) * 0.3, life: 0.8, size: 0.12, color: C.blood, colorEnd: C.bloodDark });
@@ -114,6 +159,15 @@ export class Pickups {
       } else if (it.kind === 'spell' && d < 1.1) {
         const msg = grantSpellSigil(run);
         this._take(i, ctx, msg);
+      } else if (it.kind === 'relic' && d < 1.2) {
+        const R = RELICS[it.relic];
+        const n = addRelic(run, it.relic);
+        this._take(i, ctx, n > 1 ? `${R.name} deepens (x${n})` : `Relic: ${R.name}`);
+        ctx.onRelic?.(it.relic, n);
+      } else if (it.kind === 'tome' && d < 1.2) {
+        if (run.skills) run.skills.phantomStep = true;
+        this._take(i, ctx, 'Skill learned: Phantom Step');
+        ctx.onSkill?.('phantomStep');
       } else if (it.kind === 'weapon' && d < nearestW) {
         nearestW = d;
         this.nearWeapon = it;
@@ -151,7 +205,8 @@ export class Pickups {
 
   _take(i, ctx, label) {
     const it = this.items[i];
-    burst(ctx.fx.add, it.mesh.position, { count: 20, speed: 2.5, size: 0.12, life: 0.5, gravity: 0, color: it.kind === 'spell' ? C.violet : C.emberHot, colorEnd: it.kind === 'spell' ? C.violetDark : C.emberRed });
+    const col = it.color || (it.kind === 'spell' ? C.violet : C.emberHot);
+    burst(ctx.fx.add, it.mesh.position, { count: it.color ? 40 : 20, speed: it.color ? 4 : 2.5, size: 0.12, life: 0.5, gravity: 0, color: col, colorEnd: it.kind === 'spell' ? C.violetDark : C.emberRed });
     this.scene.remove(it.mesh);
     this.items.splice(i, 1);
     ctx.audio?.pickup();

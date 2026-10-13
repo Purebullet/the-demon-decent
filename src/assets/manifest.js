@@ -170,6 +170,24 @@ export const PROPS = {
   chest: { model: 'assets/models/chest.glb', size: 0.95, maxTris: 2500, prompt: `Ornate demonic treasure chest of dark charred wood bound with black iron bands, a horned skull on the lock plate, closed lid, ${LOOK}` },
   urn: { model: 'assets/models/urn.glb', size: 1.0, maxTris: 1200, prompt: `Tall cracked clay burial urn with a narrow neck, carved skull and rune motifs, dark terracotta glaze, ${LOOK}` },
   barrel: { model: 'assets/models/barrel.glb', size: 1.1, maxTris: 1200, prompt: `Old rotten wooden barrel bound with rusted iron hoops, splintered planks, bones poking out of the open top, ${LOOK}` },
+  // ---- Relics: cursed trinkets found in chests and on elites. Each floats
+  // where it lies, and is drawn (tools/icons.html) into its HUD icon.
+  relicRime: { model: 'assets/models/relic-rime.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Heavy sword pommel encased in jagged pale blue ice crystals, frost runes carved in dark iron, small floating cursed relic, ${LOOK}` },
+  relicFang: { model: 'assets/models/relic-fang.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Huge curved demon fang on a knotted leather cord, glowing blood-red veins inside the ivory, small cursed relic, ${LOOK}` },
+  relicCinder: { model: 'assets/models/relic-cinder.glb', size: 0.45, maxTris: 1500, relic: true, prompt: `Cracked black obsidian heart with glowing orange molten lava in the cracks, small cursed relic, ${LOOK}` },
+  relicStorm: { model: 'assets/models/relic-storm.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Round iron amulet holding a crackling storm-blue eye gem, lightning runes around the rim, small cursed relic, ${LOOK}` },
+  relicWhetstone: { model: 'assets/models/relic-whetstone.glb', size: 0.45, maxTris: 1500, relic: true, prompt: `Cursed whetstone carved with dripping blood-red runes, bound in barbed wire, small cursed relic, ${LOOK}` },
+  relicMetronome: { model: 'assets/models/relic-metronome.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Small gothic metronome of brass and bone with a tiny skull as the swinging weight, small cursed relic, ${LOOK}` },
+  relicChain: { model: 'assets/models/relic-chain.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Coil of black iron chain with ghostly green soul flames trapped inside the links, small cursed relic, ${LOOK}` },
+  relicEcho: { model: 'assets/models/relic-echo.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Ornate dagger hilt with a translucent spectral pale-blue ghost blade, floating, small cursed relic, ${LOOK}` },
+  relicGorget: { model: 'assets/models/relic-gorget.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Heavy spiked iron gorget neck guard bound with petrified bark, demonic, small cursed relic, ${LOOK}` },
+  relicLantern: { model: 'assets/models/relic-lantern.glb', size: 0.5, maxTris: 1500, relic: true, prompt: `Old iron lantern with a small skull inside burning with an orange flame, small cursed relic, ${LOOK}` },
+  relicBrand: { model: 'assets/models/relic-brand.glb', size: 0.55, maxTris: 1500, relic: true, prompt: `Branding iron whose end is a glowing red-hot demonic sigil, wrapped leather handle, small cursed relic, ${LOOK}` },
+  // ---- Skill icons only (tools/icons.html draws them; never shipped).
+  iconNova: { model: 'assets/models/icon-nova.glb', size: 1, maxTris: 2000, icon: true, prompt: `Erupting ball of hellfire: a molten glowing core wrapped in rings of curling flame and burning horns, ${LOOK}` },
+  iconStep: { model: 'assets/models/icon-step.glb', size: 1, maxTris: 2000, icon: true, prompt: `Ghostly shadow wraith mask with hollow glowing violet eyes and trailing smoke wisps, ${LOOK}` },
+  iconSiphon: { model: 'assets/models/icon-siphon.glb', size: 1, maxTris: 2000, icon: true, prompt: `Ornate gothic chalice with bone handles overflowing with glowing blood-red liquid, ${LOOK}` },
+  iconDodge: { model: 'assets/models/icon-dodge.glb', size: 1, maxTris: 2000, icon: true, prompt: `Pair of spectral shadow greaves (armoured boots) with small ghostly feathered wings at the heels, ${LOOK}` },
   // ---- The street view (scripts/make-lot.mjs): sharp rocks and broken
   // pillars, sharing one texture atlas there.
   spire: { model: 'assets/models/lot-spire.glb', size: 4, maxTris: 900, lot: true, prompt: `Tall razor-sharp spire of black volcanic obsidian rock, jagged splintered facets, several knife-like points, leaning, ${LOOK}` },

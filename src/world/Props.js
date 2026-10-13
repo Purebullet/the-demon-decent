@@ -5,6 +5,7 @@ import { Hurtbox } from '../physics/Hitbox.js';
 import { softDotTexture } from './Textures.js';
 import { C, burst } from './Particles.js';
 import { rollWeapon } from '../entities/Weapons.js';
+import { rollRelic } from '../combat/Relics.js';
 import { mulberry32 } from '../core/rng.js';
 
 // Things on a cavern floor you can do something with:
@@ -214,15 +215,21 @@ export class Props {
     const fz = Math.cos(c.yaw);
     const at = (k, side) => [c.x + fx * (1.1 + k * 0.2) + fz * side, c.z + fz * (1.1 + k * 0.2) - fx * side];
     const floor = this.level.floor;
+    const run = ctx.player.run;
     const loot = [];
     loot.push(['potion']);
-    if (Math.random() < 0.55) loot.push(['weapon']);
-    if (Math.random() < 0.35) loot.push(['spell']);
-    if (Math.random() < 0.3) loot.push(['potion']);
+    // The first chest of a run always holds a relic; after that, often.
+    if (!Object.keys(run.relics || {}).length || Math.random() < 0.45) loot.push(['relic']);
+    if (!run.skills?.phantomStep && floor >= 2 && Math.random() < 0.3) loot.push(['tome']);
+    if (Math.random() < 0.45) loot.push(['weapon']);
+    if (Math.random() < 0.3) loot.push(['spell']);
+    if (Math.random() < 0.25) loot.push(['potion']);
     loot.forEach(([kind], i) => {
       const [x, z] = at(i, (i - (loot.length - 1) / 2) * 0.8);
       if (kind === 'potion') ctx.pickups?.addPotion(x, z);
       else if (kind === 'spell') ctx.pickups?.addSpell(x, z);
+      else if (kind === 'relic') ctx.pickups?.addRelic(x, z, rollRelic(run));
+      else if (kind === 'tome') ctx.pickups?.addTome(x, z);
       else ctx.pickups?.addWeapon(x, z, rollWeapon(floor, 0.5));
     });
     burst(ctx.fx.add, new THREE.Vector3(c.x, 0.8, c.z), { count: 50, speed: 3.5, color: C.spark, colorEnd: C.fireEdge, size: 0.1, life: 1.1, gravity: -2 });

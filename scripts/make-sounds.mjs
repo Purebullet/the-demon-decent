@@ -101,6 +101,97 @@ function noise(out, { freq = 800, freqEnd = freq, q = 1, type = 'bandpass', atta
 
 const SOUNDS = {
   swing_light: (o) => noise(o, { freq: 600, freqEnd: 2400, q: 1.4, attack: 0.04, decay: 0.15, gain: 0.4 }),
+  // A Perfect Chain swing: a deeper, fuller cut with a ringing tail (played
+  // lower with every link of the chain).
+  swing_perfect: (o) => {
+    noise(o, { freq: 380, freqEnd: 1700, q: 1.2, attack: 0.03, decay: 0.2, gain: 0.5 });
+    noise(o, { type: 'lowpass', freq: 500, freqEnd: 160, attack: 0.02, decay: 0.22, gain: 0.35 });
+    tone(o, { type: 'triangle', freq: 660, freqEnd: 640, attack: 0.01, decay: 0.45, gain: 0.07, delay: 0.04 });
+  },
+  // The chime of the timing itself, the moment a chain links.
+  chain: (o) => {
+    tone(o, { type: 'triangle', freq: 880, freqEnd: 870, attack: 0.002, decay: 0.4, gain: 0.16 });
+    tone(o, { freq: 1320, freqEnd: 1310, attack: 0.002, decay: 0.3, gain: 0.08 });
+    tone(o, { freq: 440, decay: 0.25, gain: 0.06 });
+  },
+  // A press too early: a dull wooden knock, the blade fumbled.
+  fumble: (o) => {
+    tone(o, { freq: 190, freqEnd: 120, decay: 0.07, gain: 0.3 });
+    noise(o, { type: 'lowpass', freq: 900, decay: 0.05, gain: 0.25 });
+  },
+  // Counter-hit: a crack, a bass boom, and a clang that rings on.
+  counter: (o) => {
+    tone(o, { freq: 72, freqEnd: 30, attack: 0.003, decay: 0.6, gain: 0.85 });
+    noise(o, { type: 'lowpass', freq: 4000, freqEnd: 260, decay: 0.28, gain: 0.7 });
+    noise(o, { type: 'highpass', freq: 3200, decay: 0.03, gain: 0.5 });
+    tone(o, { type: 'triangle', freq: 523, freqEnd: 500, decay: 0.5, gain: 0.1, delay: 0.01 });
+    tone(o, { type: 'triangle', freq: 784, freqEnd: 760, decay: 0.35, gain: 0.06, delay: 0.01 });
+  },
+  // Steel thrown back off a guard: an ugly inharmonic clang and a scrape.
+  clash: (o) => {
+    for (const [f, g, d] of [[612, 0.2, 0.6], [931, 0.14, 0.45], [1447, 0.09, 0.35], [2210, 0.05, 0.25]]) tone(o, { type: 'triangle', freq: f, freqEnd: f * 0.98, decay: d, gain: g });
+    noise(o, { type: 'highpass', freq: 2800, decay: 0.07, gain: 0.55 });
+    noise(o, { freq: 2200, freqEnd: 900, q: 2.5, attack: 0.01, decay: 0.3, gain: 0.2, delay: 0.03 });
+    tone(o, { freq: 120, freqEnd: 60, decay: 0.12, gain: 0.4 });
+  },
+  // A guard shattered: a crunch of breaking ward and a heavy thump.
+  guard_break: (o) => {
+    noise(o, { type: 'highpass', freq: 2400, decay: 0.12, gain: 0.6 });
+    for (let i = 0; i < 6; i++) noise(o, { type: 'highpass', freq: 3000 + i * 400, decay: 0.03, gain: 0.3, delay: 0.02 + i * 0.03 });
+    tone(o, { freq: 95, freqEnd: 35, decay: 0.45, gain: 0.7 });
+    noise(o, { type: 'lowpass', freq: 1400, freqEnd: 120, decay: 0.4, gain: 0.5 });
+  },
+  // A ward of hellfire flaring up.
+  guard_up: (o) => {
+    noise(o, { type: 'lowpass', freq: 300, freqEnd: 1100, attack: 0.05, decay: 0.25, gain: 0.4 });
+    tone(o, { type: 'saw', freq: 110, freqEnd: 140, attack: 0.03, decay: 0.3, gain: 0.12, lp: 700 });
+  },
+  // Procs.
+  freeze: (o) => {
+    noise(o, { freq: 4200, freqEnd: 2500, q: 3, attack: 0.01, decay: 0.45, gain: 0.35 });
+    for (let i = 0; i < 5; i++) tone(o, { freq: 2200 + i * 330, decay: 0.12, gain: 0.05, delay: i * 0.04 });
+    tone(o, { freq: 90, freqEnd: 60, decay: 0.2, gain: 0.3 });
+  },
+  shatter: (o) => {
+    noise(o, { type: 'highpass', freq: 3500, decay: 0.25, gain: 0.55 });
+    for (let i = 0; i < 8; i++) tone(o, { freq: 2400 + ((i * 577) % 1600), decay: 0.08, gain: 0.05, delay: 0.01 + i * 0.025 });
+  },
+  lifesteal: (o) => {
+    noise(o, { freq: 300, freqEnd: 1600, q: 1.5, attack: 0.25, decay: 0.12, gain: 0.45 });
+    tone(o, { freq: 180, freqEnd: 520, attack: 0.25, decay: 0.15, gain: 0.18 });
+    tone(o, { freq: 60, freqEnd: 45, decay: 0.3, gain: 0.4, delay: 0.38 });
+  },
+  eruption: (o) => {
+    noise(o, { type: 'lowpass', freq: 1600, freqEnd: 140, attack: 0.01, decay: 0.7, gain: 0.8 });
+    tone(o, { freq: 55, freqEnd: 30, decay: 0.6, gain: 0.7 });
+    noise(o, { freq: 900, freqEnd: 2600, q: 0.8, attack: 0.05, decay: 0.4, gain: 0.25 });
+  },
+  zap: (o) => {
+    for (let i = 0; i < 6; i++) noise(o, { type: 'highpass', freq: 2500 + i * 300, decay: 0.03, gain: 0.45, delay: i * 0.022 });
+    tone(o, { type: 'saw', freq: 1400, freqEnd: 160, decay: 0.18, gain: 0.18, lp: 5000 });
+    tone(o, { freq: 70, freqEnd: 40, decay: 0.25, gain: 0.4, delay: 0.02 });
+  },
+  bleed: (o) => {
+    squelch(o, { dur: 0.3, gain: 0.5, freq: 600 });
+    noise(o, { freq: 2600, freqEnd: 900, q: 1, attack: 0.01, decay: 0.2, gain: 0.2 });
+  },
+  soulrend: (o) => {
+    tone(o, { freq: 330, freqEnd: 110, attack: 0.05, decay: 0.8, gain: 0.2 });
+    tone(o, { freq: 494, freqEnd: 165, attack: 0.05, decay: 0.7, gain: 0.12 });
+    noise(o, { type: 'lowpass', freq: 1800, freqEnd: 100, decay: 0.7, gain: 0.7 });
+    tone(o, { freq: 50, freqEnd: 28, decay: 0.7, gain: 0.7 });
+  },
+  echo: (o) => {
+    noise(o, { freq: 1200, freqEnd: 2800, q: 1.2, attack: 0.04, decay: 0.2, gain: 0.35 });
+    tone(o, { freq: 660, freqEnd: 600, attack: 0.02, decay: 0.4, gain: 0.08 });
+    tone(o, { freq: 990, freqEnd: 900, attack: 0.02, decay: 0.3, gain: 0.05 });
+  },
+  // A relic taken: a dark rising chord with a shimmer.
+  relic: (o) => {
+    [196, 247, 294, 392].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: 0.9, gain: 0.12, delay: i * 0.07 }));
+    noise(o, { freq: 5000, freqEnd: 7000, q: 2, attack: 0.2, decay: 0.6, gain: 0.08 });
+    tone(o, { freq: 98, decay: 1, gain: 0.2 });
+  },
   swing_heavy: (o) => noise(o, { freq: 300, freqEnd: 1100, q: 1.4, attack: 0.05, decay: 0.24, gain: 0.45 }),
   hit_sword: (o) => {
     tone(o, { freq: 160, freqEnd: 40, decay: 0.18, gain: 0.55 });

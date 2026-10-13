@@ -1,8 +1,13 @@
 
-// Base stats for the regular enemies. Health is set so a Gaunt Stalker on
-// the first floor takes five blows of the starting sword (22 damage).
-// Floor tuning (LevelData.js) multiplies
-// hp, damage, speed, windup and cooldown on top of these.
+// Base stats for the regular enemies. Floor tuning (LevelData.js)
+// multiplies hp, damage, speed, windup and cooldown on top of these, and
+// Enemy.js on top of that makes every demon tougher, harder-hitting and
+// slower to wind up (so a fight is about reading and answering blows).
+//
+// `guard`: demons that can raise a guard against your swings (chance per
+// swing they see coming, how long they hold it, seconds between guards).
+// A guarded blow bounces off (Styles.js says which weapons break through),
+// and the demon answers with a quick riposte.
 //
 // Attack volumes are boxes in the enemy's local space (+Z is forward) that
 // are live only during the strike frames. `lunge` moves the enemy forward
@@ -44,6 +49,7 @@ export const ENEMY_TYPES = {
     poise: 45,
     mass: 1.6,
     role: 'flanker',
+    guard: { chance: 0.4, dur: [0.7, 1.3], cooldown: 3.2 },
     cooldown: 1.5,
     turnRate: 6,
     stride: 2.0,
@@ -63,6 +69,7 @@ export const ENEMY_TYPES = {
     poise: 100,
     mass: 3,
     role: 'bruiser',
+    guard: { chance: 0.5, dur: [0.9, 1.6], cooldown: 3.5 },
     cooldown: 2.0,
     turnRate: 3.5,
     stride: 1.6,
@@ -107,6 +114,8 @@ export const ENEMY_TYPES = {
     poise: 28,
     mass: 1.1,
     role: 'caster',
+    // A ward of hellfire rather than a raised arm.
+    guard: { chance: 0.35, dur: [0.8, 1.2], cooldown: 4, ward: true },
     keepAway: [5, 11],
     cooldown: 1.7,
     turnRate: 5,

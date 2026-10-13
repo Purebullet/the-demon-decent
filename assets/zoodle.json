@@ -184,6 +184,81 @@
       "id": 251,
       "source": "objects",
       "status": "done"
+    },
+    "relicRime": {
+      "id": 252,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicFang": {
+      "id": 253,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicCinder": {
+      "id": 254,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicStorm": {
+      "id": 255,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicWhetstone": {
+      "id": 256,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicMetronome": {
+      "id": 257,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicChain": {
+      "id": 258,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicEcho": {
+      "id": 259,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicGorget": {
+      "id": 260,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicLantern": {
+      "id": 261,
+      "source": "objects",
+      "status": "done"
+    },
+    "relicBrand": {
+      "id": 262,
+      "source": "objects",
+      "status": "done"
+    },
+    "iconNova": {
+      "id": 263,
+      "source": "objects",
+      "status": "done"
+    },
+    "iconStep": {
+      "id": 264,
+      "source": "objects",
+      "status": "done"
+    },
+    "iconSiphon": {
+      "id": 265,
+      "source": "objects",
+      "status": "done"
+    },
+    "iconDodge": {
+      "id": 266,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

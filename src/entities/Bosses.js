@@ -22,6 +22,7 @@ export const BOSS_TYPES = {
     poise: 380,
     mass: 12,
     role: 'boss',
+    guard: { chance: 0.25, dur: [0.8, 1.3], cooldown: 5 },
     cooldown: 0.9,
     turnRate: 2.6,
     stride: 0.9,
@@ -48,6 +49,7 @@ export const BOSS_TYPES = {
     poise: 650,
     mass: 15,
     role: 'boss',
+    guard: { chance: 0.25, dur: [0.8, 1.3], cooldown: 5 },
     cooldown: 0.85,
     turnRate: 3,
     stride: 0.8,
@@ -248,9 +250,9 @@ export class Boss extends Enemy {
     super._updateStrike(dt, ctx);
   }
 
-  takeHit(amount, dir, knockback, stagger, ctx) {
+  takeHit(amount, dir, knockback, stagger, ctx, opts) {
     // Bosses barely budge.
-    return super.takeHit(amount, dir, knockback * 0.15, stagger, ctx);
+    return super.takeHit(amount, dir, knockback * 0.15, stagger, ctx, opts);
   }
 
   die(ctx) {

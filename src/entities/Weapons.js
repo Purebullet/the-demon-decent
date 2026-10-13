@@ -1,12 +1,17 @@
 import * as THREE from 'three';
 import { emberVeinTexture } from '../world/Textures.js';
 import { Assets } from '../assets/AssetLibrary.js';
+import { ENCHANTS } from '../combat/Procs.js';
 
-// Melee weapons. The player never has armour; these are all there is.
+// Melee weapons. The player never has armour; these are all there is. Each
+// kind has a personality (combat/Styles.js):
 //
-//   Sword - balanced: quick alternating slashes, moderate damage.
-//   Axe   - heavy: slow diagonal chops, high damage.
-//   Mace  - crushing: overhead blows that stagger and hurl enemies back.
+//   Sword - Momentum: quick alternating slashes that speed up while they land.
+//   Axe   - Sunder: slow diagonal chops that tear defences away and shatter guards.
+//   Mace  - Domination: crushing blows that knock a demon out of anything it does.
+//
+// `width` is the half-thickness of the blade's hit volume around its centre
+// line: thin, so a blow lands only where the weapon visibly is.
 //
 // Swing arcs are given as start/end blade directions in camera space
 // (x right, y up, -z forward). The blade sweeps the great-circle arc between
@@ -23,7 +28,8 @@ export const WEAPON_TYPES = {
     knockback: 3,
     stagger: 28,
     blade: [0.05, 1.12], // hitbox span along the blade, metres from the grip
-    width: 0.13,
+    width: 0.055,
+    style: 'Momentum',
     hitstop: 0.045,
     arcs: [
       { from: [1, 0.25, -0.3], to: [-1, -0.5, -0.45] },
@@ -41,7 +47,8 @@ export const WEAPON_TYPES = {
     knockback: 4.5,
     stagger: 55,
     blade: [0.55, 1.15],
-    width: 0.2,
+    width: 0.1,
+    style: 'Sunder',
     hitstop: 0.08,
     arcs: [
       { from: [0.75, 1, -0.15], to: [-0.45, -0.8, -0.55] },
@@ -58,7 +65,8 @@ export const WEAPON_TYPES = {
     knockback: 9,
     stagger: 120,
     blade: [0.55, 1.0],
-    width: 0.22,
+    width: 0.12,
+    style: 'Domination',
     hitstop: 0.07,
     arcs: [
       { from: [0.15, 1, -0.12], to: [-0.05, -0.8, -0.6] },
@@ -71,24 +79,29 @@ export const WEAPON_TYPES = {
 export const TIER_MULT = [1, 1.22, 1.48, 1.8];
 const TIER_COLOR = ['#a89f94', '#d9d4c8', '#ff8a3c', '#ff3c2a'];
 
-export function makeWeapon(type, tier = 0, roll = 1) {
+export function makeWeapon(type, tier = 0, roll = 1, enchant = null) {
   const def = WEAPON_TYPES[type];
+  const E = enchant && ENCHANTS[enchant];
   return {
     type,
     tier,
-    name: def.names[tier],
+    name: E ? `${E.prefix} ${def.names[tier]}` : def.names[tier],
     damage: Math.round(def.damage * TIER_MULT[tier] * roll),
     color: TIER_COLOR[tier],
+    enchant: E ? enchant : null,
   };
 }
 
-// Weapon drop for a given depth: deeper floors favour better tiers.
+// Weapon drop for a given depth: deeper floors favour better tiers, and a
+// forged weapon or better may carry an enchantment (a proc of its own).
 export function rollWeapon(floor, luck = 0) {
   const types = Object.keys(WEAPON_TYPES);
   const type = types[Math.floor(Math.random() * types.length)];
   const base = (floor - 1) / 6 + luck;
   const tier = Math.max(0, Math.min(3, Math.floor(base + Math.random() * 1.2 - 0.2)));
-  return makeWeapon(type, tier, 0.92 + Math.random() * 0.16);
+  const ids = Object.keys(ENCHANTS);
+  const enchant = tier >= 1 && Math.random() < 0.3 + tier * 0.15 ? ids[Math.floor(Math.random() * ids.length)] : null;
+  return makeWeapon(type, tier, 0.92 + Math.random() * 0.16, enchant);
 }
 
 // ---- Swing geometry ---------------------------------------------------------
@@ -152,10 +165,11 @@ const wood = () => new THREE.MeshStandardMaterial({ color: 0x3b2618, roughness: 
 const leather = () => new THREE.MeshStandardMaterial({ color: 0x24160f, roughness: 0.9 });
 
 // Builds the weapon with its grip at the origin and the head along +Y.
-export function buildWeaponMesh(weapon) {
+// `own` gives it materials of its own (the one in your hand glows).
+export function buildWeaponMesh(weapon, { own = false } = {}) {
   // Generated weapon model; higher tiers smoulder.
   if (Assets.hasProp(weapon.type)) {
-    const w = Assets.instanceProp(weapon.type, { own: weapon.tier >= 2 });
+    const w = Assets.instanceProp(weapon.type, { own: own || weapon.tier >= 2 });
     w.traverse((o) => {
       if (!o.isMesh) return;
       o.frustumCulled = false;

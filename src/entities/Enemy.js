@@ -4,10 +4,33 @@ import { ENEMY_TYPES } from './EnemyTypes.js';
 import { C, burst, ring } from '../world/Particles.js';
 import { angleDelta, rand } from '../core/rng.js';
 import { buildGltfCharacter } from './GltfCharacter.js';
+import { FLAMES } from './poses.js';
+import { SUNDER_MAX, SUNDER_TIME, sunderDamage, GUARD_BROKEN } from '../combat/Styles.js';
+import { runeCircleTexture } from '../world/Textures.js';
 
-const WHITE = new THREE.Color(1, 1, 1);
+const WHITE = new THREE.Color(1, 0.86, 0.72);
+const TELL = new THREE.Color(1, 0.22, 0.04);
+const ICE = new THREE.Color(0.45, 0.8, 1);
+const BROKEN = new THREE.Color(1, 0.55, 0.1);
 const tmpV = new THREE.Vector3();
+const tmpC = new THREE.Color();
 const DORMANT = new Set(['dormant', 'burrowed', 'emerging', 'dying']);
+
+// Every demon is tougher and hits harder than its base stats, and winds up
+// longer: a fight is about reading a blow and answering it (a counter-hit
+// in the windup, a block, a dodge), not trading hits.
+const HP_SCALE = 1.3;
+const BOSS_HP_SCALE = 1.15;
+const DAMAGE_SCALE = 1.8;
+const WINDUP_SCALE = 1.35;
+// The answer to a blow on a raised guard comes quicker than a normal attack.
+const RIPOSTE = 0.55;
+// How long a guard takes to come up, and the arc it covers (cos of half-angle).
+const GUARD_RAISE = 0.1;
+const GUARD_FRONT = 0.35;
+// Damage taken while frozen, and while a guard lies broken.
+const FROZEN_TAKEN = 1.6;
+const BROKEN_TAKEN = 1.5;
 
 // One demon. Runs a small state machine:
 //
@@ -35,9 +58,9 @@ export class Enemy {
     this.radius = type.radius;
     this.hitRadius = this.model.hitRadius * (type.scale || 1);
     this.hurtboxes = this.model.hurtboxes;
-    this.maxHealth = Math.round(type.hp * tuning.hp);
+    this.maxHealth = Math.round(type.hp * tuning.hp * (type.role === 'boss' ? BOSS_HP_SCALE : HP_SCALE));
     this.health = this.maxHealth;
-    this.damage = type.dmg * tuning.dmg;
+    this.damage = type.dmg * tuning.dmg * DAMAGE_SCALE;
     this.speed = type.speed * tuning.speed;
     this.alive = true;
     this.removed = false;
@@ -63,6 +86,17 @@ export class Enemy {
     this.walkPhase = rand(0, 10);
     this.seed = rand(0, 100);
     this.lungeDelay = -1;
+    // Guard, wounds and weapon marks.
+    this.guardCd = rand(0.5, 2);
+    this.guardPending = -1;
+    this.status = {};
+    this.statusTick = 0;
+    this.sunder = 0;
+    this.sunderT = 0;
+    this.brokenT = 0;
+    this.stumbling = false;
+    this.ward = null;
+    this.tint = 0;
     this.strike = new StrikeVolume(this.root, new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
     this.emitters = [];
     this.baseEmissive = this.model.mats.map((m) => ({ c: m.emissive.clone(), i: m.emissiveIntensity }));
@@ -83,6 +117,26 @@ export class Enemy {
       e.active = this.state !== 'burrowed';
       this.emitters.push(e);
     }
+    if (this.elite) {
+      const e = fx.add.addEmitter(this.root, 16, FLAMES.ember, new THREE.Vector3(0, (this.model.height || 1.6) * 0.5, 0));
+      e.active = this.state !== 'burrowed';
+      this.emitters.push(e);
+    }
+  }
+
+  // An elite: larger, far tougher, harder-hitting, smouldering red and
+  // shedding embers, and it carries a relic.
+  makeElite() {
+    this.elite = true;
+    this.maxHealth = this.health = Math.round(this.maxHealth * 2.1);
+    this.damage *= 1.25;
+    this.root.scale.multiplyScalar(1.12);
+    this.radius *= 1.1;
+    this.hitRadius *= 1.12;
+    this.type = { ...this.type, poise: this.type.poise * 1.6, name: `Elite ${this.type.name}` };
+    const red = new THREE.Color(0.7, 0.06, 0.02);
+    this.baseEmissive = this.baseEmissive.map((b) => ({ c: b.c.clone().lerp(red, 0.65), i: b.i + 0.4 }));
+    this._tinted = true;
   }
 
   // Burst out of the ground (ambushers, and summons called by bosses).
@@ -133,13 +187,18 @@ export class Enemy {
   update(dt, ctx) {
     const player = ctx.player;
     this.stateT += dt;
-    this.flash = Math.max(0, this.flash - dt * 6);
+    this.flash = Math.max(0, this.flash - dt * 9);
     this.cooldown -= dt;
     this.poise = Math.max(0, this.poise - dt * this.type.poise * 0.3);
     const dx = player.position.x - this.position.x;
     const dz = player.position.z - this.position.z;
     const dist = Math.hypot(dx, dz);
     this.distToPlayer = dist;
+    if (this.alive) this._updateMarks(dt, ctx);
+    if (this.guardPending >= 0) {
+      this.guardPending -= dt;
+      if (this.guardPending < 0 && (this.state === 'chase' || this.state === 'recover')) this.raiseGuard(ctx);
+    }
 
     switch (this.state) {
       case 'dying':
@@ -182,8 +241,24 @@ export class Enemy {
         if (this.stateT >= this.stateDur) this._endAttack(ctx);
         break;
       case 'stagger':
-        if (this.stateT >= this.stateDur) this.setState('chase');
+        if (this.stateT >= this.stateDur) {
+          this.stumbling = false;
+          this.setState('chase');
+        }
         break;
+      case 'frozen':
+        // Locked in the ice mid-motion: no turning, no animation.
+        if (this.stateT >= this.stateDur) this._thaw(ctx, false);
+        return;
+      case 'guard': {
+        // Hold the guard toward the player, giving ground a little; when it
+        // drops, answer at once if the player is in reach.
+        this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 1.6);
+        this.moveBlend = Math.max(0, this.moveBlend - dt * 6);
+        if (dist < 2.2) ctx.world.move(this.position, this.radius, (-dx / (dist || 1)) * dt * 0.8, (-dz / (dist || 1)) * dt * 0.8);
+        if (this.stateT >= this.stateDur) this._lowerGuard(ctx, dist);
+        break;
+      }
       default:
         break;
     }
@@ -197,17 +272,65 @@ export class Enemy {
   postUpdate(dt, ctx, time) {
     if (this.removed) return;
     this.model.animate(this, dt, time);
-    if (this.flash > 0 || this._flashed) {
-      this._flashed = this.flash > 0;
-      const k = this.flash;
-      this.model.mats.forEach((m, i) => {
-        const b = this.baseEmissive[i];
-        m.emissive.copy(b.c).lerp(WHITE, k * 0.8);
-        m.emissiveIntensity = b.i + k * 1.2;
-      });
-    }
+    this._applyTint(dt, ctx, time);
+    if (this.ward) this._updateWard(dt, time);
     this.root.updateMatrixWorld(true);
     if (this.alive) for (const h of this.hurtboxes) h.update();
+  }
+
+  // Emissive tints, in order of importance: the white flash of a hit, the ice
+  // of a freeze, the ember glow of a broken guard, and the red heat that
+  // builds through a windup (the tell a counter-hit reads).
+  _applyTint(dt, ctx, time) {
+    let col = null;
+    let k = 0;
+    let boost = 1.3;
+    const tells = ctx.tells || 1;
+    if (this.state === 'frozen') {
+      col = ICE;
+      k = 0.75 + 0.1 * Math.sin(time * 6);
+    } else if (this.state === 'windup' && this.alive) {
+      const u = Math.min(1, this.stateT / Math.max(0.01, this.stateDur));
+      col = TELL;
+      k = Math.min(1, (0.25 + 0.75 * u * u) * 0.6 * tells) * (0.85 + 0.15 * Math.sin(time * 30));
+    } else if (this.brokenT > 0 && this.alive) {
+      col = BROKEN;
+      k = 0.35 + 0.15 * Math.sin(time * 10);
+    }
+    if (this.flash > 0) {
+      // The flash of a hit: a warm, quick, partial glare, not a white cut-out.
+      col = col ? tmpC.copy(col).lerp(WHITE, this.flash * 0.7) : WHITE;
+      k = Math.max(k, this.flash * 0.6);
+      boost = 1;
+    }
+    if (!col && !this._tinted) return;
+    this._tinted = !!col;
+    this.model.mats.forEach((m, i) => {
+      const b = this.baseEmissive[i];
+      if (!col) {
+        m.emissive.copy(b.c);
+        m.emissiveIntensity = b.i;
+        return;
+      }
+      m.emissive.copy(b.c).lerp(col, Math.min(1, k * 0.85));
+      m.emissiveIntensity = b.i + k * boost;
+    });
+  }
+
+  _updateWard(dt, time) {
+    const w = this.ward;
+    const on = this.state === 'guard' && this.alive;
+    const raise = on ? Math.min(1, this.stateT / GUARD_RAISE) : 0;
+    w.userData.k += ((on ? 1 : 0) - w.userData.k) * Math.min(1, dt * (on ? 18 : 6));
+    this.wardFlash = Math.max(0, (this.wardFlash || 0) - dt * 4);
+    const sh = w.userData.shatter || 0;
+    w.userData.shatter = Math.max(0, sh - dt * 2.5);
+    const k = w.userData.k;
+    w.visible = k > 0.01 || sh > 0.01;
+    if (!w.visible) return;
+    w.material.opacity = Math.min(1, k * (0.55 + 0.25 * Math.sin(time * 9)) + this.wardFlash * 0.8 + sh * 0.6);
+    w.rotation.z = time * 1.5;
+    w.scale.setScalar(w.userData.size * (0.6 + 0.4 * raise + sh * 0.8));
   }
 
   _canSee(ctx, player) {
@@ -341,6 +464,9 @@ export class Enemy {
       }
       return;
     }
+    // A sluggish, fumbled swing is an opening: every demon in reach takes it.
+    const opening = player.exposed && dist <= this.type.attacks[0].maxRange + 0.6;
+    if (opening) this.cooldown = Math.min(this.cooldown, 0.08);
     if (this.cooldown > 0) return;
     const options = this.type.attacks.filter((a) => dist >= a.minRange && dist <= a.maxRange);
     if (!options.length) return;
@@ -348,7 +474,7 @@ export class Enemy {
     if (Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z))) > 0.9) return;
     if (!ctx.nav.hasLineOfSight(this.position.x, this.position.z, player.position.x, player.position.z, 0.2)) return;
     // Casters pace themselves; attack tokens are for those who close in.
-    if (!this.type.keepAway && !ctx.director.requestToken(this)) return;
+    if (!this.type.keepAway && !opening && !ctx.director.requestToken(this)) return;
     this._startAttack(options[Math.floor(Math.random() * options.length)], ctx);
   }
 
@@ -356,7 +482,7 @@ export class Enemy {
     this.attack = a;
     this.hitPlayer = false;
     this.aoeDone = false;
-    this.setState('windup', a.windup * this.tuning.windup * windupScale);
+    this.setState('windup', a.windup * this.tuning.windup * windupScale * WINDUP_SCALE);
     ctx.audio?.telegraph(this.typeKey, this.position);
   }
 
@@ -448,11 +574,20 @@ export class Enemy {
 
   // ------------------------------------------------------------ damage ---
 
-  takeHit(amount, dir, knockback, stagger, ctx) {
+  // opts: { proc (a proc or wound, not a blow), heavy, contact (world point),
+  //         sweep (blade travel direction, world), force (0..1+) }
+  takeHit(amount, dir, knockback, stagger, ctx, opts = {}) {
     if (!this.alive || this.state === 'burrowed') return 0;
+    amount *= this.damageTakenMul();
+    if (this.state === 'frozen' && !opts.proc) {
+      // The blow shatters the ice.
+      this._thaw(ctx, true);
+    }
     this.health -= amount;
-    this.flash = 1;
+    this.flash = opts.proc ? 0.5 : 1;
     this.lastHit = { x: dir.x, z: dir.z, knockback };
+    // The body answers the angle and weight of the blow (GltfCharacter).
+    if (!opts.proc || opts.force) this.model.react?.(this, dir, opts.contact, opts.sweep, opts.force ?? 0.5);
     const mass = this.type.mass || 1;
     this.knock.x += (dir.x * knockback) / mass;
     this.knock.z += (dir.z * knockback) / mass;
@@ -462,24 +597,184 @@ export class Enemy {
     }
     if (this.state === 'dormant') this.becomeAlert(ctx);
     this.poise += stagger;
-    if (this.poise >= this.type.poise && this.state !== 'stagger' && this.state !== 'emerging') {
+    const threshold = this.type.poise * (1 - 0.1 * this.sunder);
+    if (this.poise >= threshold && this.state !== 'stagger' && this.state !== 'emerging' && this.state !== 'frozen') {
       this.poise = 0;
       this.interrupt(ctx, 0.7);
+    } else if (!opts.proc && this.canGuard() && this.guardCd <= 0 && this.guardPending < 0 && this.state === 'chase' && Math.random() < this.type.guard.chance * 0.5) {
+      // Stung, a guarding demon gets its guard up.
+      this.guardPending = 0.18;
     }
     return amount;
   }
 
-  interrupt(ctx, dur) {
+  // Sunder, frozen and a broken guard all open a demon up.
+  damageTakenMul() {
+    let m = sunderDamage(this.sunder);
+    if (this.state === 'frozen') m *= FROZEN_TAKEN;
+    if (this.brokenT > 0) m *= BROKEN_TAKEN;
+    return m;
+  }
+
+  // ---------------------------------------------------- guard & clash ---
+
+  canGuard() {
+    return !!this.type.guard && this.alive;
+  }
+
+  // The player started a swing; a guarding demon that sees it coming may
+  // raise its guard (after a moment to react: a fast enough blow beats it).
+  onPlayerSwing(ctx, heavy) {
+    if (!this.canGuard() || this.guardCd > 0 || this.guardPending >= 0) return;
+    if (this.state !== 'chase' && this.state !== 'recover') return;
+    if (this.distToPlayer > 3.6) return;
+    const p = ctx.player.position;
+    if (Math.abs(angleDelta(this.yaw, Math.atan2(p.x - this.position.x, p.z - this.position.z))) > 1.1) return;
+    if (Math.random() < this.type.guard.chance * (heavy ? 1.3 : 1)) this.guardPending = 0.12;
+  }
+
+  raiseGuard(ctx) {
+    const g = this.type.guard;
+    ctx.director.releaseToken(this);
+    this.attack = null;
+    this.setState('guard', rand(g.dur[0], g.dur[1]));
+    this.guardCd = g.cooldown;
+    if (!this.ward) this.ward = makeWard(this);
+    ctx.audio?.guardUp?.(this.position);
+  }
+
+  _lowerGuard(ctx, dist) {
+    // Riposte if the player is still in reach.
+    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && !x.projectile);
+    if (a && !ctx.player.dead) this._startAttack(a, ctx, RIPOSTE);
+    else this.setState('chase');
+  }
+
+  // Is a blow from `from` (world point) caught on the guard?
+  isGuardingAgainst(from) {
+    if (this.state !== 'guard' || this.stateT < GUARD_RAISE) return false;
+    const dx = from.x - this.position.x;
+    const dz = from.z - this.position.z;
+    const d = Math.hypot(dx, dz) || 1;
+    return (Math.sin(this.yaw) * dx + Math.cos(this.yaw) * dz) / d > GUARD_FRONT;
+  }
+
+  // A blow rang off the guard: hold it, then answer with a riposte.
+  clash(ctx, at) {
+    this.wardFlash = 1;
+    this.flash = 0.4;
+    burst(ctx.fx.add, at, { count: 26, speed: 6, color: C.spark, colorEnd: C.fireEdge, size: 0.07, life: 0.35 });
+    const dist = this.distToPlayer;
+    const a = this.type.attacks.find((x) => dist >= x.minRange && dist <= x.maxRange && !x.projectile);
+    if (a) this._startAttack(a, ctx, RIPOSTE);
+  }
+
+  // An axe shatters the guard: the demon reels, wide open.
+  guardBreak(ctx, at) {
+    this.wardFlash = 1;
+    if (this.ward) this.ward.userData.shatter = 1;
+    burst(ctx.fx.add, at, { count: 50, speed: 8, color: C.fireCore, colorEnd: C.emberRed, size: 0.12, life: 0.6 });
+    burst(ctx.fx.alpha, at, { count: 20, speed: 5, color: C.smoke, colorEnd: C.smoke, size: 0.3, life: 0.8, gravity: -2 });
+    this.brokenT = GUARD_BROKEN + 1.2;
+    this.interrupt(ctx, GUARD_BROKEN);
+    this.guardCd = Math.max(this.guardCd, 4);
+  }
+
+  // A mace blow (or a charged one through a guard): a heavy stumble back.
+  stumble(ctx, dur, dir) {
+    if (!this.alive || this.state === 'emerging' || this.state === 'frozen') return;
+    this.interrupt(ctx, dur);
+    this.stumbling = true;
+    const mass = this.type.mass || 1;
+    this.knock.x += (dir.x * 6) / mass;
+    this.knock.z += (dir.z * 6) / mass;
+  }
+
+  // ------------------------------------------------------ marks & ice ---
+
+  // Wounds that keep hurting (bleed, burn), sunder stacks from an axe.
+  addStatus(kind, { dps, dur }) {
+    const s = this.status[kind];
+    if (s) {
+      s.dps = Math.max(s.dps, dps);
+      s.t = Math.max(s.t, dur);
+    } else this.status[kind] = { dps, t: dur };
+  }
+
+  applySunder(n, ctx) {
+    this.sunder = Math.min(SUNDER_MAX, this.sunder + n);
+    this.sunderT = SUNDER_TIME;
+    burst(ctx.fx.add, tmpV.set(this.position.x, (this.model.height || 1.6) * 0.6 * (this.type.scale || 1), this.position.z), { count: 10 + n * 6, speed: 3, color: C.emberHot, colorEnd: C.emberRed, size: 0.08, life: 0.5 });
+  }
+
+  freeze(ctx, dur) {
+    if (!this.alive || this.state === 'emerging' || this.state === 'burrowed') return;
     ctx.director.releaseToken(this);
     this.attack = null;
     this.lungeDelay = -1;
+    this.setState('frozen', dur);
+  }
+
+  _thaw(ctx, shattered) {
+    const p = tmpV.set(this.position.x, (this.model.height || 1.6) * 0.55 * (this.type.scale || 1), this.position.z);
+    burst(ctx.fx.add, p, { count: shattered ? 46 : 16, speed: shattered ? 6 : 2, color: ICE, colorEnd: new THREE.Color(0.1, 0.3, 0.7), size: 0.14, life: 0.6, gravity: -8 });
+    if (shattered) ctx.audio?.shatter?.(this.position);
+    this.cooldown = Math.max(this.cooldown, 0.6);
+    this.setState('chase');
+  }
+
+  _updateMarks(dt, ctx) {
+    this.guardCd -= dt;
+    this.brokenT = Math.max(0, this.brokenT - dt);
+    if (this.sunder > 0) {
+      this.sunderT -= dt;
+      if (this.sunderT <= 0) this.sunder = 0;
+    }
+    if (this.state === 'frozen' && Math.random() < dt * 14) {
+      const h = (this.model.height || 1.6) * (this.type.scale || 1);
+      ctx.fx.add.emit({ x: this.position.x + rand(-0.4, 0.4), y: rand(0.2, h), z: this.position.z + rand(-0.4, 0.4), vy: -0.2, life: 0.6, size: 0.1, sizeEnd: 0.02, color: ICE, colorEnd: new THREE.Color(0.1, 0.3, 0.7), drag: 1 });
+    }
+    // Bleed and burn tick twice a second.
+    this.statusTick -= dt;
+    const tick = this.statusTick <= 0;
+    if (tick) this.statusTick = 0.5;
+    for (const [kind, st] of Object.entries(this.status)) {
+      st.t -= dt;
+      if (st.t <= 0) {
+        delete this.status[kind];
+        continue;
+      }
+      const h = (this.model.height || 1.6) * 0.6 * (this.type.scale || 1);
+      if (kind === 'burn' && Math.random() < dt * 20) ctx.fx.add.emit({ x: this.position.x + rand(-0.3, 0.3), y: rand(0.3, h * 1.4), z: this.position.z + rand(-0.3, 0.3), vy: 1.6, life: 0.5, size: 0.3, sizeEnd: 0.05, color: C.fireCore, colorEnd: C.fireEdge, drag: 1.2 });
+      if (kind === 'bleed' && Math.random() < dt * 8) ctx.fx.alpha.emit({ x: this.position.x + rand(-0.2, 0.2), y: h, z: this.position.z + rand(-0.2, 0.2), vx: rand(-0.5, 0.5), vy: 0.5, vz: rand(-0.5, 0.5), life: 0.8, size: 0.09, color: C.blood, colorEnd: C.bloodDark, gravity: -9 });
+      if (tick && this.alive) {
+        const dealt = this.takeHit(st.dps * 0.5, tmpV.set(0, 0, 0), 0, 0, ctx, { proc: true });
+        ctx.onDamage?.(this, dealt, false, tmpV.set(this.position.x, h + 0.3, this.position.z), kind);
+        if (!this.alive) return;
+      }
+    }
+  }
+
+  interrupt(ctx, dur) {
+    if (this.state === 'frozen' || this.state === 'dying') return;
+    ctx.director.releaseToken(this);
+    this.attack = null;
+    this.lungeDelay = -1;
+    this.stumbling = false;
     this.cooldown = Math.max(this.cooldown, 0.4);
     this.setState('stagger', dur);
+  }
+
+  // Is the demon winding up a blow right now (a counter-hit window)?
+  isWindingUp() {
+    return this.state === 'windup';
   }
 
   die(ctx) {
     this.alive = false;
     this.health = 0;
+    this.status = {};
+    if (this.ward) this.ward.visible = false;
     ctx.director.releaseToken(this);
     ctx.pathService.cancel(this);
     this.attack = null;
@@ -543,3 +838,19 @@ export class Enemy {
 
 // How long a body stays on the floor (with its death clip), sinking at the end.
 const CORPSE_TIME = 9;
+
+// The guard made visible: a burning ward of runes held before the chest.
+const wardGeo = new THREE.PlaneGeometry(1, 1);
+let wardTex = null;
+function makeWard(e) {
+  wardTex ||= runeCircleTexture('#ff4a1a');
+  const mat = new THREE.MeshBasicMaterial({ map: wardTex, color: e.type.guard?.ward ? 0xff7a2a : 0xff3a1a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+  const m = new THREE.Mesh(wardGeo, mat);
+  const h = e.model.height || 1.6;
+  m.position.set(0, h * 0.58, (e.radius / (e.type.scale || 1)) + 0.25);
+  m.userData = { k: 0, size: h * 0.62, shatter: 0 };
+  m.visible = false;
+  m.renderOrder = 6;
+  e.root.add(m);
+  return m;
+}

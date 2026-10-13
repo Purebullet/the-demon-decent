@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Icon painter</title>
+<style>html,body{margin:0;background:#140808}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
+</head>
+<body>
+<!-- Driven by scripts/make-icons.mjs: renders each generated model into the
+     HUD icon atlas (src/ui/icons.js lists them). Open it directly to look:
+     tools/icons.html?show=1 -->
+<script type="module">
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  import { ICONS, CELL, COLS } from '../src/ui/icons.js';
+
+  const SS = 2; // supersampled, then drawn down
+  const R = CELL * SS;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setSize(R, R);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.5;
+  const loader = new GLTFLoader();
+
+  async function paint(icon) {
+    const gltf = await loader.loadAsync(`../assets/models/${icon.model}.glb`);
+    const scene = new THREE.Scene();
+    const obj = gltf.scene;
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of [o.material].flat()) {
+        m.metalness = 0.1;
+        m.roughness = Math.max(0.55, m.roughness ?? 0.7);
+        m.metalnessMap = null;
+      }
+    });
+    // Long things stand on end first (then `tilt` lays them diagonally).
+    const s0 = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+    if (s0.x > s0.y * 1.25 && s0.x >= s0.z) obj.rotation.z = Math.PI / 2;
+    else if (s0.z > s0.y * 1.25 && s0.z > s0.x) obj.rotation.x = Math.PI / 2;
+    obj.updateMatrixWorld(true);
+    const holder = new THREE.Group();
+    holder.add(obj);
+    // Centre on the bounding sphere, turned three-quarters to the viewer.
+    let box = new THREE.Box3().setFromObject(holder);
+    const c = box.getCenter(new THREE.Vector3());
+    obj.position.sub(c);
+    holder.rotation.set(0.18 + (icon.pitch || 0), 0.55, icon.tilt || 0, 'YXZ');
+    scene.add(holder);
+    box = new THREE.Box3().setFromObject(holder);
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const cam = new THREE.PerspectiveCamera(28, 1, 0.01, 100);
+    const dist = sphere.radius / Math.sin(THREE.MathUtils.degToRad(28 / 2)) * 1.02;
+    cam.position.set(0, 0, dist).add(sphere.center);
+    cam.lookAt(sphere.center);
+    const col = new THREE.Color(icon.color);
+    scene.add(new THREE.HemisphereLight(0xffe8d0, 0x200808, 1.3));
+    const key = new THREE.DirectionalLight(0xfff0e0, 3);
+    key.position.set(-1.5, 2, 2.5);
+    scene.add(key);
+    // The icon's own colour, from below and behind: an infernal rim.
+    const rim = new THREE.DirectionalLight(col, 5);
+    rim.position.set(1.8, -0.6, -2);
+    scene.add(rim);
+    const under = new THREE.PointLight(col, 6 * sphere.radius * sphere.radius, 0, 2);
+    under.position.set(sphere.center.x, sphere.center.y - sphere.radius * 1.2, sphere.center.z + sphere.radius);
+    scene.add(under);
+    renderer.render(scene, cam);
+    // Crop to what was drawn, so every icon fills its cell the same.
+    const shot = document.createElement('canvas');
+    shot.width = shot.height = R;
+    const sg = shot.getContext('2d');
+    sg.drawImage(renderer.domElement, 0, 0);
+    const px = sg.getImageData(0, 0, R, R).data;
+    let x0 = R;
+    let y0 = R;
+    let x1 = 0;
+    let y1 = 0;
+    for (let y = 0; y < R; y++) {
+      for (let x = 0; x < R; x++) {
+        if (px[(y * R + x) * 4 + 3] < 10) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    const bw = Math.max(1, x1 - x0 + 1);
+    const bh = Math.max(1, y1 - y0 + 1);
+    const k = (CELL * 0.84) / Math.max(bw, bh);
+    const dw = bw * k;
+    const dh = bh * k;
+    const dx = (CELL - dw) / 2;
+    const dy = (CELL - dh) / 2;
+    const out = document.createElement('canvas');
+    out.width = CELL;
+    out.height = CELL;
+    const g = out.getContext('2d');
+    // A soft halo of the icon's colour behind the object.
+    g.shadowColor = icon.color;
+    g.shadowBlur = CELL * 0.07;
+    g.drawImage(shot, x0, y0, bw, bh, dx, dy, dw, dh);
+    g.shadowBlur = 0;
+    g.drawImage(shot, x0, y0, bw, bh, dx, dy, dw, dh);
+    return out;
+  }
+
+  window.makeIcons = async () => {
+    const rows = Math.ceil(ICONS.length / COLS);
+    const atlas = document.createElement('canvas');
+    atlas.width = COLS * CELL;
+    atlas.height = rows * CELL;
+    const g = atlas.getContext('2d');
+    for (const [i, icon] of ICONS.entries()) {
+      try {
+        g.drawImage(await paint(icon), (i % COLS) * CELL, Math.floor(i / COLS) * CELL);
+      } catch (e) {
+        console.warn(`No icon for ${icon.id}: ${e.message}`);
+      }
+    }
+    if (new URLSearchParams(location.search).get('show')) document.body.appendChild(atlas);
+    return atlas.toDataURL('image/png');
+  };
+  window.ready = true;
+  if (new URLSearchParams(location.search).get('show')) window.makeIcons();
+</script>
+</body>
+</html>

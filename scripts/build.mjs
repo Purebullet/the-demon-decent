@@ -39,8 +39,9 @@ const EXPERIENCE = {
 
 async function listModels() {
   try {
-    // lot-*.glb are for the street view only (scripts/make-lot.mjs).
-    return (await readdir(join(root, 'assets/models'))).filter((f) => f.endsWith('.glb') && !f.startsWith('lot-')).sort();
+    // lot-*.glb are for the street view only (scripts/make-lot.mjs); icon-*.glb
+    // and relic-*.glb only for painting the HUD icons (npm run icons).
+    return (await readdir(join(root, 'assets/models'))).filter((f) => f.endsWith('.glb') && !/^(lot|icon|relic)-/.test(f)).sort();
   } catch {
     return [];
   }
@@ -61,6 +62,8 @@ async function copyAssets(to) {
   await mkdir(join(to, 'assets/models'), { recursive: true });
   for (const f of models) await copyFile(join(root, 'assets/models', f), join(to, 'assets/models', f));
   await writeFile(join(to, 'assets/models/index.json'), JSON.stringify(models));
+  await mkdir(join(to, 'assets/icons'), { recursive: true });
+  await copyFile(join(root, 'assets/icons/atlas.webp'), join(to, 'assets/icons/atlas.webp'));
   const s = await makeSounds(join(to, 'assets/sounds'));
   return { models: models.length, sounds: s.count };
 }
@@ -88,7 +91,7 @@ async function buildExperience() {
   // only ever seen by torchlight, also drops to 512 px textures; creatures,
   // weapons and the things you walk up to keep 1024.
   const close = new Set(['sword', 'axe', 'mace', 'torch', 'potion', 'chest', 'gate', 'throne', 'statue']);
-  const small = Object.entries(PROPS).filter(([id, p]) => !close.has(id) && !p.lot).map(([, p]) => p.model.split('/').pop());
+  const small = Object.entries(PROPS).filter(([id, p]) => !close.has(id) && !p.lot && !p.icon && !p.relic).map(([, p]) => p.model.split('/').pop());
   execFileSync('python3', [join(root, 'scripts/shrink-textures.py'), `--small=${small.join(',')}`, join(out, 'assets/models')], { stdio: 'inherit' });
   await rm(join(dist, 'experience.zip'), { force: true });
   execFileSync('zip', ['-qr', join(dist, 'experience.zip'), '.'], { cwd: out });
@@ -118,7 +121,7 @@ async function buildWeb() {
   console.log(`dist/web/index.html  ${(html.length / 1024).toFixed(0)} KB, ${a.models} models, ${a.sounds} sounds`);
 }
 
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary', '.wav': 'audio/wav', '.png': 'image/png' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.glb': 'model/gltf-binary', '.wav': 'audio/wav', '.png': 'image/png', '.webp': 'image/webp' };
 
 function serve(dir, port, { cors = false, dynamicIndex = false } = {}) {
   createServer(async (req, res) => {
