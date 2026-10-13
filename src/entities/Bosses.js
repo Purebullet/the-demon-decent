@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Enemy } from './Enemy.js';
-import { buildBrute, buildArchfiend } from './EnemyModels.js';
 import { angleDelta, rand } from '../core/rng.js';
 import { C, burst, ring } from '../world/Particles.js';
 
@@ -15,8 +14,6 @@ export const BOSS_TYPES = {
   gorvath: {
     name: 'Gorvath, the Flame-Horned',
     asset: 'gorvath',
-    build: buildBrute,
-    buildOptions: { boss: true },
     scale: 1.9,
     hp: 1500,
     dmg: 24,
@@ -43,7 +40,6 @@ export const BOSS_TYPES = {
   azrakel: {
     name: 'Azrakel, the Winged Archfiend',
     asset: 'azrakel',
-    build: buildArchfiend,
     scale: 1.45,
     hp: 3600,
     dmg: 26,
@@ -58,7 +54,7 @@ export const BOSS_TYPES = {
     loot: { potion: 1, weapon: 0, spell: 0 },
     summons: [
       { at: 0.7, spawn: ['fiend', 'ghoul', 'ghoul', 'ghoul'] },
-      { at: 0.4, spawn: ['fiend', 'fiend', 'brute', 'ghoul', 'ghoul'] },
+      { at: 0.4, spawn: ['fiend', 'witch', 'brute', 'hound', 'hound'] },
     ],
     attacks: [
       { name: 'sweep', windup: 0.8, strike: 0.24, recover: 0.8, dmg: 1, minRange: 0, maxRange: 5, volume: { c: [0, 1.4, 1.8], h: [2.2, 1.0, 1.6] }, knockback: 10, weight: 3 },

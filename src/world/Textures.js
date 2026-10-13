@@ -135,24 +135,6 @@ export function emberVeinTexture(seed = 3, color = [255, 90, 20], sharpness = 14
   });
 }
 
-// Mottled creature skin.
-export function skinTexture(seed, base, spots, amount = 0.35) {
-  return cached(`skin${seed}${base}${spots}`, () => {
-    const P = 5;
-    const c = paint(256, (u, v) => {
-      const n = tileFbm(u * P, v * P, P, 5, seed);
-      const s = Math.max(0, tileFbm(u * P * 2, v * P * 2, P * 2, 3, seed + 9) - 0.5) * 2 * amount * 2;
-      const k = 0.75 + n * 0.5;
-      return [
-        (base[0] * (1 - s) + spots[0] * s) * k,
-        (base[1] * (1 - s) + spots[1] * s) * k,
-        (base[2] * (1 - s) + spots[2] * s) * k,
-      ];
-    });
-    return toTexture(c);
-  });
-}
-
 // Soft round sprite for particles and glows.
 export function softDotTexture() {
   return cached('dot', () => {

@@ -52,7 +52,8 @@ export class Audio {
     }
   }
 
-  kind = (k) => (k === 'ghoul' ? 'ghoul' : k === 'fiend' ? 'fiend' : 'brute');
+  // Each creature borrows the voice nearest its size.
+  kind = (k) => (k === 'ghoul' || k === 'hound' ? 'ghoul' : k === 'fiend' || k === 'witch' ? 'fiend' : 'brute');
 
   swing(type) {
     this.play(type === 'sword' ? 'swing_light' : 'swing_heavy', { volume: 0.7 });

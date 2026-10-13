@@ -6,7 +6,7 @@ import { TILE } from './LevelData.js';
 // Pure and DOM-free so tests can validate every floor.
 
 const SOLID = new Set(['#', 'o', 't']);
-const ENEMY = { g: 'ghoul', G: 'ghoul', c: 'fiend', b: 'brute' };
+const ENEMY = { g: 'ghoul', G: 'ghoul', c: 'fiend', b: 'brute', d: 'hound', m: 'witch' };
 
 // A* entry costs. Enemies will walk through hazards only when there is no
 // sane alternative (and hunting packs on deep floors sometimes do).

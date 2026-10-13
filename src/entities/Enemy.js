@@ -3,7 +3,6 @@ import { StrikeVolume } from '../physics/Hitbox.js';
 import { ENEMY_TYPES } from './EnemyTypes.js';
 import { C, burst, ring } from '../world/Particles.js';
 import { angleDelta, rand } from '../core/rng.js';
-import { Assets } from '../assets/AssetLibrary.js';
 import { buildGltfCharacter } from './GltfCharacter.js';
 
 const WHITE = new THREE.Color(1, 1, 1);
@@ -26,8 +25,8 @@ export class Enemy {
     this.typeKey = typeKey;
     this.type = type;
     this.tuning = tuning;
-    // The AI-generated model when its GLB is present, else the stand-in.
-    this.model = type.asset && Assets.hasCharacter(type.asset) ? buildGltfCharacter(type.asset, type.scale || 1) : type.build(type.buildOptions);
+    // The AI-generated model (a plain block until its GLB exists).
+    this.model = buildGltfCharacter(type.asset, type.scale || 1);
     this.root = this.model.root;
     if (type.scale) this.root.scale.setScalar(type.scale);
     this.position = this.root.position;
@@ -266,8 +265,25 @@ export class Enemy {
     vz /= len;
     let speed = this.speed;
     const engaging = goal === ctx.player.position;
-    const range = this.type.attacks[0].maxRange;
-    if (engaging && dist < range * 0.6 + ctx.player.radius) speed = 0;
+    const keep = this.type.keepAway;
+    if (keep) {
+      // Casters hold a firing distance with a clear line, and back off when
+      // the player closes in.
+      const clear = dist < keep[1] && nav.hasLineOfSight(px, pz, ctx.player.position.x, ctx.player.position.z, 0.2);
+      if (dist < keep[0]) {
+        vx = (px - ctx.player.position.x) / (dist || 1);
+        vz = (pz - ctx.player.position.z) / (dist || 1);
+        speed *= 0.85;
+      } else if (clear) {
+        const side = this.seed > 50 ? 1 : -1;
+        vx = (-(ctx.player.position.z - pz) / dist) * side;
+        vz = ((ctx.player.position.x - px) / dist) * side;
+        speed *= 0.25;
+      }
+    } else {
+      const range = this.type.attacks[0].maxRange;
+      if (engaging && dist < range * 0.6 + ctx.player.radius) speed = 0;
+    }
     if (this.role === 'surround' && !engaging) {
       const toSlot = Math.hypot(this.slot.x - px, this.slot.z - pz);
       if (toSlot < 0.7) {
@@ -307,7 +323,9 @@ export class Enemy {
     const sp = Math.hypot(this.vel.x, this.vel.z);
     this.moveBlend += (Math.min(1, sp / this.speed) - this.moveBlend) * Math.min(1, dt * 8);
     this.walkPhase += sp * dt * this.type.stride;
-    const face = dist < 5 || sp < 0.3 ? Math.atan2(ctx.player.position.x - px, ctx.player.position.z - pz) : Math.atan2(this.vel.x, this.vel.z);
+    // Casters keep their eyes (and staff) on the player while they reposition.
+    const watch = dist < 5 || sp < 0.3 || (keep && dist < keep[1]);
+    const face = watch ? Math.atan2(ctx.player.position.x - px, ctx.player.position.z - pz) : Math.atan2(this.vel.x, this.vel.z);
     this._turnToward(face, dt, this.type.turnRate * this.tuning.speed);
   }
 
@@ -329,7 +347,8 @@ export class Enemy {
     // Needs to be roughly facing and have a clear line.
     if (Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z))) > 0.9) return;
     if (!ctx.nav.hasLineOfSight(this.position.x, this.position.z, player.position.x, player.position.z, 0.2)) return;
-    if (!ctx.director.requestToken(this)) return;
+    // Casters pace themselves; attack tokens are for those who close in.
+    if (!this.type.keepAway && !ctx.director.requestToken(this)) return;
     this._startAttack(options[Math.floor(Math.random() * options.length)], ctx);
   }
 
@@ -349,7 +368,24 @@ export class Enemy {
       this.strike.localCenter.set(v.c[0], v.c[1], v.c[2]);
       this.strike.localHalf.set(v.h[0], v.h[1], v.h[2]);
     }
-    ctx.audio?.enemySwing(this.typeKey, this.position);
+    if (a.projectile) this._throw(ctx, a);
+    else ctx.audio?.enemySwing(this.typeKey, this.position);
+  }
+
+  // Fireballs from the staff tip at the player's chest, fanned when several.
+  _throw(ctx, a) {
+    const p = a.projectile;
+    const count = p.count + (ctx.tuning.swarm ? 2 : 0);
+    const from = this.model.j.staffTip.getWorldPosition(new THREE.Vector3());
+    const aim = ctx.player.position.clone();
+    aim.y = 1.2;
+    aim.sub(from);
+    for (let i = 0; i < count; i++) {
+      const off = (i - (count - 1) / 2) * p.spread;
+      const dir = aim.clone().applyAxisAngle(THREE.Object3D.DEFAULT_UP, off);
+      ctx.effects.fireball(from, dir, p.speed * Math.sqrt(this.tuning.speed), this.damage * a.dmg, { homing: p.homing });
+    }
+    ctx.audio?.fireball(from);
   }
 
   _updateStrike(dt, ctx) {

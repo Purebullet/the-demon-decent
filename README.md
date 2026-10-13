@@ -52,30 +52,48 @@ Before publishing a new version, run it in Project 0's own sandbox: `npm run dev
 - **Interface** (`src/ui/Hud.js`): painted on a canvas (`OffscreenCanvas` in the worker) and drawn over the 3D view.
 - **Sound** (`scripts/make-sounds.mjs`): every effect and the ambient drone is synthesized in code into WAV files at build time; no third-party audio.
 - **Run flow** (`src/game/Game.js`, `src/game/transitions.js`): a state machine with a transition table: `title → surface → floor(1) → sanctum → floor(2) … floor(20) → victory`. Death from any floor goes `dead → surface` and throws the run away.
-- **Floors** (`src/world/LevelData.js`): 20 ASCII maps with per-floor tuning (hp, damage, speed, windup, cooldown, attack slots, swarm, aggro, fog, loot). Floor 10 is Gorvath, floor 20 is Azrakel. Floors 11–19 add lava, spike traps, fire vents, burrowed ambushers and swarm tactics, with faster enemies and tighter attack windups. `npm test` checks that every map is enclosed and that every enemy, potion and exit can be reached.
+- **Floors** (`src/world/LevelData.js`): 20 ASCII maps with per-floor tuning (hp, damage, speed, windup, cooldown, attack slots, swarm, aggro, fog, loot). Pyre Witches join on floor 4 and Cinder Hounds on floor 6. Floor 10 is Gorvath, floor 20 is Azrakel. Floors 11–19 add lava, spike traps, fire vents, burrowed ambushers and swarm tactics, with faster enemies and tighter attack windups. `npm test` checks that every map is enclosed and that every enemy, potion and exit can be reached.
 - **Sanctums** (`src/world/Sanctum.js`): between floors you can wake one of three altars: the Blood Well (+max health or +potion capacity), the Magic Circle (learn or upgrade a spell), or the Burning Sigil (+damage or +attack speed).
 - **Combat hitboxes** (`src/physics`): the weapon blade is an oriented box swept along its swing arc. The sweep is sub-stepped and includes the camera's own motion, so a fast swing or a mouse flick can't skip through a target. It is tested with a separating-axis test against per-body-part hurtboxes; head hits crit. Enemy attacks are strike volumes that are only active on their strike frames.
 - **Weapons**: swords are balanced alternating slashes, axes are slow heavy chops, and maces are overheads that break poise and knock enemies back. Weapons drop in four tiers.
 - **Enemy AI** (`src/ai`): A* on the tile grid with terrain costs, a per-frame search budget, and string-pulled paths. A director hands out attack tokens and sends flankers to points behind the player, routed by A* with a penalty on tiles inside the player's view cone. On deep floors, ghoul packs take slots on a ring around you and lunge in sequence.
 - **Street view** (`src/lot/buildLot.js`, `scripts/make-lot.mjs`): three LODs made for the lot's box, plus `lot.json` with shaders for the hellfire and the molten cracks, and a script that turns the vortex.
 
-## AI-generated 3D models (Zoodle)
+## AI-generated 3D models
 
-Every model slot (enemies, bosses, weapons, potion, braziers, cave rock, pillars, ruins, trees, gravestones, skulls, Blood Well) is listed in `src/assets/manifest.js` with its size, reference image (`assets/reference/`) and prompt. The game loads whatever GLBs exist in `assets/models/` and uses a built-in stand-in for anything missing.
+The game is medium-poly and every creature is an AI-generated model; none is modelled in code. A creature without its model yet shows as a plain grey block while you develop, and `npm run build` refuses to package the game until all seven have one.
 
-`scripts/zoodle.mjs` fills the slots from your Zoodle account ([API docs](https://zoodle3d.com/api/v1/docs)). It runs in Node only, and the key never goes into the game.
+| Creature | Role | Floors | Export budget |
+| --- | --- | --- | --- |
+| Husk Ghoul | swarmer; packs encircle and lunge together | 1+ (burrowed ambushers 11+) | 10k tris |
+| Chain Fiend | flanker; sweeps, and its chain lash pulls you in | 2+ | 15k tris |
+| Flame-Horned Brute | bruiser; ground slams and sweeps | 5+ | 15k tris |
+| Pyre Witch | caster; keeps her distance and throws hellfire, bursts you away up close | 4+ | 15k tris |
+| Cinder Hound | fast pack hunter; bites and long pounces | 6+ | 10k tris |
+| Gorvath, the Flame-Horned | boss | 10 | 20k tris |
+| Azrakel, the Winged Archfiend | final boss | 20 | 20k tris |
+
+Each creature's look, size, budget and flame points are in `src/assets/manifest.js`. They are made in three steps, each run from Node so no key reaches the game:
+
+1. **Concept images** (`scripts/concepts.mjs`, Google's Gemini image models, key in `GEMINI_API_KEY`). Each creature is drawn whole, in a neutral pose on a plain background, without fire effects (flames are particles in the game), redrawn from its reference art in `assets/reference/` when it has one. Takes go to `assets/concepts/`, with a contact sheet at `assets/concepts/index.html`.
+2. **Approval.** One take per creature is approved; nothing goes on to 3D without it.
+3. **Image-to-3D** (`scripts/zoodle.mjs`, a Zoodle batch job, key in `ZOODLE_API_KEY`, 30 Z-Coins per creature, failures refunded). Only approved images are sent, and each model is exported at its triangle budget.
 
 ```sh
-npm run zoodle -- status                  # which slots have models
-npm run zoodle -- list                    # your finished Zoodle creations
-npm run zoodle -- pull ghoul=<id>         # download a creation into a slot, with its animations (free)
-npm run zoodle -- batch                   # characters from the reference art (dry run: shows the cost)
-npm run zoodle -- batch --spend           # ... generate them (30 Z-Coins each, failures refunded)
-npm run zoodle -- objects --spend         # props from their prompts (30 Z-Coins each)
+npm run concepts                          # dry run: prompts and cost
+npm run concepts -- --spend               # one take per creature that has none
+npm run concepts -- witch --spend --note "hood up, staff held higher"   # another take
+npm run concepts -- approve ghoul=1 witch=2
+npm run zoodle -- batch                   # dry run: approved creatures and cost
+npm run zoodle -- batch --spend           # build them
+npm run zoodle -- status                  # models, approvals and Zoodle ids
+npm run zoodle -- pull                    # download recorded models again (free)
 ```
 
-Slot-to-Zoodle-id mappings are saved in `assets/zoodle.json`, so models can be downloaded again without paying again.
+Slot-to-Zoodle mappings are saved in `assets/zoodle.json`, so models can be downloaded again without paying again.
 
-- **Static meshes:** Zoodle's game models are static. A vertex shader bends them at the hips (rearing back, lunging, twisting, recoiling and striding), and the head and torso hitboxes follow the bend.
-- **Rigged animations:** a character's Zoodle animations come as rigged GLBs. `pull` saves them as `<slot>-<clip>.glb`. Their hitboxes then ride the bones, and the AI state drives the idle, walk, run, attack, hit and death clips.
+- **Static meshes:** Zoodle's game models are static. A vertex shader bends them at the hips (rearing back, lunging, twisting, recoiling and striding; hounds trot on diagonal pairs), and the head and torso hitboxes follow the bend.
+- **Rigged animations:** a creature's Zoodle animations come as rigged GLBs. `pull` saves them as `<id>-<clip>.glb`. Their hitboxes then ride the bones, and the AI state drives the idle, walk, run, attack, hit and death clips.
 - **Textures:** embedded textures are decoded with `createImageBitmap` straight from the file's bytes, not through `blob:` URLs, so a strict Content-Security-Policy can't turn models grey.
+
+Weapons, the potion and the props listed under `PROPS` in the manifest go through Zoodle the same way (`npm run zoodle -- objects`). The cave walls, ruins and other scenery are still built in code and are next to be replaced by generated models.

@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { Assets } from '../assets/AssetLibrary.js';
 import { Hurtbox, AnchoredHurtbox } from '../physics/Hitbox.js';
-import { attackWeights, FLAMES } from './EnemyModels.js';
+import { attackWeights, FLAMES } from './poses.js';
 
-// Wraps an AI-generated GLB character in the same interface as the
-// procedural models (root, joints, hurtboxes, fire emitters, animate).
+// Wraps an AI-generated GLB creature for the game: root, joints, body-part
+// hurtboxes, fire emitters and an animate() driven by the AI state.
 //
 // Rigged models (with a skeleton and clips): hurtboxes ride the head, chest,
 // hips and forearm bones, and clips are driven from the AI state.
@@ -35,6 +35,7 @@ uniform float uBend;
 uniform float uSway;
 uniform float uTwist;
 uniform float uStep;
+uniform float uGait;
 vec3 ddRotate(vec3 q, float y) {
   float k = smoothstep(uPivot, uTop, y);
   float a = uBend * k;
@@ -46,7 +47,9 @@ vec3 ddRotate(vec3 q, float y) {
 }
 vec3 ddBend(vec3 p) {
   float legs = 1.0 - smoothstep(0.0, uPivot, p.y);
-  p.z += uStep * clamp(p.x / (uPivot * 0.3 + 1e-4), -1.0, 1.0) * legs;
+  // Bipeds scissor left against right; four-legged beasts trot (diagonal pairs).
+  float side = clamp(p.x / (uPivot * 0.3 + 1e-4), -1.0, 1.0) * mix(1.0, sign(p.z), uGait);
+  p.z += uStep * side * legs;
   vec3 q = ddRotate(p - vec3(0.0, uPivot, 0.0), p.y);
   return q + vec3(0.0, uPivot, 0.0);
 }`;
@@ -75,6 +78,7 @@ function installBend(mesh, toChar, U) {
 export function buildGltfCharacter(id, rootScale = 1) {
   const inst = Assets.instantiateCharacter(id, rootScale);
   const H = inst.height;
+  const beast = inst.entry.body === 'beast';
   const root = new THREE.Group();
   const pose = new THREE.Group();
   root.add(pose);
@@ -97,12 +101,13 @@ export function buildGltfCharacter(id, rootScale = 1) {
 
   // Static meshes get the bend deformer.
   const U = {
-    uPivot: { value: 0.47 * H },
+    uPivot: { value: (beast ? 0.4 : 0.47) * H },
     uTop: { value: H },
     uBend: { value: 0 },
     uSway: { value: 0 },
     uTwist: { value: 0 },
     uStep: { value: 0 },
+    uGait: { value: beast ? 1 : 0 },
   };
   if (!rigged) {
     const inv = new THREE.Matrix4().copy(pose.matrixWorld).invert();
@@ -147,11 +152,24 @@ export function buildGltfCharacter(id, rootScale = 1) {
       bentAnchors.push({ anchor: a, rest });
       return a;
     };
-    hurtboxes = [
-      new AnchoredHurtbox(bent(V(0, 0.9, 0.02)), root, V(0, 0, 0), V(0.1, 0.1, 0.11), { name: 'head', multiplier: 1.5 }),
-      new AnchoredHurtbox(bent(V(0, 0.66, 0)), root, V(0, 0, 0), V(0.21, 0.17, 0.15), { name: 'torso' }),
-      new Hurtbox(pose, V(0, 0.25, 0), V(0.17, 0.26, 0.13), { name: 'legs', multiplier: 0.85 }),
-    ];
+    if (beast) {
+      // Head at the front end of the body, torso along it, legs under it.
+      const b = new THREE.Box3().setFromObject(inst.inner);
+      const front = b.max.z / H;
+      const mid = (b.min.z + b.max.z) / 2 / H;
+      const len = (b.max.z - b.min.z) / H;
+      hurtboxes = [
+        new AnchoredHurtbox(bent(V(0, 0.74, front - 0.16)), root, V(0, 0, 0), V(0.13, 0.13, 0.17), { name: 'head', multiplier: 1.5 }),
+        new AnchoredHurtbox(bent(V(0, 0.6, mid)), root, V(0, 0, 0), V(0.18, 0.18, len * 0.32), { name: 'torso' }),
+        new Hurtbox(pose, V(0, 0.22, mid), V(0.17, 0.22, len * 0.38), { name: 'legs', multiplier: 0.85 }),
+      ];
+    } else {
+      hurtboxes = [
+        new AnchoredHurtbox(bent(V(0, 0.9, 0.02)), root, V(0, 0, 0), V(0.1, 0.1, 0.11), { name: 'head', multiplier: 1.5 }),
+        new AnchoredHurtbox(bent(V(0, 0.66, 0)), root, V(0, 0, 0), V(0.21, 0.17, 0.15), { name: 'torso' }),
+        new Hurtbox(pose, V(0, 0.25, 0), V(0.17, 0.26, 0.13), { name: 'legs', multiplier: 0.85 }),
+      ];
+    }
   }
 
   // Flame anchors follow bones (or bent body points) each frame.
@@ -229,7 +247,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
     } else if (!rigged) {
       const sweep = /sweep|gust|lash/.test(e.attack?.name || '');
       const sw = Math.sin(e.walkPhase);
-      U.uBend.value = 0.1 * mv + Math.sin(t * 1.6 + e.seed) * 0.025 - (sweep ? 0.15 : 0.4) * raise + (sweep ? 0.2 : 0.6) * swing - 0.5 * stagger;
+      // A beast's whole body is above its hips: pitch it gently.
+      const k = beast ? 0.45 : 1;
+      U.uBend.value = k * (0.1 * mv + Math.sin(t * 1.6 + e.seed) * 0.025 - (sweep ? 0.15 : 0.4) * raise + (sweep ? 0.2 : 0.6) * swing - 0.5 * stagger);
       U.uTwist.value = sweep ? 0.55 * raise - 0.75 * swing : 0.12 * raise - 0.1 * swing;
       U.uSway.value = sw * 0.06 * mv;
       U.uStep.value = sw * 0.11 * H * mv;

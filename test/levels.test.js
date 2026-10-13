@@ -38,3 +38,15 @@ test('deep floors are faster and tighter, not just tougher', () => {
   assert.ok(FLOORS[10].speed > FLOORS[8].speed);
   assert.ok(FLOORS[10].windup < FLOORS[8].windup);
 });
+
+test('every creature in the maps and boss summons has stats and a model slot', async () => {
+  const { ENEMY_TYPES } = await import('../src/entities/EnemyTypes.js');
+  const { BOSS_TYPES } = await import('../src/entities/Bosses.js');
+  const { CHARACTERS } = await import('../src/assets/manifest.js');
+  const used = new Set();
+  for (const def of FLOORS) for (const e of parseLevel(def).enemies) used.add(e.type);
+  for (const b of Object.values(BOSS_TYPES)) for (const s of b.summons) s.spawn.forEach((t) => used.add(t));
+  for (const t of used) assert.ok(ENEMY_TYPES[t], `no stats for ${t}`);
+  for (const t of [...Object.values(ENEMY_TYPES), ...Object.values(BOSS_TYPES)]) assert.ok(CHARACTERS[t.asset], `no model slot for ${t.name}`);
+  assert.equal(Object.keys(CHARACTERS).length, 7);
+});

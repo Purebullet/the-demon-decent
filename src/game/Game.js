@@ -10,6 +10,7 @@ import { FLOORS, FLOOR_COUNT } from '../world/LevelData.js';
 import { Effects } from '../world/Effects.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
+import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss } from '../entities/Bosses.js';
 import { Pickups } from '../entities/Pickups.js';
 import { rollWeapon } from '../entities/Weapons.js';
@@ -236,7 +237,7 @@ export class Game {
     }
     if (this.level) {
       // Boss summons and burrowed ambushers arrive mid-fight.
-      for (const type of ['ghoul', 'fiend', 'brute']) far(new Enemy(type, { x: 0, z: 0 }, this.level.def).root);
+      for (const type of Object.keys(ENEMY_TYPES)) far(new Enemy(type, { x: 0, z: 0 }, this.level.def).root);
     }
     return staged;
   }

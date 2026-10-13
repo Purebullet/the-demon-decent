@@ -95,6 +95,11 @@ export class AIDirector {
     let engaged = 0;
     for (const e of active) {
       if (e.role === 'surround' && pack.includes(e)) continue;
+      if (e.type.keepAway) {
+        // Casters keep their own distance (Enemy._locomote).
+        e.role = 'engage';
+        continue;
+      }
       if (engaged < engageCount || e._distSq < 3.2 * 3.2 || e.type.role === 'bruiser') {
         e.role = 'engage';
         engaged++;

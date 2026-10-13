@@ -6,8 +6,10 @@ import { CHARACTERS, PROPS } from './manifest.js';
 
 // Loads the AI-generated GLBs listed in the manifest. Only files named in
 // assets/models/index.json are requested (the dev server and the build
-// generate that list from the folder), so a missing model costs nothing and
-// quietly falls back to the procedural stand-in.
+// generate that list from the folder), so a missing model costs nothing. A
+// creature whose model is missing stands in as a plain block of its size, so
+// the game still runs while models are being generated; the build refuses to
+// package it that way.
 
 // Decode textures embedded in a GLB straight from their bytes with
 // createImageBitmap, instead of the loader's default blob: object URLs. A host
@@ -134,20 +136,17 @@ export const Assets = {
     ];
     let done = 0;
     await Promise.all(jobs.map((j) => j().finally(() => onProgress?.(++done, jobs.length))));
-    // Bosses may borrow a regular model (e.g. Gorvath uses the brute GLB).
-    for (const [id, entry] of Object.entries(CHARACTERS)) {
-      const base = entry.fallback && this.characters.get(entry.fallback);
-      if (!this.characters.has(id) && base) {
-        // Same mesh, resized to the borrower's height.
-        const unitScale = base.unitScale * (entry.height / base.entry.height);
-        this.characters.set(id, { ...base, unitScale, entry: { ...base.entry, ...entry } });
-      }
-    }
+    const missing = this.missingCharacters();
+    if (missing.length) console.warn(`No generated model yet for: ${missing.join(', ')} (shown as blocks)`);
     return this.loaded;
   },
 
   hasCharacter(id) {
     return this.characters.has(id);
+  },
+
+  missingCharacters() {
+    return Object.keys(CHARACTERS).filter((id) => !this.characters.has(id));
   },
 
   hasProp(id) {
@@ -220,6 +219,7 @@ export const Assets = {
   // final height still matches the manifest.
   instantiateCharacter(id, rootScale = 1) {
     const a = this.characters.get(id);
+    if (!a) return missingCharacter(id, rootScale);
     const model = a.skinned ? cloneSkinned(a.scene) : a.scene.clone(true);
     model.position.copy(a.offset);
     model.traverse((o) => {
@@ -274,6 +274,22 @@ export const Assets = {
     return p.merged;
   },
 };
+
+// A creature without its generated model yet: a flat grey block of its size
+// (segmented, so it still bends), never shipped.
+const missingMat = new THREE.MeshStandardMaterial({ color: 0x5a4d57, roughness: 0.8, emissive: 0x000000 });
+function missingCharacter(id, rootScale) {
+  const entry = CHARACTERS[id];
+  const H = entry.height;
+  const geo = entry.body === 'beast' ? new THREE.BoxGeometry(0.4 * H, H, 1.5 * H, 1, 8, 4) : new THREE.BoxGeometry(0.45 * H, H, 0.3 * H, 1, 8, 1);
+  geo.translate(0, H / 2, 0);
+  const model = new THREE.Mesh(geo, missingMat.clone());
+  model.name = `missing:${id}`;
+  const inner = new THREE.Group();
+  inner.add(model);
+  inner.scale.setScalar(1 / rootScale);
+  return { inner, model, clips: {}, entry, height: H / rootScale };
+}
 
 // Compare the spread of vertices near the top and bottom of an upright
 // weapon: the blade or head is the wider end.

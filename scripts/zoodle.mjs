@@ -8,7 +8,12 @@
 //                                                   a character's Zoodle animations come too
 //   node scripts/zoodle.mjs pull                   re-download every slot recorded in assets/zoodle.json
 //   node scripts/zoodle.mjs objects [slot ...]     generate props from their text prompts
-//   node scripts/zoodle.mjs batch [slot ...]       generate characters from the reference art
+//   node scripts/zoodle.mjs batch [slot ...]       generate creatures from their approved concept images
+//
+// Creatures go through `npm run concepts` first: a concept image is made and
+// approved for each one (assets/concepts/approved.json), and only approved
+// images are sent here. Models are exported at the creature's medium-poly
+// triangle budget (`tris` in the manifest; batch exports allow up to 20,000).
 //
 // Commands that cost coins only print a plan unless you add --spend.
 // Slots and prompts live in src/assets/manifest.js. Generated GLBs are saved
@@ -27,6 +32,7 @@ import { CHARACTERS, PROPS } from '../src/assets/manifest.js';
 const BASE = 'https://zoodle3d.com';
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const RECORD = join(ROOT, 'assets/zoodle.json');
+const APPROVED = join(ROOT, 'assets/concepts/approved.json');
 const BATCH_ITEM_COST = 30;
 
 // Batch image-to-3D: create a job (free), submit one image per request
@@ -37,6 +43,8 @@ const BATCH = {
   addItem: (job) => `/api/v1/batch/jobs/${job}/items`,
   close: (job) => `/api/v1/batch/jobs/${job}/close`,
   poll: (job) => `/api/v1/batch/jobs/${job}`,
+  // Free; ?tris= is clamped to 1,000-20,000.
+  model: (job, item, tris) => `/api/v1/batch/jobs/${job}/items/${item}/game-model?tris=${tris}`,
 };
 
 const args = process.argv.slice(2);
@@ -128,12 +136,23 @@ function chooseSlots(pool) {
 
 // ---------------------------------------------------------------- commands
 
+async function loadApproved() {
+  try {
+    return JSON.parse(await readFile(APPROVED, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 async function status() {
   const rec = await loadRecord();
-  console.log('slot          file                                   zoodle id');
+  const approved = await loadApproved();
+  console.log('slot          file                                   concept                         zoodle');
   for (const [slot, e] of Object.entries(SLOTS)) {
     const have = await exists(e.model);
-    console.log(`${slot.padEnd(13)} ${(have ? 'ok  ' : '--  ') + e.model.padEnd(35)} ${rec.slots[slot]?.id || ''}`);
+    const concept = CHARACTERS[slot] ? approved[slot] || 'not approved' : '';
+    const r = rec.slots[slot];
+    console.log(`${slot.padEnd(13)} ${(have ? 'ok  ' : '--  ') + e.model.padEnd(35)} ${concept.padEnd(31)} ${r ? r.id || `job ${r.job}` : ''}`);
   }
 }
 
@@ -149,6 +168,12 @@ async function pull() {
   for (const [slot, id] of pairs) {
     if (!SLOTS[slot] || !id) throw new Error(`Use slot=<id>; slots: ${Object.keys(SLOTS).join(', ')}`);
     console.log(`${slot} <- ${id}`);
+    const r = rec.slots[slot];
+    if (r?.job && r.item && String(r.id) === String(id)) {
+      // A batch creation: export it again at its triangle budget.
+      await save(slot, await api(BATCH.model(r.job, r.item, SLOTS[slot].tris || 8000), { raw: true }));
+      continue;
+    }
     const clips = CHARACTERS[slot] ? await pullAnimations(slot, id) : 0;
     // A rigged animation GLB carries the mesh too; without one, the static game model.
     if (!clips) await save(slot, await api(`/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
@@ -220,18 +245,22 @@ async function objects() {
 }
 
 async function batch() {
-  const slots = chooseSlots(CHARACTERS).filter((s) => SLOTS[s].reference && (names.length || !SLOTS[s].fallback));
+  const approved = await loadApproved();
+  const slots = chooseSlots(CHARACTERS);
+  const unapproved = slots.filter((s) => !CHARACTERS[s] || !approved[s]);
+  if (names.length && unapproved.length) throw new Error(`No approved concept image for: ${unapproved.join(', ')} (npm run concepts -- approve ${unapproved[0]}=<take>)`);
   const todo = [];
-  for (const s of slots) if (!(await exists(SLOTS[s].model)) || names.length) todo.push(s);
-  console.log(`Characters to generate from reference art: ${todo.join(', ') || 'none'}`);
+  for (const s of slots) if (approved[s] && (!(await exists(SLOTS[s].model)) || names.length)) todo.push(s);
+  console.log(`Creatures to build from their approved concepts: ${todo.join(', ') || 'none'}`);
+  if (!names.length && unapproved.length) console.log(`Waiting for approval: ${unapproved.join(', ')}`);
   if (!todo.length) return;
   if (!spend) {
-    for (const s of todo) console.log(`  ${s}: ${SLOTS[s].reference}`);
+    for (const s of todo) console.log(`  ${s}: ${approved[s]} -> ${SLOTS[s].model} (${SLOTS[s].tris} tris)`);
     console.log(`Dry run. This costs ${todo.length * BATCH_ITEM_COST} Z-Coins (${BATCH_ITEM_COST} per item, failures refunded); add --spend to run.`);
     return;
   }
   const rec = await loadRecord();
-  const job = await api(BATCH.create(), { method: 'POST', body: { label: 'The Demon Descent characters' } });
+  const job = await api(BATCH.create(), { method: 'POST', body: { label: 'The Demon Descent creatures' } });
   const jobId = pick(job, 'jobId', 'id', 'job.id');
   if (!jobId) throw new Error(`No job id in response: ${JSON.stringify(job).slice(0, 300)}`);
   console.log(`batch job ${jobId}`);
@@ -240,11 +269,15 @@ async function batch() {
   for (const s of todo) {
     const clientRef = `demon-descent-${s}-${run}`;
     refs[clientRef] = s;
-    const ref = SLOTS[s].reference;
-    const mime = MIME[ref.split('.').pop().toLowerCase()];
-    const imageBase64 = `data:${mime};base64,${(await readFile(join(ROOT, ref))).toString('base64')}`;
-    await api(BATCH.addItem(jobId), { method: 'POST', body: { imageBase64, clientRef, style: 'realistic' } });
-    rec.slots[s] = { source: 'batch', job: jobId, clientRef, status: 'pending' };
+    const file = approved[s];
+    const mime = MIME[file.split('.').pop().toLowerCase()];
+    const imageBase64 = `data:${mime};base64,${(await readFile(join(ROOT, file))).toString('base64')}`;
+    // Generate with headroom above the export budget, so the export is a
+    // clean reduction rather than the generator's own floor.
+    const faceLimit = Math.min(500000, SLOTS[s].tris * 3);
+    const added = await api(BATCH.addItem(jobId), { method: 'POST', body: { imageBase64, clientRef, style: 'realistic', faceLimit } });
+    const item = pick(added, 'itemId', 'items.0.itemId', 'item.id', 'items.0.id');
+    rec.slots[s] = { source: 'batch', concept: file, job: jobId, item, clientRef, status: 'pending' };
     await saveRecord(rec);
     console.log(`  queued ${s}`);
   }
@@ -252,27 +285,25 @@ async function batch() {
   const done = new Set();
   for (let i = 0; done.size < todo.length; i++) {
     if (i > 360) throw new Error(`Timed out; job ${jobId} is recorded in assets/zoodle.json`);
-    await sleep(5000);
+    await sleep(6000);
     const state = await api(BATCH.poll(jobId));
     const items = pick(state, 'items', 'job.items') || [];
-    if (pick(state, 'done', 'job.done') && !items.some((it) => refs[it.clientRef] && !done.has(refs[it.clientRef]) && ['completed', 'failed'].includes(it.status))) {
-      for (const s of todo) if (!done.has(s)) done.add(s);
-    }
-    for (const item of items) {
-      const s = refs[item.clientRef];
+    for (const it of items) {
+      const s = refs[it.clientRef];
       if (!s || done.has(s)) continue;
-      if (item.status === 'completed') {
-        const id = pick(item, 'characterId', 'itemId', 'id');
-        await save(s, await api(item.gameModelUrl || `/api/v1/characters/${encodeURIComponent(id)}/game-model`, { raw: true }));
-        rec.slots[s] = { ...rec.slots[s], id, status: 'done' };
+      const itemId = pick(it, 'itemId', 'id') || rec.slots[s].item;
+      if (it.status === 'completed') {
+        rec.slots[s] = { ...rec.slots[s], item: itemId, id: pick(it, 'characterId') || rec.slots[s].id, status: 'done' };
+        await save(s, await api(BATCH.model(jobId, itemId, SLOTS[s].tris), { raw: true }));
         done.add(s);
-      } else if (item.status === 'failed') {
-        console.log(`  ${s} failed (refunded): ${item.error || ''}`);
+      } else if (it.status === 'failed') {
+        console.log(`  ${s} failed (refunded): ${it.error || ''}`);
         rec.slots[s] = { ...rec.slots[s], status: 'failed' };
         done.add(s);
       }
       await saveRecord(rec);
     }
+    if (pick(state, 'done', 'job.done')) for (const s of todo) done.add(s);
     process.stdout.write(`  ${done.size}/${todo.length} finished\r`);
   }
   console.log('');

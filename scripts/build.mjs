@@ -9,6 +9,10 @@
 //   node scripts/build.mjs --serve     dev page on http://localhost:5173
 //   node scripts/build.mjs --devkit    build the package and serve it with CORS
 //                                      on :5500 for Project 0's dev kit
+//
+// The packaging build refuses to run while any creature is missing its
+// generated model (it would ship as a grey block); --allow-missing overrides
+// that for a test build. The dev page and the dev kit only warn.
 
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir, stat, readdir, copyFile, rm, cp } from 'node:fs/promises';
@@ -16,6 +20,7 @@ import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { extname, join, normalize, resolve, relative } from 'node:path';
 import { makeSounds } from './make-sounds.mjs';
+import { CHARACTERS } from '../src/assets/manifest.js';
 
 const root = resolve(new URL('..', import.meta.url).pathname);
 const dist = join(root, 'dist');
@@ -130,6 +135,29 @@ function serve(dir, port, { cors = false, dynamicIndex = false } = {}) {
       res.writeHead(404, headers).end('Not found');
     }
   }).listen(port, '127.0.0.1');
+}
+
+async function missingCreatures() {
+  const missing = [];
+  for (const [id, c] of Object.entries(CHARACTERS)) {
+    try {
+      await stat(join(root, c.model));
+    } catch {
+      missing.push(id);
+    }
+  }
+  return missing;
+}
+
+const missing = await missingCreatures();
+if (missing.length) {
+  const msg = `No generated model yet for: ${missing.join(', ')} (npm run concepts, then npm run zoodle -- batch).`;
+  const packaging = !process.argv.includes('--serve') && !process.argv.includes('--devkit');
+  if (packaging && !process.argv.includes('--allow-missing')) {
+    console.error(`${msg}\nRefusing to package the game with placeholder blocks; add --allow-missing for a test build.`);
+    process.exit(1);
+  }
+  console.warn(`${msg} They show as grey blocks.`);
 }
 
 if (process.argv.includes('--serve')) {
