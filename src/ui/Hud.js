@@ -284,6 +284,7 @@ export class Hud {
       r.potions,
       r.potionCap,
       r.weapon.name,
+      p?.armed,
       r.dmgMul.toFixed(2),
       r.speedMul.toFixed(2),
       JSON.stringify(r.spells),
@@ -379,20 +380,24 @@ export class Hud {
     g.fill();
 
     // Compass toward the exit or the last few demons.
-    if (i.compass) {
+    if (i.compass && !this.announcement) {
+      const exit = i.compass.kind === 'exit';
+      const big = exit ? 1.8 : 1;
       g.save();
-      g.translate(w / 2, 88);
+      g.translate(w / 2, exit ? 104 : 88);
       g.rotate(i.compass.angle);
-      g.fillStyle = i.compass.kind === 'exit' ? C.ember : '#d03030';
+      g.fillStyle = exit ? C.ember : '#d03030';
       g.shadowColor = 'rgba(255,90,20,0.9)';
-      g.shadowBlur = 8;
+      g.shadowBlur = exit ? 16 : 8;
       g.beginPath();
-      g.moveTo(0, -14);
-      g.lineTo(10, 10);
-      g.lineTo(-10, 10);
+      g.moveTo(0, -14 * big);
+      g.lineTo(10 * big, 10 * big);
+      g.lineTo(0, 4 * big);
+      g.lineTo(-10 * big, 10 * big);
       g.closePath();
       g.fill();
       g.restore();
+      if (exit) this._text(g, 'EXIT', w / 2, 146, { size: 13, color: C.ember, align: 'center', glow: 'rgba(255,90,20,0.8)' });
     }
 
     // Boss bar.
@@ -426,12 +431,12 @@ export class Hud {
     if (p.siphonT > 0) bx += this._tag(g, `Blood Siphon ${Math.ceil(p.siphonT)}s`, bx, hy + 40, '#ff6a5a') + 8;
     if (p.invuln > 0.25) this._tag(g, 'Invulnerable', bx, hy + 40, '#c9a0ff');
 
-    // Weapon, bottom right.
-    const wd = r.weapon;
+    // Weapon, bottom right (none until you take up your sword).
+    const wd = p?.armed === false ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
     const dmg = Math.round(wd.damage * r.dmgMul);
     const wx = w - pad;
     this._text(g, wd.name, wx, h - pad - 22, { size: small ? 15 : 19, color: wd.color, align: 'right' });
-    this._text(g, `${WEAPON_TYPES[wd.type].label} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`, wx, h - pad - 4, { size: 13, color: C.ash, align: 'right' });
+    if (wd.damage) this._text(g, `${WEAPON_TYPES[wd.type].label} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`, wx, h - pad - 4, { size: 13, color: C.ash, align: 'right' });
 
     // Spells, bottom centre.
     const sz = small ? 46 : 58;

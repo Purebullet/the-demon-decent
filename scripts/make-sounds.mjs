@@ -121,6 +121,55 @@ const SOUNDS = {
     squelch(o, { delay: 0.06, dur: 0.45, gain: 0.55, freq: 700 });
     noise(o, { freq: 3000, freqEnd: 900, q: 0.8, attack: 0.02, decay: 0.5, gain: 0.25, delay: 0.08 });
   },
+  // Steel on claw and bone: a ringing clang with a hard scrape.
+  block: (o) => {
+    tone(o, { type: 'triangle', freq: 1250, freqEnd: 1150, decay: 0.45, gain: 0.22 });
+    tone(o, { type: 'triangle', freq: 1870, freqEnd: 1800, decay: 0.3, gain: 0.12 });
+    tone(o, { freq: 140, freqEnd: 70, decay: 0.12, gain: 0.45 });
+    noise(o, { type: 'highpass', freq: 3000, decay: 0.08, gain: 0.45 });
+    noise(o, { freq: 2600, freqEnd: 1400, q: 2, attack: 0.01, decay: 0.2, gain: 0.2, delay: 0.02 });
+  },
+  // Pottery bursting: a hard crack and a spill of bright shards.
+  smash_clay: (o) => {
+    noise(o, { type: 'highpass', freq: 1800, decay: 0.06, gain: 0.6 });
+    tone(o, { freq: 180, freqEnd: 70, decay: 0.12, gain: 0.4 });
+    for (let i = 0; i < 9; i++) tone(o, { type: 'triangle', freq: 2200 + rnd() * 2500, decay: 0.05 + rnd() * 0.06, gain: 0.08, delay: 0.04 + rnd() * 0.35 });
+    noise(o, { freq: 3500, freqEnd: 2000, q: 1.5, attack: 0.02, decay: 0.35, gain: 0.18, delay: 0.05 });
+  },
+  // Rotten wood splitting: a dull crunch and splinters.
+  smash_wood: (o) => {
+    tone(o, { freq: 120, freqEnd: 50, decay: 0.2, gain: 0.6 });
+    noise(o, { type: 'lowpass', freq: 1500, freqEnd: 300, decay: 0.25, gain: 0.6 });
+    for (let i = 0; i < 6; i++) noise(o, { freq: 900 + rnd() * 1200, q: 4, decay: 0.03, gain: 0.35, delay: 0.03 + rnd() * 0.25 });
+  },
+  // A heavy lid heaved open: a creak, a thud, a glint of treasure.
+  chest: (o) => {
+    tone(o, { type: 'sawtooth', freq: 160, freqEnd: 240, attack: 0.05, decay: 0.4, gain: 0.12, lp: 900 });
+    noise(o, { freq: 700, freqEnd: 1100, q: 6, attack: 0.05, decay: 0.4, gain: 0.25 });
+    tone(o, { freq: 90, freqEnd: 50, decay: 0.2, gain: 0.5, delay: 0.42 });
+    [784, 988, 1175, 1568].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: 0.5, gain: 0.08, delay: 0.5 + i * 0.07 }));
+  },
+  // Flint on steel: a sharp click and a spit of sparks.
+  strike: (o) => {
+    noise(o, { type: 'highpass', freq: 4500, decay: 0.03, gain: 0.7 });
+    tone(o, { type: 'triangle', freq: 3200, freqEnd: 2600, decay: 0.05, gain: 0.12 });
+    for (let i = 0; i < 5; i++) noise(o, { type: 'highpass', freq: 6000, decay: 0.012, gain: 0.25, delay: 0.03 + rnd() * 0.15 });
+  },
+  // The pitch-soaked rag catching: a soft rush that swells into a burn.
+  ignite: (o) => {
+    noise(o, { type: 'lowpass', freq: 300, freqEnd: 1800, attack: 0.25, decay: 0.6, gain: 0.55 });
+    noise(o, { freq: 1200, freqEnd: 600, q: 0.6, attack: 0.1, decay: 0.8, gain: 0.2, delay: 0.1 });
+    for (let i = 0; i < 8; i++) noise(o, { type: 'highpass', freq: 3000, decay: 0.01, gain: 0.2, delay: 0.3 + rnd() * 0.7 });
+  },
+  // Drawing back for a heavy blow: a low tightening rush.
+  charge: (o) => {
+    noise(o, { freq: 250, freqEnd: 900, q: 1.2, attack: 0.35, decay: 0.25, gain: 0.3 });
+    tone(o, { type: 'sawtooth', freq: 55, freqEnd: 90, attack: 0.3, decay: 0.3, gain: 0.12, lp: 400 });
+  },
+  charge_full: (o) => {
+    tone(o, { type: 'triangle', freq: 880, freqEnd: 1320, decay: 0.25, gain: 0.14 });
+    noise(o, { type: 'highpass', freq: 4000, decay: 0.15, gain: 0.12 });
+  },
   hit_heavy: (o) => {
     tone(o, { freq: 110, freqEnd: 38, decay: 0.22, gain: 0.65 });
     noise(o, { type: 'lowpass', freq: 1600, freqEnd: 200, decay: 0.16, gain: 0.55 });

@@ -64,6 +64,27 @@ export class Audio {
     this.play(`flesh_${1 + Math.floor(Math.random() * 3)}`, { volume: 1, gap: 0.04, rate: 0.92 + Math.random() * 0.16 });
     this.play(type === 'sword' ? 'hit_sword' : 'hit_heavy', { volume: 0.45, gap: 0.04 });
   }
+  smash(kind) {
+    this.play(kind === 'barrel' ? 'smash_wood' : 'smash_clay', { volume: 0.9, gap: 0.05, rate: 0.9 + Math.random() * 0.2 });
+  }
+  chest() {
+    this.play('chest', { volume: 0.9, gap: 0.3 });
+  }
+  strike() {
+    this.play('strike', { volume: 0.8, gap: 0.1, rate: 0.9 + Math.random() * 0.2 });
+  }
+  ignite() {
+    this.play('ignite', { volume: 0.9, gap: 0.5 });
+  }
+  block() {
+    this.play('block', { volume: 0.9, gap: 0.05, rate: 0.95 + Math.random() * 0.1 });
+  }
+  charge() {
+    this.play('charge', { volume: 0.6, gap: 0.2 });
+  }
+  chargeFull() {
+    this.play('charge_full', { volume: 0.6, gap: 0.2 });
+  }
   kill() {
     this.play('kill', { volume: 1, gap: 0.05 });
   }

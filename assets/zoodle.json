@@ -139,6 +139,21 @@
       "id": 239,
       "source": "objects",
       "status": "done"
+    },
+    "chest": {
+      "id": 243,
+      "source": "objects",
+      "status": "done"
+    },
+    "urn": {
+      "id": 244,
+      "source": "objects",
+      "status": "done"
+    },
+    "barrel": {
+      "id": 245,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

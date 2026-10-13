@@ -22,10 +22,13 @@ const DIRS = [
 ];
 
 // Iron props keep some metal; everything else is matte rock, bone and wood.
-const METAL = { brazier: 0.55, cage: 0.6, chains: 0.6 };
+const METAL = {};
 // Props whose bright parts glow in the floor's glow colour (a brazier's coals
 // in its flame colour), and how strongly.
 const GLOW = { crystal: 1.25, fungus: 1.2, eggs: 1.1, obelisk: 1.4, brazier: 1.2 };
+// Footprint radius of each prop, as a fraction of its size: nothing is
+// placed inside another's footprint (see free/claim).
+const FOOT = { skulls: 0.7, ribcage: 0.42, remains: 0.5, stakes: 0.42, altar: 0.55, statue: 0.28, obelisk: 0.25, crystal: 0.42, fungus: 0.45, eggs: 0.5, stalagmite: 0.35, cage: 0.3, chains: 0.15 };
 // Rock-like props take the full rock tint; the rest a softer one.
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar']);
 
@@ -106,17 +109,34 @@ export class Dressing {
     this.glows = [];
     this.d = level.data;
     this.ceiling = look.ceiling;
+    this.taken = [];
+    this.hung = [];
     this._findEdges();
+    for (const b of this.d.braziers) this.claim(b.x, b.z, 1.1);
     this._shell();
     this._hanging();
     this._rubble();
     this._pillars();
-    this._decor();
     this._exitGate();
     this._throne();
+    this._decor();
     this._glowSprites();
     this._backing();
     this._mist();
+  }
+
+  // Room on the floor: is a circle of radius r at (x, z) clear of everything
+  // placed so far? `claim` reserves it.
+  free(x, z, r, list = this.taken) {
+    return list.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 >= (o.r + r) ** 2);
+  }
+
+  claim(x, z, r, list = this.taken) {
+    list.push({ x, z, r });
+  }
+
+  foot(id, scale = 1) {
+    return Assets.props.get(id).entry.size * scale * (FOOT[id] ?? 0.32);
   }
 
   // Themed material for a prop, made once per floor.
@@ -373,6 +393,7 @@ export class Dressing {
     const r = this.r;
     const ids = this.look.pillars.filter((id) => Assets.hasProp(id));
     for (const pl of this.d.pillars) {
+      this.claim(pl.x, pl.z, 1.2);
       const id = ids.length ? ids[Math.floor(r() * ids.length)] : null;
       const yaw = r() * Math.PI * 2;
       if (id === 'pillar') {
@@ -416,10 +437,13 @@ export class Dressing {
       const k = pickWeighted(r, kinds);
       const size = Assets.props.get(k.id).entry.size;
       const sc = k.scale[0] + r() * (k.scale[1] - k.scale[0]);
+      const rad = this.foot(k.id, sc);
       if (k.where === 'open') {
         const t = this.openTiles[Math.floor(r() * this.openTiles.length)];
         if (!this.clear(t.x, t.z, 2 * TILE)) continue;
         p.set(t.x + (r() - 0.5) * 1.4, 0, t.z + (r() - 0.5) * 1.4);
+        if (!this.free(p.x, p.z, rad + 0.3)) continue;
+        this.claim(p.x, p.z, rad);
         add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
         continue;
       }
@@ -434,6 +458,8 @@ export class Dressing {
         // Hung a little out from the wall, high enough to walk under.
         const x = t.x + dx * 0.2 + dz * along;
         const z = t.z + dz * 0.2 + dx * along;
+        if (!this.free(x, z, 1.1, this.hung)) continue;
+        this.claim(x, z, 1.1, this.hung);
         if (k.id === 'cage') {
           const bottom = Math.max(3.1, this.ceiling - size * sc - 1.6);
           p.set(x, bottom, z);
@@ -454,9 +480,11 @@ export class Dressing {
       if (k.where === 'wall') {
         // Big pieces keep further from where you arrive and leave.
         if (used.has(key) || !this.clear(t.x, t.z, 3.5 * TILE)) continue;
-        used.add(key);
         // Backed into the rock, facing into the room.
         p.set(t.x + dx * 0.8 + dz * along * 0.3, 0, t.z + dz * 0.8 + dx * along * 0.3);
+        if (!this.free(p.x, p.z, rad + 0.2)) continue;
+        used.add(key);
+        this.claim(p.x, p.z, rad);
         q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (r() - 0.5) * 0.3);
         add(k.id, m.compose(p, q, s.setScalar(sc)).clone());
         if (GLOW[k.id]) this.glows.push({ x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc });
@@ -465,6 +493,8 @@ export class Dressing {
       // Along the foot of the wall.
       const inset = 0.6 + r() * 0.3;
       p.set(t.x + dx * inset + dz * along, 0, t.z + dz * inset + dx * along);
+      if (!this.free(p.x, p.z, rad + 0.15)) continue;
+      this.claim(p.x, p.z, rad);
       add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
       if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
     }
@@ -484,6 +514,7 @@ export class Dressing {
       if (open < openBest) [best, openBest] = [[dc, dr], open];
     }
     const [dx, dz] = best;
+    this.claim(x.x + dx * 1.7, x.z + dz * 1.7, 2.4);
     this.gate = this._place('gate', x.x + dx * 1.7, x.z + dz * 1.7, { yaw: Math.atan2(-dx, -dz), scale: Math.min(1, (this.ceiling - 0.4) / Assets.props.get('gate').entry.size) });
   }
 
@@ -503,6 +534,7 @@ export class Dressing {
     }
     if (!best) return;
     const { t, dx, dz } = best;
+    this.claim(t.x + dx * 0.4, t.z + dz * 0.4, 2.2);
     this._place('throne', t.x + dx * 0.4, t.z + dz * 0.4, { yaw: Math.atan2(-dx, -dz), scale: 1.25 });
   }
 

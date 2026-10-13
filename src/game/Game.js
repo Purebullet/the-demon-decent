@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { matte } from '../world/matte.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { C, burst } from '../world/Particles.js';
 import { Input } from '../core/Input.js';
 import { Audio } from '../core/Audio.js';
 import { StateMachine } from '../core/StateMachine.js';
@@ -31,7 +34,7 @@ const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => (
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
 export class Game {
-  constructor(host, { lotLabel = 'Lot #265', devFloor = 0 } = {}) {
+  constructor(host, { lotLabel = 'The Demon Descent', devFloor = 0 } = {}) {
     this.host = host;
     this.lotLabel = lotLabel;
     const r = host.renderer;
@@ -162,6 +165,7 @@ export class Game {
       scene.traverse((o) => {
         if (!o.material || !(o.isMesh || o.isPoints || o.isSprite || o.isLine)) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          matte(m);
           for (const t of [m.map, m.normalMap, m.emissiveMap, m.bumpMap, m.roughnessMap, m.metalnessMap]) if (t) textures.add(t);
           const key = [m.type, m.customProgramCacheKey?.(), m.vertexShader?.length, m.fragmentShader?.length, !!m.map, !!m.emissiveMap, !!m.bumpMap, !!m.normalMap, !!m.roughnessMap, !!m.metalnessMap, m.vertexColors, m.transparent, m.blending, m.side, m.fog, o.isInstancedMesh, o.isSkinnedMesh].join('|');
           if (seen.has(key)) continue;
@@ -424,7 +428,7 @@ export class Game {
       p.update(dt, { ...ctx, combat: false, input: FROZEN_INPUT });
       this.surface.update(dt, this.fx);
       this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
-      if (fall > 4.5 && !this.busy) this.goto('floor', { floor: 1 });
+      if (fall > 4.5 && !this.busy) this.goto('floor', { floor: 1, arrival: true });
       return;
     }
     p.update(dt, ctx);
@@ -448,7 +452,7 @@ export class Game {
 
   // ---------------------------------------------------------------- floor ---
 
-  _enterFloor({ floor }) {
+  _enterFloor({ floor, arrival = false }) {
     const def = FLOORS[floor - 1];
     const run = this.run;
     run.floor = floor;
@@ -484,8 +488,15 @@ export class Game {
       tuning: def,
       torchRange: def.light,
       onEnemyKilled: (e) => this._onEnemyKilled(e),
+      pickups: this.pickups,
+      props: level.props,
       spawnEnemy: (type, pos, emerge) => this._spawnEnemy(type, pos, emerge),
     });
+
+    this.guide = makeGuideArrow();
+    s.add(this.guide);
+    this.guideT = 0;
+    this.guideDir = null;
 
     for (const e of level.data.enemies) this._spawnEnemy(e.type, e);
     if (level.data.boss) {
@@ -502,7 +513,11 @@ export class Game {
     this.player.position.y = 0;
     this.player.dash = null;
     const deep = floor > 10 && !def.boss;
-    this.hud.announce(`Floor ${floor}`, def.boss ? def.name : `${def.name}${deep ? ' — the Deep' : ''}`);
+    this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${deep ? ' — the Deep' : ''}`];
+    this.intro = null;
+    this.renderer.toneMappingExposure = 1.2;
+    if (arrival) this._beginArrival(level);
+    else this.hud.announce(...this.floorTitle);
     if (this.newRecord) {
       this.newRecord = false;
       setTimeout(() => this.hud.toast('New deepest descent!'), 1500);
@@ -547,11 +562,14 @@ export class Game {
     ctx.time = this.time;
     const p = this.player;
     const level = this.level;
-    p.update(dt, ctx);
+    const intro = this._updateArrival(dt);
+    p.update(dt, intro ? { ...ctx, combat: false, input: this.intro.look ? ctx.input : FROZEN_INPUT } : ctx);
 
     this.pathService.update();
-    this.director.update(dt, this.enemies, p);
-    for (const e of this.enemies) e.update(dt, ctx);
+    if (!intro) {
+      this.director.update(dt, this.enemies, p);
+      for (const e of this.enemies) e.update(dt, ctx);
+    }
 
     // Bodies push the player out (except when passing through as a shade).
     if (!p.dash && !p.dead) {
@@ -603,7 +621,10 @@ export class Game {
       if (this.deadT > 1.8 && !this.busy) this.goto('dead');
     }
 
-    let prompt = this.pickups.weaponPrompt(this.run);
+    this._updateGuide(dt);
+    if (intro) return;
+
+    let prompt = this.pickups.weaponPrompt(this.run) || level.props.prompt();
     if (!prompt && level.exitOpen && !p.dead) prompt = 'The portal is open — descend';
     this.hud.update(dt, p, this.run, {
       floorLabel: `Floor ${this.run.floor} / ${FLOOR_COUNT} — ${level.def.name}`,
@@ -615,10 +636,113 @@ export class Game {
     });
   }
 
-  // Arrow toward the open exit, or toward the last few demons.
+  // Arriving at the bottom of the pit (floor 1 after the fall): you come to
+  // on the floor and push yourself up in near darkness, the last of the
+  // light goes, then you strike your torch alight. Your sword lies on the
+  // ground in front of you, flung there by the fall.
+  _beginArrival(level) {
+    const p = this.player;
+    p.wake = 0;
+    p.torchLit = 0;
+    p.torchRaise = 0;
+    p.armed = false;
+    p.pitch = -0.42;
+    this.renderer.toneMappingExposure = 0.55;
+    const sp = level.spawn;
+    const yaw = p.yaw;
+    let d = 2.3;
+    while (d > 0.8 && level.world.isSolidAt(sp.x - Math.sin(yaw) * d, sp.z - Math.cos(yaw) * d)) d -= 0.3;
+    this.pickups.addStarter(sp.x - Math.sin(yaw) * d, sp.z - Math.cos(yaw) * d, this.run.weapon, yaw);
+    // The last red light falling down the shaft you came through. It stays in
+    // the scene at zero afterwards: removing a light would recompile shaders.
+    this.introLight = new THREE.PointLight(0xff3014, 0, 22, 1.3);
+    this.introLight.position.set(sp.x, 7, sp.z);
+    this.scene.add(this.introLight);
+    this.intro = { t: 0, strikes: 0, lit: false, look: false };
+  }
+
+  // Returns true while the arrival is still playing.
+  _updateArrival(dt) {
+    const a = this.intro;
+    if (!a) return false;
+    const p = this.player;
+    const r = this.renderer;
+    a.t += dt;
+    const t = a.t;
+    const smooth = (k) => k * k * (3 - 2 * k);
+    // 0-3.2 s: getting up in the last dim red light from the shaft above.
+    p.wake = Math.min(1, smooth(Math.min(1, t / 3.2)));
+    a.look = t > 3.2;
+    // 3.2-4.2 s: it fades to complete darkness.
+    if (t < 3.2) r.toneMappingExposure = 0.55;
+    else if (t < 4.2) r.toneMappingExposure = 0.55 * (1 - (t - 3.2));
+    this.introLight.intensity = t < 3.2 ? 60 : Math.max(0, 60 * (1 - (t - 3.2)));
+    // 4.2-6.4 s: the torch comes up, three strikes of the flint, it catches.
+    p.torchRaise = smooth(Math.min(1, Math.max(0, (t - 4.2) / 0.6)));
+    const strikes = [4.9, 5.35, 5.8];
+    while (a.strikes < strikes.length && t >= strikes[a.strikes]) {
+      a.strikes++;
+      this.audio.strike?.();
+      const tip = p.camera.localToWorld(new THREE.Vector3(-0.42, -0.18, -0.7));
+      burst(this.fx.add, tip, { count: 14, speed: 2.4, size: 0.05, life: 0.35, color: C.spark, colorEnd: C.fireEdge, gravity: -6 });
+      p.shake(0.03);
+    }
+    if (t >= 5.85 && !a.lit) {
+      a.lit = true;
+      this.audio.ignite?.();
+    }
+    if (a.lit) {
+      const k = Math.min(1, (t - 5.85) / 0.9);
+      p.torchLit = smooth(k);
+      r.toneMappingExposure = 1.2 * smooth(k);
+    } else if (t >= 4.2) {
+      // A flicker of light with each spark.
+      const since = Math.min(...strikes.map((s) => (t >= s ? t - s : 9)));
+      p.torchLit = since < 0.12 ? 0.15 * (1 - since / 0.12) : 0;
+    }
+    this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
+    if (t >= 7) {
+      this.intro = null;
+      r.toneMappingExposure = 1.2;
+      this.hud.announce(...this.floorTitle);
+      return false;
+    }
+    return true;
+  }
+
+  // Once the floor is cleared, a glowing arrow floats on the floor ahead of
+  // you and points the way to the portal along the walkable path (A*, so it
+  // turns corners instead of pointing into rock).
+  _updateGuide(dt) {
+    const g = this.guide;
+    const p = this.player;
+    const show = this.level.exitOpen && !p.dead;
+    g.visible = show;
+    if (!show) return;
+    const x = this.level.data.exit;
+    this.guideT -= dt;
+    if (this.guideT <= 0) {
+      this.guideT = 0.3;
+      const path = this.level.nav.findPathWorld(p.position.x, p.position.z, x.x, x.z);
+      let target = path?.find((q) => Math.hypot(q.x - p.position.x, q.z - p.position.z) > 2.5) || path?.[path.length - 1] || x;
+      this.guideDir = { x: target.x - p.position.x, z: target.z - p.position.z, dist: Math.hypot(x.x - p.position.x, x.z - p.position.z), target };
+    }
+    const d = this.guideDir;
+    const len = Math.hypot(d.x, d.z) || 1;
+    const near = d.dist < 3;
+    g.visible = !near;
+    const ahead = Math.min(2.2, d.dist - 1);
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
+    g.position.set(p.position.x + (d.x / len) * ahead, 0.18 + pulse * 0.06, p.position.z + (d.z / len) * ahead);
+    const want = Math.atan2(d.x, d.z);
+    g.rotation.y += Math.atan2(Math.sin(want - g.rotation.y), Math.cos(want - g.rotation.y)) * Math.min(1, dt * 8);
+    g.material.opacity = 0.55 + pulse * 0.35;
+  }
+
+  // Arrow toward the open exit (along the path), or toward the last few demons.
   _compass(alive) {
     let target = null;
-    if (this.level.exitOpen) target = this.level.data.exit;
+    if (this.level.exitOpen) target = this.guideDir?.target || this.level.data.exit;
     else if (alive.length && alive.length <= 3) {
       let best = Infinity;
       for (const e of alive) {
@@ -854,7 +978,7 @@ export class Game {
       this.viewRoot.updateMatrixWorld(true);
       this.viewCamera.position.copy(rc.position);
       this.viewCamera.quaternion.copy(rc.quaternion);
-      this.viewGlow.intensity = 6 * (0.85 + Math.sin(this.time * 13) * 0.1);
+      this.viewGlow.intensity = 6 * (0.85 + Math.sin(this.time * 13) * 0.1) * this.player.torchLit;
       r.autoClear = false;
       r.clearDepth();
       r.render(this.viewScene, this.viewCamera);
@@ -872,3 +996,29 @@ export class Game {
     }
   }
 }
+
+// A pair of glowing chevrons lying on the floor, pointing along +Z.
+function makeGuideArrow() {
+  const shape = new THREE.Shape();
+  const chevron = (y) => {
+    shape.moveTo(0, y + 0.55);
+    shape.lineTo(0.5, y);
+    shape.lineTo(0.3, y);
+    shape.lineTo(0, y + 0.3);
+    shape.lineTo(-0.3, y);
+    shape.lineTo(-0.5, y);
+    shape.lineTo(0, y + 0.55);
+  };
+  chevron(0);
+  const geo = new THREE.ShapeGeometry(shape);
+  const second = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(0, 1.05), new THREE.Vector2(0.5, 0.5), new THREE.Vector2(0.3, 0.5), new THREE.Vector2(0, 0.8), new THREE.Vector2(-0.3, 0.5), new THREE.Vector2(-0.5, 0.5)]));
+  const merged = mergeGeometries([geo, second]);
+  merged.translate(0, -0.5, 0);
+  merged.rotateX(Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff7a24, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const m = new THREE.Mesh(merged, mat);
+  m.visible = false;
+  m.renderOrder = 4;
+  return m;
+}
+

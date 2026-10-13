@@ -119,3 +119,66 @@ export function validateLevel(def, index) {
   if (level.enemies.length === 0 && !level.boss) problems.push(`${label}: no enemies`);
   return problems;
 }
+
+// Dead ends for treasure: where a floor has fewer than `want` dead-end
+// passages, short alcoves (two tiles deep, one wide) are cut into solid rock
+// off its passages and rooms, far from the spawn and from each other. They
+// only add floor next to floor already reachable, so every check on the map
+// still holds. Mutates the parsed level; deterministic per `rand`.
+export function carveAlcoves(level, want, rand) {
+  const { cols, rows, tiles, solid, nav } = level;
+  const DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const at = (c, r) => (c < 0 || r < 0 || c >= cols || r >= rows ? '#' : tiles[r][c]);
+  const rock = (c, r) => c > 0 && r > 0 && c < cols - 1 && r < rows - 1 && at(c, r) === '#';
+  const keep = [level.spawn, level.exit, level.boss].filter(Boolean);
+  const ends = level.floorTiles.filter((t) => DIRS.filter(([dc, dr]) => nav.isWalkable(t.c + dc, t.r + dr)).length === 1);
+  let need = Math.max(0, want - ends.length);
+  const cands = [];
+  for (const t of level.floorTiles) {
+    if (at(t.c, t.r) !== '.' || keep.some((k) => Math.hypot(k.x - t.x, k.z - t.z) < 3 * TILE)) continue;
+    for (const [dc, dr] of DIRS) {
+      const a = [t.c + dc, t.r + dr];
+      const b = [t.c + 2 * dc, t.r + 2 * dr];
+      if (!rock(...a) || !rock(...b)) continue;
+      // Rock all round the alcove but its mouth.
+      let ok = true;
+      for (const [c, r] of [a, b]) {
+        for (let y = -1; y <= 1 && ok; y++) {
+          for (let x = -1; x <= 1 && ok; x++) {
+            const cc = c + x;
+            const rr = r + y;
+            if ((cc === t.c && rr === t.r) || (cc === a[0] && rr === a[1]) || (cc === b[0] && rr === b[1])) continue;
+            if (Math.abs(cc - t.c) <= 1 && Math.abs(rr - t.r) <= 1) continue; // the mouth's own neighbours
+            if (at(cc, rr) !== '#') ok = false;
+          }
+        }
+      }
+      if (ok) cands.push({ t, a, b, far: Math.hypot(t.x - level.spawn.x, t.z - level.spawn.z) + rand() * 6 });
+    }
+  }
+  cands.sort((p, q) => q.far - p.far);
+  const made = [];
+  for (const k of cands) {
+    if (need <= 0) break;
+    const x = (k.b[0] + 0.5) * TILE;
+    const z = (k.b[1] + 0.5) * TILE;
+    if ([...made, ...ends].some((m) => Math.hypot(m.x - x, m.z - z) < 12)) continue;
+    for (const [c, r] of [k.a, k.b]) {
+      const i = r * cols + c;
+      if (at(c, r) !== '#') continue;
+      solid[i] = 0;
+      nav.walkable[i] = 1;
+      nav.cost[i] = 1;
+      tiles[r] = tiles[r].slice(0, c) + '.' + tiles[r].slice(c + 1);
+      level.floorTiles.push({ c, r, x: (c + 0.5) * TILE, z: (r + 0.5) * TILE });
+    }
+    made.push({ x, z });
+    need--;
+  }
+  return made.length;
+}

@@ -10,6 +10,6 @@ import { createP0Host } from './platform/p0host.js';
 export default async function start(p0) {
   const host = createP0Host(p0);
   await Assets.preload(null, (path) => p0.asset(path));
-  const game = new Game(host, { lotLabel: `Lot #${p0.lot.id || 265}` });
+  const game = new Game(host);
   game.ready();
 }

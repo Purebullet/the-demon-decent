@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TILE } from './LevelData.js';
-import { parseLevel } from './levelParser.js';
+import { parseLevel, carveAlcoves } from './levelParser.js';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { runeCircleTexture } from './Textures.js';
 import { lavaMaterial, portalMaterial, makeFlame } from './Shaders.js';
@@ -9,6 +9,7 @@ import { mulberry32 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
 import { lookFor } from './themes.js';
 import { Dressing } from './Dressing.js';
+import { Props } from './Props.js';
 
 // Builds one cavern floor from its hand-authored map and runs its hazards.
 // The scenery is dressed in the floor's look (Dressing.js, themes.js);
@@ -27,6 +28,8 @@ export class Level {
     this.def = def;
     this.data = parseLevel(def);
     const d = this.data;
+    // Every floor gets two or three dead ends for its chests.
+    carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32(floorNumber * 4111));
     this.nav = d.nav;
     this.world = new CollisionWorld({ grid: { cols: d.cols, rows: d.rows, solid: d.solid }, tileSize: TILE });
     this.group = new THREE.Group();
@@ -47,6 +50,7 @@ export class Level {
     this.group.add(this.dressing.group);
     this._buildProps();
     this._buildHazards();
+    this.props = new Props(this);
     this._buildGlowLights();
     this._buildExit();
   }
@@ -221,6 +225,14 @@ export class Level {
     this.exitLight.position.y = 1.2;
     g.add(this.exitLight);
     this.exitRune = rune;
+    // Once the seal breaks, a pillar of hellfire light stands over the
+    // portal, seen through the dark from across the cavern.
+    const beamMat = new THREE.MeshBasicMaterial({ color: 0xff5a1a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
+    const beamGeo = new THREE.CylinderGeometry(0.7, 1.2, 30, 20, 1, true);
+    beamGeo.translate(0, 15, 0);
+    this.beam = new THREE.Mesh(beamGeo, beamMat);
+    this.beam.visible = false;
+    g.add(this.beam);
     this.group.add(g);
     this.exitGroup = g;
   }
@@ -242,6 +254,11 @@ export class Level {
     const t = this.time;
     this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.viewRange);
     this.dressing.tick(t);
+    this.props.update(dt, ctx);
+    if (this.beam) {
+      this.beam.visible = this.exitOpen;
+      this.beam.material.opacity = this.portalT * (0.55 + Math.sin(t * 2.2) * 0.12);
+    }
     if (this.lavaMat) this.lavaMat.uniforms.uTime.value = t;
     this.portalMat.uniforms.uTime.value = t;
     this.portalT = Math.min(1, this.portalT + (this.exitOpen ? dt * 0.8 : 0));

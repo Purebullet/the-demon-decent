@@ -65,3 +65,16 @@ test('every floor has a look, and every look dresses with props that exist', asy
     assert.ok(look.ceiling >= 6, `${name}: ceiling too low`);
   }
 });
+
+test('every floor has at least two dead ends for chests, and alcoves keep it playable', async () => {
+  const { carveAlcoves } = await import('../src/world/levelParser.js');
+  const { mulberry32 } = await import('../src/core/rng.js');
+  FLOORS.forEach((f, i) => {
+    const d = parseLevel(f);
+    carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32((i + 1) * 4111));
+    const ends = d.floorTiles.filter((t) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([a, b]) => d.nav.isWalkable(t.c + a, t.r + b)).length === 1);
+    assert.ok(ends.length >= 2, `floor ${i + 1} has ${ends.length} dead ends`);
+    // The outer border stays sealed.
+    for (let c = 0; c < d.cols; c++) assert.ok(!d.nav.isWalkable(c, 0) && !d.nav.isWalkable(c, d.rows - 1));
+  });
+});

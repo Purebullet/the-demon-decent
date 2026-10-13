@@ -189,6 +189,8 @@ export const Assets = {
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
           m.metalnessMap = null;
           m.metalness = 0;
+          m.roughnessMap = null;
+          m.roughness = 0.9;
           m.needsUpdate = true;
         }
       }
@@ -212,9 +214,8 @@ export const Assets = {
     const gltf = await load(entry.model, available);
     if (!gltf) return;
     const scene = gltf.scene;
-    // Scenery is stone, bone and wood: matte, like the creatures. Weapons keep
-    // their metal (they are seen up close in the torchlight).
-    if (!entry.weapon) {
+    // Scenery is stone, bone and wood, and the weapons dull old iron: matte.
+    {
       scene.traverse((o) => {
         if (!o.isMesh) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {

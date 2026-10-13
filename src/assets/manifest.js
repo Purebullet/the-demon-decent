@@ -164,6 +164,10 @@ export const PROPS = {
   remains: { model: 'assets/models/chained-skeleton.glb', size: 1.1, maxTris: 2500, prompt: `Human skeleton sitting slumped with its arms chained up to an iron ring, tattered rags, ${LOOK}` },
   gate: { model: 'assets/models/hell-gate.glb', size: 5.2, maxTris: 4000, prompt: `Huge demonic stone archway made of two great curved horns meeting at the top, carved skulls along the arch, open gateway, ${LOOK}` },
   throne: { model: 'assets/models/throne.glb', size: 4.2, maxTris: 4000, prompt: `Massive demonic throne of black obsidian and bones with huge curved horns rising from the back, ${LOOK}` },
+  // Treasure at the dead ends, and things to smash.
+  chest: { model: 'assets/models/chest.glb', size: 0.95, maxTris: 2500, prompt: `Ornate demonic treasure chest of dark charred wood bound with black iron bands, a horned skull on the lock plate, closed lid, ${LOOK}` },
+  urn: { model: 'assets/models/urn.glb', size: 1.0, maxTris: 1200, prompt: `Tall cracked clay burial urn with a narrow neck, carved skull and rune motifs, dark terracotta glaze, ${LOOK}` },
+  barrel: { model: 'assets/models/barrel.glb', size: 1.1, maxTris: 1200, prompt: `Old rotten wooden barrel bound with rusted iron hoops, splintered planks, bones poking out of the open top, ${LOOK}` },
   // ---- The surface and the sanctums.
   well: { model: 'assets/models/blood-well.glb', size: 2.7, prompt: `Ancient round stone well filled with dark blood, iron frame with hanging chains, ${LOOK}` },
   column: { model: 'assets/models/ruin-column.glb', size: 5.5, maxTris: 2500, prompt: `Broken ancient dark stone column snapped at the top, cracked fluted shaft, square plinth base, weathered gothic ruin, ${LOOK}` },

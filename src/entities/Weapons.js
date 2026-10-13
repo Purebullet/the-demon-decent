@@ -140,8 +140,8 @@ function metal(tier) {
   const glow = tier >= 2;
   return new THREE.MeshStandardMaterial({
     color: tier === 0 ? 0x7a726a : 0x9a9ca2,
-    metalness: 0.8,
-    roughness: tier === 0 ? 0.55 : 0.3,
+    metalness: 0.05,
+    roughness: 0.85,
     emissive: glow ? 0xffffff : 0x000000,
     emissiveMap: glow ? emberVeinTexture(13 + tier, tier === 3 ? [255, 40, 20] : [255, 120, 30], 8) : null,
     emissiveIntensity: glow ? 1.4 : 0,

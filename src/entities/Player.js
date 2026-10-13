@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import { OBB } from '../physics/OBB.js';
 import { queryHurtboxes } from '../physics/Hitbox.js';
-import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion } from './Weapons.js';
+import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc } from './Weapons.js';
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
 import { softDotTexture } from '../world/Textures.js';
 import { makeFlame } from '../world/Shaders.js';
 import { clamp } from '../core/rng.js';
 
-// First-person demon hunter. WASD + mouse look, left click to swing, Space or
-// Shift to dodge (with invulnerability frames), F to drink a potion, 1/2/3 for
-// demon spells. No armour and no regeneration: health only returns from
-// potions and Blood Siphon.
+// First-person demon hunter. WASD + mouse look. Left button: a tap swings a
+// light attack, holding it draws the weapon back for a heavy blow released
+// when you let go. Right button blocks (most of a blow from the front is
+// turned aside). Space or Shift dodges (with invulnerability frames), E
+// drinks a potion, 1/2/3 cast demon spells. No armour and no regeneration:
+// health only returns from potions and Blood Siphon.
 
 const EYE = 1.65;
 const RADIUS = 0.4;
@@ -25,10 +27,24 @@ const DODGE_CD = 0.7;
 const DRINK_TIME = 0.65;
 const POTION_HEAL = 0.4;
 
-// Resting guard: blade up and forward on the right side of the view.
-const IDLE_DIR = new THREE.Vector3(0.18, 0.72, -0.67).normalize();
-const IDLE_AXIS = new THREE.Vector3(0.35, 0.1, 1).normalize();
-const IDLE_POS = new THREE.Vector3(0.42, -0.52, -0.5);
+// Resting guard: held low on the right, blade raised and leaning outward
+// toward the top right of the view.
+const IDLE_DIR = new THREE.Vector3(0.62, 0.76, -0.28).normalize();
+const IDLE_AXIS = new THREE.Vector3(0.15, 0.1, 1).normalize();
+const IDLE_POS = new THREE.Vector3(0.3, -0.48, -0.52);
+// Block: the blade laid across the body, flat toward the enemy.
+const BLOCK_DIR = new THREE.Vector3(-0.93, 0.3, -0.2).normalize();
+const BLOCK_AXIS = new THREE.Vector3(0, 0.1, 1).normalize();
+const BLOCK_POS = new THREE.Vector3(0.3, -0.32, -0.46);
+const BLOCK_FRONT = 0.3; // cos of the half-angle a block covers (about 72 degrees)
+const BLOCK_TAKEN = 0.2; // share of a blocked blow that still lands
+// Heavy attack: hold longer than HOLD to draw back; full power after CHARGE_FULL.
+const HOLD = 0.22;
+const CHARGE_FULL = 0.75;
+const HEAVY_ARC = prepareArc({ from: [0.35, 0.93, -0.05], to: [-0.6, -0.72, -0.55] });
+// Drawn back: raised high on the right, blade straight up and a little back.
+const CHARGE_DIR = new THREE.Vector3(0.35, 0.93, -0.05).normalize();
+const CHARGE_POS = new THREE.Vector3(0.44, -0.44, -0.82);
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -42,6 +58,10 @@ const _world = new THREE.Matrix4();
 const _one = new THREE.Vector3(1, 1, 1);
 const _dir = new THREE.Vector3();
 const _seg = new THREE.Vector3();
+const _roll = new THREE.Quaternion();
+const _fwd = new THREE.Vector3(0, 0, 1);
+const TORCH_POS = new THREE.Vector3(-0.46, -0.48, -0.68);
+const TORCH_ROT = new THREE.Euler(0.12, 0, -0.14);
 
 export class Player {
   constructor(camera, viewRoot) {
@@ -58,6 +78,9 @@ export class Player {
     this.prevCamQ = new THREE.Quaternion();
     this.prevCamP = new THREE.Vector3();
     this.idleQuat = bladeQuaternion(IDLE_DIR, IDLE_AXIS, new THREE.Quaternion());
+    this.blockQuat = bladeQuaternion(BLOCK_DIR, BLOCK_AXIS, new THREE.Quaternion());
+    this.chargeQuat = bladeQuaternion(CHARGE_DIR, HEAVY_ARC.axis, new THREE.Quaternion());
+    this.chargePos = CHARGE_POS.clone();
 
     // Viewmodel: weapon in the right hand, torch in the left.
     this.weaponPivot = new THREE.Group();
@@ -69,18 +92,21 @@ export class Player {
   }
 
   _buildTorch() {
+    // Held low on the left, nearly upright, leaning a little in toward the
+    // middle; the flame stands about level with the bottom third of the view.
     const g = new THREE.Group();
-    g.position.set(-0.5, -0.56, -0.78);
-    g.rotation.set(0.3, 0, 0.3);
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.9 }));
-    const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.1, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
+    g.position.copy(TORCH_POS);
+    g.rotation.copy(TORCH_ROT);
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.95 }));
+    stick.position.y = -0.1;
+    const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
     wrap.position.y = 0.24;
     // A living noise flame on the rag wrap, a soft glow around it.
-    const flame = makeFlame({ height: 0.34, seed: 1.7, intensity: 1.15 });
-    flame.position.y = 0.26;
+    const flame = makeFlame({ height: 0.3, seed: 1.7, intensity: 1.15 });
+    flame.position.y = 0.27;
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: 0xff7a24, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
-    glow.position.y = 0.4;
-    glow.scale.set(0.42, 0.5, 1);
+    glow.position.y = 0.42;
+    glow.scale.set(0.46, 0.56, 1);
     g.add(stick, wrap, flame, glow);
     this.flame = flame;
     this.flameGlow = glow;
@@ -93,6 +119,14 @@ export class Player {
     this.swing = null;
     this.comboIndex = 0;
     this.queued = false;
+    this.press = null;
+    this.charge = null;
+    this.blocking = false;
+    this.blockK = 0;
+    this.armed = true;
+    this.torchLit = 1;
+    this.torchRaise = 1;
+    this.wake = 1;
     this.dodgeT = 0;
     this.dodgeCd = 0;
     this.dodgeDir = new THREE.Vector3();
@@ -190,8 +224,7 @@ export class Player {
         this.invuln = Math.max(this.invuln, DODGE_IFRAMES);
         ctx.audio?.dodge();
       }
-      if (input.mouseClicked[0]) this.queued = true;
-      if (!this.swing && this.drinkT <= 0 && (this.queued || input.mouseDown[0])) this._startSwing(ctx);
+      this._attackInput(dt, ctx);
     }
 
     // Potion: heal over the drink.
@@ -214,6 +247,9 @@ export class Player {
     let speed = WALK;
     // Rooted while swinging: the blow's own lunge is the only movement.
     if (this.swing) speed = 0;
+    else if (this.charge) speed *= 0.35;
+    else if (this.blocking) speed *= 0.45;
+    if (this.wake < 1) speed = 0;
     if (this.drinkT > 0) speed *= 0.45;
     const blend = 1 - Math.exp(-14 * dt);
     this.vel.x += (dir.x * speed - this.vel.x) * blend;
@@ -263,8 +299,16 @@ export class Player {
       const k = Math.min(1, this.deathT / 1.1);
       eye = EYE - (EYE - 0.35) * k * k;
       roll = k * 1.1;
+    } else if (this.wake < 1) {
+      // Getting up off the floor after the fall: lying on one side, then
+      // pushing up onto a knee, then standing.
+      const k = this.wake;
+      const up = smooth(Math.min(1, k / 0.55));
+      const stand = smooth(Math.max(0, (k - 0.55) / 0.45));
+      eye = 0.28 + (0.95 - 0.28) * up + (EYE - 0.95) * stand;
+      roll = (1 - up) * 1.25 + Math.sin(k * 9) * 0.03 * (1 - stand);
     } else {
-      eye += Math.sin(this.bobT * 2) * 0.035 * Math.min(1, (this.speedNow || 0) / WALK);
+      eye += Math.sin(this.bobT * 2) * 0.02 * Math.min(1, (this.speedNow || 0) / WALK);
       if (this.dodgeT > 0) eye -= 0.25 * Math.sin((this.dodgeT / DODGE_TIME) * Math.PI);
       const strafe = this.input ? this.input.moveAxes().strafe : 0;
       roll = -strafe * 0.015;
@@ -282,30 +326,105 @@ export class Player {
 
   // ----------------------------------------------------------- combat ---
 
-  _startSwing(ctx) {
+  // Left button: a tap is a light attack (queued if a swing is still
+  // running); held past HOLD it draws back for a heavy one, released on let
+  // go. Right button blocks.
+  _attackInput(dt, ctx) {
+    const input = ctx.input;
+    if (!this.armed) {
+      this.press = this.charge = null;
+      this.blocking = false;
+      return;
+    }
+    const lmb = input.mouseDown[0];
+    if (input.mouseClicked[0] && !this.press) this.press = { t: 0 };
+    if (this.press) {
+      this.press.t += dt;
+      if (!lmb) {
+        if (this.charge) this._startSwing(ctx, true);
+        else this.queued = true;
+        this.press = null;
+        this.charge = null;
+      } else if (this.press.t > HOLD && !this.charge && !this.swing && this.drinkT <= 0) {
+        this.charge = { t: 0, full: false };
+        this.queued = false;
+        ctx.audio?.charge?.();
+      }
+    }
+    if (this.charge) {
+      this.charge.t += dt;
+      if (!this.charge.full && this.charge.t >= CHARGE_FULL) {
+        this.charge.full = true;
+        ctx.audio?.chargeFull?.();
+      }
+    }
+    this.blocking = !!input.mouseDown[2] && !this.swing && !this.charge && this.drinkT <= 0 && this.dodgeT <= 0;
+    if (!this.swing && !this.charge && !this.blocking && this.queued && this.drinkT <= 0) this._startSwing(ctx, false);
+  }
+
+  _startSwing(ctx, heavy = false) {
     const def = this.weaponDef;
     this.queued = false;
-    const arc = def.prepared[this.comboIndex % def.prepared.length];
-    this.comboIndex++;
-    this.swing = { arc, t: 0, prevK: 0, hitSet: new Set(), hit: false, sounded: false };
+    const sp = this.run.speedMul;
+    if (heavy) {
+      const power = Math.min(1, this.charge.t / CHARGE_FULL);
+      this.swing = {
+        arc: HEAVY_ARC,
+        heavy: true,
+        power,
+        W: 0.07,
+        A: (def.active * 1.25) / sp,
+        R: (def.recover * 1.25) / sp,
+        from: { pos: this.weaponPivot.position.clone(), quat: this.weaponPivot.quaternion.clone() },
+      };
+    } else {
+      const arc = def.prepared[this.comboIndex % def.prepared.length];
+      this.comboIndex++;
+      this.swing = { arc, heavy: false, power: 0, W: def.windup / sp, A: def.active / sp, R: def.recover / sp, from: null };
+    }
+    Object.assign(this.swing, { t: 0, prevK: 0, hitSet: new Set(), hit: false, sounded: false });
     ctx.audio?.swingStart?.();
   }
 
   _timings() {
-    const def = this.weaponDef;
-    const s = this.run.speedMul;
-    return { W: def.windup / s, A: def.active / s, R: def.recover / s };
+    const s = this.swing;
+    return { W: s.W, A: s.A, R: s.R };
+  }
+
+  // Side-to-side sway of a hand while walking: a roll about the view axis and
+  // a little lateral drift, the two hands out of step like swinging arms.
+  _sway(phase) {
+    const walk = Math.min(1, (this.speedNow || 0) / WALK);
+    return Math.sin(this.bobT + phase) * walk;
   }
 
   _updateWeapon(dt, ctx) {
     const s = this.swing;
     const pivot = this.weaponPivot;
+    pivot.visible = this.armed;
     if (!s) {
-      // Idle sway.
       const t = performance.now() * 0.001;
-      const bob = Math.sin(this.bobT * 2) * 0.015;
-      pivot.position.set(IDLE_POS.x + Math.sin(this.bobT) * 0.01, IDLE_POS.y + bob + Math.sin(t * 1.3) * 0.004, IDLE_POS.z);
-      pivot.quaternion.copy(this.idleQuat);
+      const sw = this._sway(0);
+      this.blockK += ((this.blocking ? 1 : 0) - this.blockK) * Math.min(1, dt * 14);
+      if (this.charge) {
+        // Drawn back over the shoulder; trembling once fully charged.
+        const k = easeOut(Math.min(1, this.charge.t / 0.3));
+        pivot.position.lerpVectors(IDLE_POS, this.chargePos, k);
+        pivot.quaternion.slerpQuaternions(this.idleQuat, this.chargeQuat, k);
+        if (this.charge.full) {
+          pivot.position.x += Math.sin(t * 70) * 0.004;
+          pivot.position.y += Math.cos(t * 63) * 0.004;
+        }
+        return;
+      }
+      // Rest pose swaying side to side with the stride, eased into the block.
+      pivot.position.set(IDLE_POS.x + sw * 0.03, IDLE_POS.y + Math.sin(t * 1.3) * 0.004, IDLE_POS.z);
+      _roll.setFromAxisAngle(_fwd, -sw * 0.14);
+      pivot.quaternion.copy(this.idleQuat).premultiply(_roll);
+      if (this.blockK > 0.001) {
+        pivot.position.lerp(BLOCK_POS, this.blockK);
+        pivot.quaternion.slerp(this.blockQuat, this.blockK);
+      }
       if (this.drinkT > 0) pivot.position.y -= 0.3;
       return;
     }
@@ -316,15 +435,16 @@ export class Player {
       const k = easeOut(s.t / W);
       arcDirection(arc, 0, _v);
       gripPose(_v, arc.axis, _pos, _quat);
-      pivot.position.lerpVectors(IDLE_POS, _pos, k);
-      pivot.quaternion.slerpQuaternions(this.idleQuat, _quat, k);
+      pivot.position.lerpVectors(s.from ? s.from.pos : IDLE_POS, _pos, k);
+      pivot.quaternion.slerpQuaternions(s.from ? s.from.quat : this.idleQuat, _quat, k);
     } else if (s.t < W + A) {
       if (!s.sounded) {
         s.sounded = true;
-        ctx.audio?.swing(this.run.weapon.type);
-        // The blow carries you a step forward.
-        this.knock.x += Math.sin(this.yaw) * -LUNGE;
-        this.knock.z += Math.cos(this.yaw) * -LUNGE;
+        ctx.audio?.swing(s.heavy ? 'heavy' : this.run.weapon.type);
+        // The blow carries you a step forward; a heavy one further.
+        const lunge = LUNGE * (s.heavy ? 1.5 : 1);
+        this.knock.x += Math.sin(this.yaw) * -lunge;
+        this.knock.z += Math.cos(this.yaw) * -lunge;
       }
       const k = smooth((s.t - W) / A);
       this._sweep(s, s.prevK, k, ctx);
@@ -342,8 +462,7 @@ export class Player {
       pivot.position.lerpVectors(_pos, IDLE_POS, k);
       pivot.quaternion.slerpQuaternions(_quat, this.idleQuat, k);
       // Combo: a buffered click cancels the tail of the recovery.
-      const wantsNext = this.queued || (this.input?.mouseDown[0] ?? false);
-      if (wantsNext && s.t - W - A > R * 0.75 && this.drinkT <= 0) this._startSwing(ctx);
+      if (this.queued && s.t - W - A > R * 0.75 && this.drinkT <= 0) this._startSwing(ctx, false);
     } else {
       this.swing = null;
     }
@@ -369,29 +488,44 @@ export class Player {
       _world.compose(_camP, _camQ, _one).multiply(_local);
       this.blade.setFromMatrix(this.hitCenter, this.hitHalf, _world);
       queryHurtboxes(this.blade, ctx.enemies, s.hitSet, hits);
+      if (ctx.props) queryHurtboxes(this.blade, ctx.props.targets, s.hitSet, hits);
     }
     if (hits.length) this._applyHits(hits, ctx);
   }
 
   _applyHits(hits, ctx) {
+    // Urns and barrels just smash.
+    const props = hits.filter((h) => h.target.isProp);
+    if (props.length) {
+      for (const h of props) h.target.smash(ctx, _v2.subVectors(h.target.position, this.position).setY(0).normalize());
+      hits = hits.filter((h) => !h.target.isProp);
+      if (!hits.length) {
+        ctx.hitStop?.(0.03);
+        return;
+      }
+    }
     const def = this.weaponDef;
     const w = this.run.weapon;
+    const heavy = this.swing?.heavy;
+    // A heavy blow: 1.6x damage, up to 2.4x fully charged; it staggers and
+    // throws far harder.
+    const mult = heavy ? 1.6 + 0.8 * this.swing.power : 1;
     let total = 0;
     for (const h of hits) {
       const e = h.target;
       const crit = h.part.multiplier > 1.2;
-      const amount = Math.round(w.damage * this.run.dmgMul * h.part.multiplier * (0.93 + Math.random() * 0.14));
+      const amount = Math.round(w.damage * this.run.dmgMul * mult * h.part.multiplier * (0.93 + Math.random() * 0.14));
       _v2.subVectors(e.position, this.position).setY(0).normalize();
-      const dealt = e.takeHit(amount, _v2, def.knockback, def.stagger, ctx);
+      const dealt = e.takeHit(amount, _v2, def.knockback * (heavy ? 1.8 : 1), def.stagger * (heavy ? 2.5 : 1), ctx);
       total += dealt;
       ctx.onDamage?.(e, dealt, crit, h.point);
       burst(ctx.fx.alpha, h.point, { count: 18, speed: 3.5, color: C.blood, colorEnd: C.bloodDark, size: 0.1, life: 0.7 });
       burst(ctx.fx.add, h.point, { count: 8, speed: 5, size: 0.06, life: 0.25 });
     }
     if (total > 0) {
-      ctx.hitStop?.(def.hitstop * (hits.length > 1 ? 1.4 : 1));
-      ctx.audio?.hit(this.run.weapon.type);
-      this.shake(0.12);
+      ctx.hitStop?.(def.hitstop * (hits.length > 1 ? 1.4 : 1) * (heavy ? 1.7 : 1));
+      ctx.audio?.hit(heavy ? 'heavy' : this.run.weapon.type);
+      this.shake(heavy ? 0.3 : 0.12);
       if (this.siphonT > 0) this.heal(total * this.siphonLeech);
     }
   }
@@ -400,12 +534,18 @@ export class Player {
     const t = performance.now() * 0.001;
     const f = 0.85 + Math.sin(t * 13) * 0.08 + Math.sin(t * 7.3) * 0.07;
     this.flame.userData.tick(t);
-    this.flameGlow.material.opacity = 0.25 + (f - 0.7) * 0.5;
-    this.torch.position.y = -0.56 + Math.sin(this.bobT * 2 + 1) * 0.012;
+    const lit = this.torchLit;
+    this.flame.scale.setScalar(Math.max(0.001, lit));
+    this.flame.visible = lit > 0.01;
+    this.flameGlow.material.opacity = (0.25 + (f - 0.7) * 0.5) * lit;
+    // Swings side to side with the stride, out of step with the weapon.
+    const sw = this._sway(Math.PI);
+    this.torch.position.set(TORCH_POS.x + sw * 0.025, TORCH_POS.y - (1 - this.torchRaise) * 0.5, TORCH_POS.z);
+    this.torch.rotation.set(TORCH_ROT.x, TORCH_ROT.y, TORCH_ROT.z - sw * 0.12);
     // World light rides with the torch.
     this.torch.getWorldPosition(_v);
     this.torchLight.position.copy(_v).add(_v2.set(0, 0.35, 0));
-    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f;
+    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit;
     this.torchLight.distance = ctx.torchRange ?? 16;
   }
 
@@ -453,6 +593,32 @@ export class Player {
     if (this.invuln > 0) {
       if (this.dodgeT > 0 || this.dash) ctx.onDodge?.();
       return false;
+    }
+    // A block turns most of a blow from the front aside.
+    const fx = this.position.x - from.x;
+    const fz = this.position.z - from.z;
+    const fd = Math.hypot(fx, fz);
+    if (this.blocking && this.blockK > 0.5 && fd > 0.3) {
+      const dot = (fx * Math.sin(this.yaw) + fz * Math.cos(this.yaw)) / fd;
+      if (dot > BLOCK_FRONT) {
+        amount *= BLOCK_TAKEN;
+        knockback *= 0.35;
+        this.invuln = 0.2;
+        ctx.audio?.block?.();
+        this.shake(0.12);
+        _v.set(this.position.x - Math.sin(this.yaw) * 0.7, this.position.y + 1.25, this.position.z - Math.cos(this.yaw) * 0.7);
+        burst(ctx.fx.add, _v, { count: 22, speed: 5, size: 0.06, life: 0.3, color: C.spark, colorEnd: C.fireEdge });
+        this.run.health -= Math.round(amount);
+        this.knock.add(_v.set(fx / fd, 0, fz / fd).multiplyScalar(knockback));
+        if (this.run.health <= 0) {
+          this.run.health = 0;
+          this.dead = true;
+          this.deathT = 0;
+          this.swing = null;
+          ctx.audio?.playerDeath();
+        }
+        return true;
+      }
     }
     amount = Math.round(amount);
     this.run.health -= amount;

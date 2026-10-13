@@ -59,6 +59,19 @@ export class Pickups {
     return this._add('weapon', x, z, g, { weapon });
   }
 
+  // Your own sword, lying on the floor where the fall flung it.
+  addStarter(x, z, weapon, yaw) {
+    const g = new THREE.Group();
+    const w = buildWeaponMesh(weapon);
+    w.rotation.set(Math.PI / 2, 0, 0.6);
+    w.position.y = 0.05;
+    g.add(w);
+    g.rotation.y = yaw;
+    const it = this._add('weapon', x, z, g, { weapon, starter: true });
+    g.position.y = 0;
+    return it;
+  }
+
   addSpell(x, z) {
     const g = new THREE.Group();
     const m = new THREE.MeshBasicMaterial({ map: runeCircleTexture('#c060ff'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
@@ -78,8 +91,10 @@ export class Pickups {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.t += dt;
-      it.mesh.position.y = 0.75 + Math.sin(it.t * 2.2) * 0.08;
-      it.mesh.rotation.y += dt * (it.kind === 'spell' ? 1.6 : 0.9);
+      if (!it.starter) {
+        it.mesh.position.y = 0.75 + Math.sin(it.t * 2.2) * 0.08;
+        it.mesh.rotation.y += dt * (it.kind === 'spell' ? 1.6 : 0.9);
+      }
       if (it.kind === 'potion' && Math.random() < dt * 4) {
         ctx.fx.add.emit({ x: it.x, y: 0.9, z: it.z, vx: (Math.random() - 0.5) * 0.3, vy: 0.6, vz: (Math.random() - 0.5) * 0.3, life: 0.8, size: 0.12, color: C.blood, colorEnd: C.bloodDark });
       }
@@ -104,7 +119,15 @@ export class Pickups {
         this.nearWeapon = it;
       }
     }
-    if (this.nearWeapon && ctx.input.wasPressed('KeyF')) {
+    if (this.nearWeapon && this.nearWeapon.starter && ctx.input.wasPressed('KeyF')) {
+      const it = this.nearWeapon;
+      ctx.player.armed = true;
+      this.scene.remove(it.mesh);
+      this.items.splice(this.items.indexOf(it), 1);
+      ctx.audio?.pickup();
+      ctx.toast?.(`${it.weapon.name} in hand`);
+      this.nearWeapon = null;
+    } else if (this.nearWeapon && ctx.input.wasPressed('KeyF')) {
       const it = this.nearWeapon;
       const old = run.weapon;
       ctx.player.setWeapon(it.weapon);
@@ -122,6 +145,7 @@ export class Pickups {
     if (!it) return null;
     const w = it.weapon;
     const def = WEAPON_TYPES[w.type];
+    if (it.starter) return `<b>F</b> take up your <span style="color:${w.color}">${w.name}</span>`;
     return `<b>F</b> take <span style="color:${w.color}">${w.name}</span> (${def.label}, ${w.damage} dmg) &mdash; holding ${run.weapon.name} (${run.weapon.damage})`;
   }
 

@@ -150,8 +150,13 @@ export class Surface {
       v.fromBufferAttribute(p, i);
       const a = Math.atan2(v.z, v.x);
       const yN = (v.y + depth / 2) / depth;
-      const n = fbm2(a * 2.5 + 3, v.y * 0.25, 4, 9);
-      const k = 1 + (n - 0.5) * 0.45 * (0.3 + yN);
+      // Noise in metres both around and down the wall (the old one varied
+      // with angle only, which carved it into vertical metal-looking flutes),
+      // plus a few rough horizontal strata.
+      const circ = a * PIT_RADIUS;
+      const n = fbm2(circ * 0.32 + 3, v.y * 0.32, 4, 9);
+      const strata = Math.sin(v.y * 1.4 + n * 4) * 0.035;
+      const k = 1 + (n - 0.5) * 0.32 * (0.4 + yN) + strata;
       p.setXYZ(i, v.x * k, v.y, v.z * k);
     }
     g.computeVertexNormals();

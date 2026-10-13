@@ -25,7 +25,7 @@ if (!webglAvailable()) {
     status.textContent = `Summoning… ${done}/${total}`;
   }).then(async (loaded) => {
     if (loaded.length) console.info(`Loaded ${loaded.length} generated models`, loaded);
-    const game = new Game(host, { lotLabel: 'Lot #265', devFloor });
+    const game = new Game(host, { devFloor });
     await game.ready();
     // Handy for debugging from the console.
     window.__demonDescent = game;
