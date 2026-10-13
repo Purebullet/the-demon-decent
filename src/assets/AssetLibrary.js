@@ -140,7 +140,9 @@ export const Assets = {
     const available = await loadIndex();
     const jobs = [
       ...Object.entries(CHARACTERS).map(([id, e]) => () => this._loadCharacter(id, e, available)),
-      ...Object.entries(PROPS).map(([id, e]) => () => this._loadProp(id, e, available)),
+      ...Object.entries(PROPS)
+        .filter(([, e]) => !e.lot)
+        .map(([id, e]) => () => this._loadProp(id, e, available)),
     ];
     let done = 0;
     await Promise.all(jobs.map((j) => j().finally(() => onProgress?.(++done, jobs.length))));

@@ -14,14 +14,18 @@ import { makeCanvas } from '../world/Textures.js';
 // a second), so the texture upload stays cheap even in software rendering.
 
 const SERIF = "Georgia, 'Times New Roman', serif";
+// One look for every panel and label: charred black-red panels with grain,
+// a dark iron frame lined in old blood with small horned corners, and text
+// that glows softly out of the dark rather than sitting crisp on top of it.
 const C = {
-  bone: '#d8c9a8',
-  ash: '#8a7f76',
-  ember: '#ff7a2a',
-  blood: '#c41a10',
-  light: '#ffcfa8',
-  panel: 'rgba(12,3,3,0.82)',
-  edge: '#5a1a10',
+  bone: '#cdb796',
+  ash: '#7d6c60',
+  ember: '#e8642a',
+  blood: '#b3180e',
+  light: '#f2c79e',
+  panel: 'rgba(14,4,3,0.86)',
+  edge: '#6a1a10',
+  iron: '#1e0c09',
 };
 
 const VIGNETTE = {
@@ -95,8 +99,9 @@ export class Hud {
   resize(w, h) {
     this.w = Math.max(1, w);
     this.h = Math.max(1, h);
-    // Painted at the screen's own resolution (up to 2x), so text is crisp.
-    this.scale = Math.min(Math.max(1, this.host.pixelRatio || 1), 2);
+    // Painted at about the screen's resolution (at most 1.25x, and never
+    // wider than 2400 px): sharp enough, and cheap to re-upload.
+    this.scale = Math.min(Math.max(1, this.host.pixelRatio || 1), 1.25, 2400 / this.w);
     this.canvas.width = Math.round(this.w * this.scale);
     this.canvas.height = Math.round(this.h * this.scale);
     this.texture.dispose();
@@ -319,15 +324,80 @@ export class Hud {
     else if (this.panel === 'death' || this.panel === 'victory') this._paintEnd(g);
   }
 
-  _text(g, text, x, y, { size = 16, color = C.bone, align = 'left', base = 'alphabetic', glow = null, weight = '' } = {}) {
+  // Text glows softly out of the dark: a wide black-red halo under it (or the
+  // given glow colour), never a hard edge. `ls` spaces the letters.
+  _text(g, text, x, y, { size = 16, color = C.bone, align = 'left', base = 'alphabetic', glow = null, weight = '', ls = 0 } = {}) {
     g.font = `${weight}${size}px ${SERIF}`;
     g.textAlign = align;
     g.textBaseline = base;
-    g.shadowColor = glow || 'rgba(0,0,0,0.9)';
-    g.shadowBlur = glow ? 18 : 4;
+    if ('letterSpacing' in g) g.letterSpacing = `${ls}px`;
+    g.shadowColor = glow || 'rgba(30,0,0,0.95)';
+    g.shadowBlur = glow ? 20 : Math.max(5, size * 0.45);
     g.fillStyle = color;
     g.fillText(text, x, y);
     g.shadowBlur = 0;
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+  }
+
+  // Spaced small capitals for labels.
+  _label(g, text, x, y, opts = {}) {
+    this._text(g, text.toUpperCase(), x, y, { size: 12, color: C.ash, ls: 2, ...opts });
+  }
+
+  // Grain painted once: specks, pits and faint scratches, tiled over panels.
+  _grain(g) {
+    if (this.grain) return this.grain;
+    const c = makeCanvas(96, 96);
+    const x = c.getContext('2d');
+    let seed = 7;
+    const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 900; i++) {
+      x.fillStyle = r() < 0.5 ? `rgba(0,0,0,${0.15 + r() * 0.3})` : `rgba(120,30,20,${r() * 0.08})`;
+      x.fillRect(r() * 96, r() * 96, 1 + r() * 2, 1 + r() * 2);
+    }
+    x.strokeStyle = 'rgba(0,0,0,0.25)';
+    for (let i = 0; i < 6; i++) {
+      x.beginPath();
+      const sx = r() * 96;
+      const sy = r() * 96;
+      x.moveTo(sx, sy);
+      x.lineTo(sx + (r() - 0.5) * 50, sy + (r() - 0.5) * 20);
+      x.stroke();
+    }
+    this.grain = g.createPattern(c, 'repeat');
+    return this.grain;
+  }
+
+  // A ragged stroke of old blood with a small diamond at its middle.
+  _divider(g, cx, y, w) {
+    g.save();
+    const grad = g.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
+    grad.addColorStop(0, 'rgba(120,20,10,0)');
+    grad.addColorStop(0.5, 'rgba(150,26,14,0.9)');
+    grad.addColorStop(1, 'rgba(120,20,10,0)');
+    g.fillStyle = grad;
+    g.beginPath();
+    g.moveTo(cx - w / 2, y);
+    for (let i = 0; i <= 24; i++) {
+      const k = i / 24;
+      g.lineTo(cx - w / 2 + k * w, y - 1.2 - Math.sin(k * 37) * 0.8 * Math.sin(k * Math.PI));
+    }
+    for (let i = 24; i >= 0; i--) {
+      const k = i / 24;
+      g.lineTo(cx - w / 2 + k * w, y + 1.2 + Math.cos(k * 29) * 0.8 * Math.sin(k * Math.PI));
+    }
+    g.fill();
+    g.fillStyle = '#c0301a';
+    g.shadowColor = 'rgba(255,60,20,0.8)';
+    g.shadowBlur = 8;
+    g.beginPath();
+    g.moveTo(cx, y - 5);
+    g.lineTo(cx + 5, y);
+    g.lineTo(cx, y + 5);
+    g.lineTo(cx - 5, y);
+    g.closePath();
+    g.fill();
+    g.restore();
   }
 
   // Tiny markup: <b>..</b> in ember, <span style="color:#hex">..</span>.
@@ -350,14 +420,46 @@ export class Hud {
     return total;
   }
 
+  // Every panel: charred fill with grain and a shadow falling away from it,
+  // a dark iron frame lined with old blood, and small horns at the corners
+  // of the larger ones. `stroke` null draws the fill only.
   _box(g, x, y, w, h, fill = C.panel, stroke = C.edge) {
+    g.save();
+    g.shadowColor = 'rgba(0,0,0,0.85)';
+    g.shadowBlur = 14;
     g.fillStyle = fill;
     g.fillRect(x, y, w, h);
+    g.shadowBlur = 0;
+    const dark = g.createLinearGradient(0, y, 0, y + h);
+    dark.addColorStop(0, 'rgba(60,10,6,0.25)');
+    dark.addColorStop(1, 'rgba(0,0,0,0.35)');
+    g.fillStyle = dark;
+    g.fillRect(x, y, w, h);
+    g.fillStyle = this._grain(g);
+    g.fillRect(x, y, w, h);
     if (stroke) {
-      g.strokeStyle = stroke;
+      g.lineWidth = 3;
+      g.strokeStyle = C.iron;
+      g.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
       g.lineWidth = 1;
-      g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      g.strokeStyle = stroke;
+      g.globalAlpha *= 0.85;
+      g.strokeRect(x + 3.5, y + 3.5, w - 7, h - 7);
+      g.globalAlpha /= 0.85;
+      if (h >= 26 && w >= 40) {
+        g.fillStyle = stroke;
+        const horn = Math.min(8, h * 0.22);
+        for (const [cx, cy, sx, sy] of [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]]) {
+          g.beginPath();
+          g.moveTo(cx - sx * 2, cy - sy * 2);
+          g.lineTo(cx + sx * horn, cy + sy * 2);
+          g.lineTo(cx + sx * 2, cy + sy * horn);
+          g.closePath();
+          g.fill();
+        }
+      }
     }
+    g.restore();
   }
 
   _paintPlaying(g) {
@@ -369,15 +471,19 @@ export class Hud {
     const pad = small ? 12 : 22;
 
     // Top corners (Project 0's own bar sits at the top centre).
-    this._text(g, i.floorLabel || '', pad, 30, { size: small ? 13 : 15 });
-    this._text(g, i.enemyLabel || '', w - pad, 30, { size: small ? 13 : 15, color: C.ember, align: 'right' });
-    if (!small && i.best) this._text(g, `Deepest: Floor ${i.best}`, w - pad, 50, { size: 13, color: C.ash, align: 'right' });
+    this._text(g, (i.floorLabel || '').toUpperCase(), pad, 30, { size: small ? 11 : 13, ls: 1.5, color: C.bone });
+    this._text(g, (i.enemyLabel || '').toUpperCase(), w - pad, 30, { size: small ? 11 : 13, ls: 1.5, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
+    if (!small && i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, 50, { size: 11, align: 'right' });
 
     // Crosshair.
-    g.fillStyle = 'rgba(255,200,160,0.85)';
+    g.save();
+    g.fillStyle = 'rgba(230,120,70,0.75)';
+    g.shadowColor = 'rgba(80,0,0,1)';
+    g.shadowBlur = 6;
     g.beginPath();
-    g.arc(w / 2, h / 2, 3, 0, Math.PI * 2);
+    g.arc(w / 2, h / 2, 2.5, 0, Math.PI * 2);
     g.fill();
+    g.restore();
 
     // Compass toward the exit or the last few demons.
     if (i.compass && !this.announcement) {
@@ -386,8 +492,10 @@ export class Hud {
       g.save();
       g.translate(w / 2, exit ? 104 : 88);
       g.rotate(i.compass.angle);
-      g.fillStyle = exit ? C.ember : '#d03030';
-      g.shadowColor = 'rgba(255,90,20,0.9)';
+      g.fillStyle = exit ? '#c8441a' : '#9a1a10';
+      g.strokeStyle = C.iron;
+      g.lineWidth = 2;
+      g.shadowColor = 'rgba(255,60,10,0.9)';
       g.shadowBlur = exit ? 16 : 8;
       g.beginPath();
       g.moveTo(0, -14 * big);
@@ -396,15 +504,17 @@ export class Hud {
       g.lineTo(-10 * big, 10 * big);
       g.closePath();
       g.fill();
+      g.shadowBlur = 0;
+      g.stroke();
       g.restore();
-      if (exit) this._text(g, 'EXIT', w / 2, 146, { size: 13, color: C.ember, align: 'center', glow: 'rgba(255,90,20,0.8)' });
+      if (exit) this._label(g, 'The portal', w / 2, 146, { color: C.ember, align: 'center', glow: 'rgba(160,30,0,0.9)' });
     }
 
     // Boss bar.
     if (i.boss) {
       const bw = Math.min(620, w * 0.8);
       const bx = (w - bw) / 2;
-      this._text(g, i.boss.name, w / 2, 126, { size: small ? 14 : 18, color: '#ffb38a', align: 'center', glow: 'rgba(255,60,20,0.8)' });
+      this._text(g, i.boss.name.toUpperCase(), w / 2, 126, { size: small ? 13 : 16, ls: 2, color: '#f0b080', align: 'center', glow: 'rgba(200,30,0,0.9)' });
       this._box(g, bx, 134, bw, 12, 'rgba(20,4,4,0.85)', '#5a1a10');
       const grad = g.createLinearGradient(bx, 0, bx + bw, 0);
       grad.addColorStop(0, '#6a0a04');
@@ -415,16 +525,34 @@ export class Hud {
     }
 
     // Health and potions, bottom left.
+    // Health: a vial of blood in an iron frame, its end ragged.
     const hw = Math.min(340, w * 0.42);
-    const hy = h - pad - (this.touch ? 0 : 0) - 50;
-    this._box(g, pad, hy, hw, 22, 'rgba(15,3,3,0.85)', '#4a1510');
+    const hy = h - pad - 52;
+    this._box(g, pad, hy, hw, 24, 'rgba(10,2,2,0.9)', C.edge);
     const frac = Math.max(0, r.health / r.maxHealth);
-    const hg = g.createLinearGradient(0, hy, 0, hy + 22);
-    hg.addColorStop(0, '#d2241a');
-    hg.addColorStop(1, '#7a0a06');
-    g.fillStyle = hg;
-    g.fillRect(pad + 1, hy + 1, (hw - 2) * frac, 20);
-    this._text(g, `${Math.ceil(r.health)} / ${r.maxHealth}`, pad + hw / 2, hy + 12, { size: 13, align: 'center', base: 'middle' });
+    const fw = (hw - 10) * frac;
+    if (fw > 0) {
+      g.save();
+      const hg = g.createLinearGradient(0, hy + 5, 0, hy + 19);
+      hg.addColorStop(0, '#9a1408');
+      hg.addColorStop(0.45, '#6e0a04');
+      hg.addColorStop(1, '#320302');
+      g.fillStyle = hg;
+      g.shadowColor = 'rgba(200,20,0,0.6)';
+      g.shadowBlur = 8;
+      g.beginPath();
+      g.moveTo(pad + 5, hy + 5);
+      g.lineTo(pad + 5 + fw, hy + 5);
+      for (let k = 1; k <= 4; k++) g.lineTo(pad + 5 + fw - (k % 2) * 3, hy + 5 + k * 3.5);
+      g.lineTo(pad + 5, hy + 19);
+      g.closePath();
+      g.fill();
+      g.shadowBlur = 0;
+      g.fillStyle = this._grain(g);
+      g.fill();
+      g.restore();
+    }
+    this._text(g, `${Math.ceil(r.health)} / ${r.maxHealth}`, pad + hw / 2, hy + 13, { size: 12, ls: 1, color: C.light, align: 'center', base: 'middle' });
     for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, pad + k * 24, hy + 28, k < r.potions);
     this._text(g, 'E', pad + r.potionCap * 24 + 2, hy + 40, { size: 11, color: C.ash, base: 'middle' });
     let bx = pad + r.potionCap * 24 + 18;
@@ -435,8 +563,11 @@ export class Hud {
     const wd = p?.armed === false ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
     const dmg = Math.round(wd.damage * r.dmgMul);
     const wx = w - pad;
-    this._text(g, wd.name, wx, h - pad - 22, { size: small ? 15 : 19, color: wd.color, align: 'right' });
-    if (wd.damage) this._text(g, `${WEAPON_TYPES[wd.type].label} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`, wx, h - pad - 4, { size: 13, color: C.ash, align: 'right' });
+    g.font = `${small ? 15 : 18}px ${SERIF}`;
+    const ww = Math.max(150, g.measureText(wd.name).width + 34);
+    this._box(g, wx - ww, h - pad - 46, ww, 46, C.panel, C.edge);
+    this._text(g, wd.name, wx - 14, h - pad - 24, { size: small ? 15 : 18, color: wd.color, align: 'right', glow: 'rgba(40,0,0,0.95)' });
+    if (wd.damage) this._label(g, `${WEAPON_TYPES[wd.type].label} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`, wx - 14, h - pad - 9, { size: 10, align: 'right', ls: 1.5 });
 
     // Spells, bottom centre.
     const sz = small ? 46 : 58;
@@ -445,8 +576,8 @@ export class Hud {
     const sy = h - pad - sz - (this.touch ? 92 : 0);
     for (const id of SPELL_IDS) {
       const lvl = r.spells[id];
-      g.globalAlpha = lvl ? 1 : 0.3;
-      this._box(g, sx, sy, sz, sz, 'rgba(20,6,4,0.8)', '#6a3a1a');
+      g.globalAlpha = lvl ? 1 : 0.35;
+      this._box(g, sx, sy, sz, sz, C.panel, lvl ? C.edge : '#3a1410');
       if (lvl) {
         const cd = (p.spellCd[id] || 0) / SPELLS[id].levels[lvl - 1].cd;
         if (cd > 0) {
@@ -454,10 +585,10 @@ export class Hud {
           g.fillRect(sx + 1, sy + 1 + (sz - 2) * (1 - cd), sz - 2, (sz - 2) * cd);
         }
       }
-      this._text(g, SPELLS[id].label, sx + 5, sy + 13, { size: 12, color: C.ember });
-      const words = SPELLS[id].name.split(' ');
-      words.forEach((wd2, k) => this._text(g, wd2, sx + sz / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: small ? 8 : 9, align: 'center', base: 'middle' }));
-      if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 5, sy + sz - 4, { size: 10, color: '#ffcf8a', align: 'right' });
+      this._text(g, SPELLS[id].label, sx + 8, sy + 16, { size: 12, color: C.ember, glow: 'rgba(140,20,0,0.9)' });
+      const words = SPELLS[id].name.toUpperCase().split(' ');
+      words.forEach((wd2, k) => this._text(g, wd2, sx + sz / 2, sy + sz / 2 + 2 + (k - (words.length - 1) / 2) * 11, { size: small ? 7 : 8, ls: 1, color: C.bone, align: 'center', base: 'middle' }));
+      if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 8, sy + sz - 7, { size: 10, color: C.light, align: 'right' });
       g.globalAlpha = 1;
       if (this.touch && lvl) this.buttons.push({ x: sx + sz / 2, y: sy + sz / 2, r: sz / 2, code: SPELLS[id].key });
       sx += sz + 10;
@@ -468,7 +599,7 @@ export class Hud {
       g.font = `16px ${SERIF}`;
       const plain = i.prompt.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '—');
       const pw = Math.min(w - 20, g.measureText(plain).width + 30);
-      this._box(g, (w - pw) / 2, h * 0.62 - 16, pw, 32, 'rgba(10,3,3,0.72)', '#4a1a10');
+      this._box(g, (w - pw) / 2, h * 0.62 - 18, pw, 36, C.panel, C.edge);
       this._rich(g, i.prompt, w / 2, h * 0.62, small ? 13 : 16);
     }
 
@@ -555,8 +686,9 @@ export class Hud {
     const alpha = Math.min(1, a.t / 0.4) * Math.min(1, (1 - k) / 0.25);
     g.globalAlpha = Math.max(0, alpha);
     const size = Math.max(26, Math.min(56, this.w * 0.05));
-    this._text(g, a.text.toUpperCase(), this.w / 2, this.h * 0.28, { size, color: C.light, align: 'center', glow: 'rgba(255,60,10,0.9)' });
-    if (a.sub) this._text(g, a.sub, this.w / 2, this.h * 0.28 + size * 0.85, { size: Math.max(14, size * 0.38), color: C.ash, align: 'center' });
+    this._text(g, a.text.toUpperCase(), this.w / 2, this.h * 0.28, { size, ls: size * 0.08, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.95)' });
+    this._divider(g, this.w / 2, this.h * 0.28 + size * 0.32, Math.min(this.w * 0.5, size * 8));
+    if (a.sub) this._text(g, a.sub, this.w / 2, this.h * 0.28 + size * 0.85, { size: Math.max(13, size * 0.34), ls: 1, color: C.bone, align: 'center' });
     g.globalAlpha = 1;
   }
 
@@ -569,11 +701,9 @@ export class Hud {
       g.font = `14px ${SERIF}`;
       const tw = g.measureText(plain).width + 24;
       const x = this.w - 22 - tw;
-      this._box(g, x, y - 14, tw, 28, 'rgba(12,3,3,0.8)', null);
-      g.fillStyle = C.ember;
-      g.fillRect(x, y - 14, 2, 28);
+      this._box(g, x, y - 15, tw, 30, C.panel, C.edge);
       this._rich(g, t.text, x + 12, y, 14, 'left');
-      y += 34;
+      y += 36;
     }
     g.globalAlpha = 1;
   }
@@ -592,19 +722,17 @@ export class Hud {
     g.fillRect(0, 0, w, h);
     const big = Math.max(30, Math.min(88, w * 0.072));
     let y = h * 0.3;
-    this._text(g, 'THE DEMON DESCENT', w / 2, y, { size: big, color: '#ffd8b8', align: 'center', glow: 'rgba(255,50,10,0.95)' });
-    y += big * 0.7;
-    this._text(g, 'Twenty floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.24), color: C.ash, align: 'center' });
+    this._text(g, 'THE DEMON DESCENT', w / 2, y, { size: big, ls: big * 0.06, color: '#f4c8a0', align: 'center', glow: 'rgba(190,25,0,1)' });
+    this._divider(g, w / 2, y + big * 0.3, Math.min(w * 0.6, big * 9));
+    y += big * 0.75;
+    this._text(g, 'Twenty floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.22), ls: 1, color: C.bone, align: 'center' });
     y += big * 0.9;
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 2.6);
     g.font = `${Math.max(16, big * 0.27)}px ${SERIF}`;
     const label = this.touch ? 'Tap to enter the pit' : 'Click to enter the pit';
     const bw = g.measureText(label).width + 48;
-    g.shadowColor = `rgba(255,60,10,${0.4 + pulse * 0.4})`;
-    g.shadowBlur = 24;
-    this._box(g, (w - bw) / 2, y - 22, bw, 44, 'rgba(60,8,4,0.6)', '#8a2a14');
-    g.shadowBlur = 0;
-    this._text(g, label, w / 2, y, { size: Math.max(16, big * 0.27), color: C.light, align: 'center', base: 'middle' });
+    this._box(g, (w - bw) / 2, y - 24, bw, 48, `rgba(${40 + pulse * 30},6,4,0.88)`, '#8a2210');
+    this._text(g, label.toUpperCase(), w / 2, y, { size: Math.max(14, big * 0.22), ls: 2, color: C.light, align: 'center', base: 'middle', glow: `rgba(200,40,0,${0.5 + pulse * 0.4})` });
     y += 50;
     const t = this.titleInfo;
     const best = t.best ? `Your deepest descent: Floor ${t.best}` : 'No soul has yet returned from the pit.';
@@ -618,7 +746,7 @@ export class Hud {
     const table = (t.table || []).slice(0, 5);
     if (table.length) {
       y += 8;
-      this._text(g, "THIS WEEK'S DEEPEST", w / 2, y, { size: 12, color: C.ash, align: 'center' });
+      this._label(g, "This week's deepest", w / 2, y, { align: 'center' });
       y += 18;
       table.forEach((row, k) => {
         this._text(g, `${k + 1}. ${row.name}`, w / 2 - 10, y, { size: 13, color: row.you ? C.ember : C.bone, align: 'right' });
@@ -630,11 +758,13 @@ export class Hud {
     if (!this.touch && h > 420) {
       const rows = [
         ['W A S D', 'move', 'Mouse', 'aim'],
-        ['Left click', 'attack', 'Space / Shift', 'dodge'],
+        ['Click / hold', 'light / heavy', 'Right button', 'block'],
+        ['Space / Shift', 'dodge', '', ''],
         ['E', 'drink potion', '1 2 3', 'demon spells'],
         ['F', 'take / use', '', ''],
       ];
       let cy = Math.max(y + 20, h - 24 - rows.length * 19);
+      this._box(g, w / 2 - 210, cy - 22, 420, rows.length * 19 + 18, 'rgba(10,2,2,0.7)', C.edge);
       for (const [a, b, c2, d] of rows) {
         this._text(g, a, w / 2 - 190, cy, { size: 13, color: C.bone });
         this._text(g, b, w / 2 - 80, cy, { size: 13, color: C.ash });
@@ -647,27 +777,31 @@ export class Hud {
 
   _paintPause(g) {
     this._dim(g);
-    this._text(g, 'PAUSED', this.w / 2, this.h * 0.45, { size: 44, color: C.light, align: 'center', glow: 'rgba(255,50,10,0.6)' });
-    this._text(g, 'Click to return to the dark', this.w / 2, this.h * 0.45 + 40, { size: 15, color: C.ash, align: 'center' });
+    const pw = Math.min(420, this.w - 40);
+    this._box(g, (this.w - pw) / 2, this.h * 0.45 - 62, pw, 112, C.panel, C.edge);
+    this._text(g, 'PAUSED', this.w / 2, this.h * 0.45, { size: 40, ls: 4, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
+    this._divider(g, this.w / 2, this.h * 0.45 + 14, pw * 0.7);
+    this._label(g, 'Click to return to the dark', this.w / 2, this.h * 0.45 + 36, { align: 'center', color: C.bone });
   }
 
   _paintChoice(g) {
     const { w, h } = this;
     this._dim(g, 0.55);
     const c = this.choice;
-    this._text(g, c.title.toUpperCase(), w / 2, h * 0.3, { size: Math.min(36, w * 0.06), color: C.light, align: 'center', glow: 'rgba(255,60,10,0.8)' });
+    this._text(g, c.title.toUpperCase(), w / 2, h * 0.3, { size: Math.min(34, w * 0.06), ls: 3, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
+    this._divider(g, w / 2, h * 0.3 + 12, Math.min(420, w * 0.6));
     const bw = Math.min(560, w - 30);
     let y = h * 0.3 + 30;
     c.options.forEach((o, k) => {
       const bh = o.detail ? 62 : 46;
-      this._box(g, (w - bw) / 2, y, bw, bh, 'rgba(20,5,4,0.88)', '#6a2a14');
+      this._box(g, (w - bw) / 2, y, bw, bh, C.panel, C.edge);
       this._text(g, String(k + 1), (w - bw) / 2 + 22, y + bh / 2, { size: 26, color: C.ember, align: 'center', base: 'middle' });
       this._text(g, o.label, (w - bw) / 2 + 46, y + (o.detail ? 22 : bh / 2), { size: 17, base: 'middle' });
       if (o.detail) this._wrap(g, o.detail, (w - bw) / 2 + 46, y + 42, bw - 60, 12, C.ash);
       this.buttons.push({ x: w / 2, y: y + bh / 2, w: bw, h: bh, code: `Digit${k + 1}`, rect: true });
       y += bh + 10;
     });
-    this._text(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Press 1 or 2 to choose · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 13, color: C.ash, align: 'center' });
+    this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Press 1 or 2 to choose · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
   }
 
   _wrap(g, text, x, y, maxW, size, color) {
@@ -695,8 +829,9 @@ export class Hud {
     g.fillRect(0, 0, w, h);
     const e = this.endInfo || {};
     const big = Math.max(40, Math.min(110, w * 0.09));
-    this._text(g, won ? 'HELL IS CONQUERED' : 'YOU DIED', w / 2, h * 0.36, { size: won ? big * 0.75 : big, color: won ? '#ffd28a' : C.blood, align: 'center', glow: won ? 'rgba(255,120,0,0.8)' : 'rgba(255,0,0,0.6)' });
-    let y = h * 0.36 + 40;
+    this._text(g, won ? 'HELL IS CONQUERED' : 'YOU DIED', w / 2, h * 0.36, { size: won ? big * 0.75 : big, ls: big * 0.08, color: won ? '#ffd28a' : '#c01a0e', align: 'center', glow: won ? 'rgba(255,120,0,0.8)' : 'rgba(120,0,0,1)' });
+    this._divider(g, w / 2, h * 0.36 + 16, Math.min(w * 0.6, big * 7));
+    let y = h * 0.36 + 46;
     for (const line of e.lines || []) {
       this._text(g, line, w / 2, y, { size: 17, align: 'center' });
       y += 24;
@@ -706,9 +841,9 @@ export class Hud {
     const colW = Math.min(150, (w - 40) / Math.max(1, stats.length));
     stats.forEach(([label, value], k) => {
       const x = w / 2 + (k - (stats.length - 1) / 2) * colW;
-      this._text(g, label.toUpperCase(), x, y, { size: 11, color: C.ash, align: 'center' });
-      this._text(g, String(value), x, y + 32, { size: 28, color: C.ember, align: 'center' });
+      this._label(g, label, x, y, { size: 10, align: 'center' });
+      this._text(g, String(value), x, y + 32, { size: 28, color: C.ember, align: 'center', glow: 'rgba(160,30,0,0.9)' });
     });
-    if (e.ready) this._text(g, this.touch ? 'Tap to rise again at the surface' : 'Click to rise again at the surface', w / 2, y + 80, { size: 15, color: C.ash, align: 'center' });
+    if (e.ready) this._label(g, this.touch ? 'Tap to rise again at the surface' : 'Click to rise again at the surface', w / 2, y + 80, { size: 12, align: 'center', color: C.bone });
   }
 }

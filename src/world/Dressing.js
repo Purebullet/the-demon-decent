@@ -621,7 +621,7 @@ export class Dressing {
         void main() {
           vec2 p = vWorld.xz * 0.11 + uLayer * 7.3;
           float t = uTime * (0.05 + uLayer * 0.02);
-          float n = n2(p + vec2(t, t * 0.6)) * 0.55 + n2(p * 2.3 - vec2(t * 1.7, -t)) * 0.3 + n2(p * 5.1 + t * 2.0) * 0.15;
+          float n = n2(p + vec2(t, t * 0.6)) * 0.65 + n2(p * 2.3 - vec2(t * 1.7, -t)) * 0.35;
           float wisp = smoothstep(0.38, 0.85, n);
           float near = smoothstep(0.6, 4.0, vDepth);
           // Seen edge-on a sheet would stack into a hard band: fade it out.
@@ -631,7 +631,7 @@ export class Dressing {
           #include <fog_fragment>
         }`,
     });
-    const heights = [0.35, 0.95, 1.45];
+    const heights = [0.45, 1.25];
     this.mist = heights.map((y, i) => {
       const mat = this.mistMat.clone();
       mat.uniforms.uLayer.value = i;

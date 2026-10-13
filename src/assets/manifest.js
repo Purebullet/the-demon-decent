@@ -168,6 +168,13 @@ export const PROPS = {
   chest: { model: 'assets/models/chest.glb', size: 0.95, maxTris: 2500, prompt: `Ornate demonic treasure chest of dark charred wood bound with black iron bands, a horned skull on the lock plate, closed lid, ${LOOK}` },
   urn: { model: 'assets/models/urn.glb', size: 1.0, maxTris: 1200, prompt: `Tall cracked clay burial urn with a narrow neck, carved skull and rune motifs, dark terracotta glaze, ${LOOK}` },
   barrel: { model: 'assets/models/barrel.glb', size: 1.1, maxTris: 1200, prompt: `Old rotten wooden barrel bound with rusted iron hoops, splintered planks, bones poking out of the open top, ${LOOK}` },
+  // ---- The street view (scripts/make-lot.mjs): sharp rocks and broken
+  // pillars, sharing one texture atlas there.
+  spire: { model: 'assets/models/lot-spire.glb', size: 4, maxTris: 900, lot: true, prompt: `Tall razor-sharp spire of black volcanic obsidian rock, jagged splintered facets, several knife-like points, leaning, ${LOOK}` },
+  crag: { model: 'assets/models/lot-crag.glb', size: 2.5, maxTris: 900, lot: true, prompt: `Cluster of sharp jagged broken dark rock shards bursting up from the ground, splintered angular crystalline stone blades, ${LOOK}` },
+  pillarA: { model: 'assets/models/lot-pillar-a.glb', size: 5, maxTris: 1600, lot: true, prompt: `Tall ancient gothic stone pillar snapped off at a jagged angle near the top, carved demon faces, chunks missing, cracked plinth, ${LOOK}` },
+  pillarB: { model: 'assets/models/lot-pillar-b.glb', size: 3, maxTris: 1600, lot: true, prompt: `Short stump of a thick fluted stone column broken off low with a ragged top, fallen drum segment leaning against it, rubble at the base, ${LOOK}` },
+  pillarC: { model: 'assets/models/lot-pillar-c.glb', size: 4.5, maxTris: 1600, lot: true, prompt: `Ruined twisted spiral stone column wrapped in rusted chains, split down the middle with a crack, top shattered, skull carved on the base, ${LOOK}` },
   // ---- The surface and the sanctums.
   well: { model: 'assets/models/blood-well.glb', size: 2.7, prompt: `Ancient round stone well filled with dark blood, iron frame with hanging chains, ${LOOK}` },
   column: { model: 'assets/models/ruin-column.glb', size: 5.5, maxTris: 2500, prompt: `Broken ancient dark stone column snapped at the top, cracked fluted shaft, square plinth base, weathered gothic ruin, ${LOOK}` },

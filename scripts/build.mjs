@@ -39,7 +39,8 @@ const EXPERIENCE = {
 
 async function listModels() {
   try {
-    return (await readdir(join(root, 'assets/models'))).filter((f) => f.endsWith('.glb')).sort();
+    // lot-*.glb are for the street view only (scripts/make-lot.mjs).
+    return (await readdir(join(root, 'assets/models'))).filter((f) => f.endsWith('.glb') && !f.startsWith('lot-')).sort();
   } catch {
     return [];
   }

@@ -154,6 +154,31 @@
       "id": 245,
       "source": "objects",
       "status": "done"
+    },
+    "spire": {
+      "id": 246,
+      "source": "objects",
+      "status": "done"
+    },
+    "crag": {
+      "id": 247,
+      "source": "objects",
+      "status": "done"
+    },
+    "pillarA": {
+      "id": 248,
+      "source": "objects",
+      "status": "done"
+    },
+    "pillarB": {
+      "id": 249,
+      "source": "objects",
+      "status": "done"
+    },
+    "pillarC": {
+      "id": 250,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

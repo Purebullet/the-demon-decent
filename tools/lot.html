@@ -8,7 +8,18 @@
 <body>
 <!-- Driven by scripts/make-lot.mjs: builds the street-view LODs in a browser (canvas textures). -->
 <script type="module">
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
   import { buildLot } from '../src/lot/buildLot.js';
+  // The generated street-view pieces (assets/models/lot-*.glb).
+  const loader = new GLTFLoader();
+  window.lotModels = {};
+  for (const kind of ['spire', 'crag', 'pillar-a', 'pillar-b', 'pillar-c']) {
+    try {
+      window.lotModels[kind] = (await loader.loadAsync(`../assets/models/lot-${kind}.glb`)).scene;
+    } catch (e) {
+      console.warn(`No lot-${kind}.glb: ${e.message}`);
+    }
+  }
   window.buildLot = buildLot;
   window.ready = true;
 </script>

@@ -545,13 +545,14 @@ export class Surface {
     const tex = fogPuffTexture(11);
     this.fogSprites = [];
     const r = this.rand;
-    for (let i = 0; i < 70; i++) {
-      const inner = i < 46;
+    // (Fewer, bigger banks: each is a full-screen layer of overdraw up close.)
+    for (let i = 0; i < 36; i++) {
+      const inner = i < 24;
       const a = r() * Math.PI * 2;
       const rad = inner ? PIT_RADIUS - 1 + r() * 7 : 12 + r() * 22;
       const m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: inner ? 0.3 : 0.2, color: 0x2a1c1a });
       const s = new THREE.Sprite(m);
-      const size = inner ? 6 + r() * 7 : 10 + r() * 10;
+      const size = inner ? 8 + r() * 8 : 13 + r() * 10;
       s.scale.set(size, size * 0.55, 1);
       const y = inner ? 0.4 + r() * 2.2 : 0.6 + r() * 1.5;
       s.position.set(Math.cos(a) * rad, y, Math.sin(a) * rad);

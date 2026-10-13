@@ -47,6 +47,7 @@ const port = server.address().port;
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('page error:', e.message));
+page.on('console', (m) => { if (m.type() === 'warning' || m.type() === 'error') console.error('page:', m.text()); });
 await page.goto(`http://127.0.0.1:${port}/tools/lot.html`);
 await page.waitForFunction(() => window.ready === true);
 const lods = await page.evaluate((d) => window.buildLot(d), { width, depth, height });
@@ -68,6 +69,7 @@ for (const [name, l] of Object.entries(lods)) {
 // billows up out of the hole and lava spits out of it onto the slopes, all
 // on the world clock so every viewer sees the same.
 const { rc, rb, hm } = lods.lod0.dims;
+const landing = lods.lod0.landing;
 const edge = Math.min(width, depth) / 2 - 0.5;
 await writeFile(
   join(out, 'lot.json'),
@@ -75,7 +77,7 @@ await writeFile(
     {
       materials: {
         Glow: { surface: 'glow.glsl', glow: 2 },
-        Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: false, glow: 0.4, uniforms: { rise: +(height * 0.75).toFixed(2), spread: +(rc * 0.9).toFixed(2) } },
+        Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2) } },
       },
       script: 'build.js',
@@ -86,45 +88,67 @@ await writeFile(
 );
 await writeFile(
   join(out, 'fog-common.glsl'),
-  `// Shared by the fog's two stages: where a puff is in its slow climb (0 just
-// out of the pit, 1 dissolved high above it). uv.x is the puff's phase.
-float fogAge(vec2 uv) {
-  return fract(p0Time * 0.045 + uv.x);
+  `// Shared by the fog's two stages. Each puff is four crossed quads; a
+// vertex's UV is its quad corner (whole part) plus the puff's phase
+// (fraction). vLocal is the corner (0..1) for the soft round edge, vAge the
+// puff's age through its climb (0 out of the pit, 1 gone).
+varying vec2 vLocal;
+varying float vAge;
+varying float vSeed;
+float fogHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
-float fogHash(vec3 p) {
-  return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+float fogNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(fogHash(i), fogHash(i + vec2(1.0, 0.0)), u.x), mix(fogHash(i + vec2(0.0, 1.0)), fogHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 `,
 );
 await writeFile(
   join(out, 'fog-vertex.glsl'),
-  `// Each puff climbs out of the pit, drifts outward and swells as it rises,
-// its surface churning so it reads as billowing smoke, not a ball.
+  `// Puffs climb out of the pit slowly, swelling and drifting outward and
+// turning as they rise, then thin away; the cycle repeats on the world clock.
 vec3 p0Vertex(vec3 position, vec3 normal, vec2 uv) {
-  float k = fogAge(uv);
-  vec3 centre = position - normal * uv.y;
-  vec2 out2 = length(centre.xz) > 0.01 ? normalize(centre.xz) : vec2(1.0, 0.0);
-  centre.xz += out2 * spread * k * k;
-  centre.y += rise * k;
-  float churn = 0.75 + 0.35 * sin(p0Time * 0.9 + dot(normal, vec3(5.1, 3.7, 4.3)) + uv.x * 40.0);
-  float size = uv.y * (0.55 + 2.6 * k) * churn;
-  return centre + normal * size;
+  float phase = fract(uv.x);
+  vec2 corner = vec2(floor(uv.x + 0.001), floor(uv.y + 0.5));
+  vec3 n = normalize(normal);
+  vec3 up = vec3(0.0, 1.0, 0.0);
+  vec3 t = abs(n.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : normalize(cross(up, n));
+  vec3 b = abs(n.y) > 0.9 ? vec3(0.0, 0.0, -1.0) : up;
+  vec3 offset = t * (corner.x - 0.5) + b * (corner.y - 0.5);
+  vec3 centre = position - offset * puff;
+  float k = fract(p0Time * 0.038 + phase);
+  vAge = k;
+  vLocal = corner;
+  vSeed = phase * 37.0;
+  vec2 dir = length(centre.xz) > 0.01 ? normalize(centre.xz) : vec2(cos(phase * 40.0), sin(phase * 40.0));
+  centre.xz += dir * spread * k * (0.6 + 0.4 * k);
+  centre.y += rise * k * (0.8 + 0.2 * k);
+  // Turn the puff slowly so its quads never line up edge-on for long.
+  float a = p0Time * 0.12 + phase * 6.28;
+  mat2 r = mat2(cos(a), -sin(a), sin(a), cos(a));
+  offset.xz = r * offset.xz;
+  float size = puff * (1.0 + 4.2 * k);
+  return centre + offset * size;
 }
 `,
 );
 await writeFile(
   join(out, 'fog.glsl'),
-  `// Dark smoke lit red from below, soft at its edges, thickest just out of
-// the pit and thinning to nothing as it climbs.
+  `// Soft, torn edges of dark smoke, lit red from the pit beneath while it is
+// low, thinning to nothing as it climbs.
 void p0Surface(inout P0Surface s) {
-  float k = fogAge(s.uv);
-  float facing = max(dot(s.normal, s.view), 0.0);
-  float edge = smoothstep(0.0, 0.6, facing);
-  float life = smoothstep(0.0, 0.08, k) * (1.0 - smoothstep(0.45, 1.0, k));
-  s.alpha = 0.62 * edge * life;
-  s.color = vec3(0.07, 0.055, 0.06);
-  float under = pow(1.0 - k, 3.0) * (0.5 + 0.5 * max(-s.normal.y, 0.0));
-  s.emissive = vec3(1.0, 0.22, 0.04) * under * (0.55 + 0.25 * sin(p0Time * 1.4));
+  vec2 c = vLocal - 0.5;
+  float d = length(c) * 2.0;
+  float n = fogNoise(vLocal * 3.0 + vec2(vSeed, p0Time * 0.15)) * 0.65 + fogNoise(vLocal * 7.0 - vec2(p0Time * 0.2, vSeed)) * 0.35;
+  float shape = smoothstep(1.0, 0.25, d + (n - 0.5) * 0.7);
+  float life = smoothstep(0.0, 0.1, vAge) * (1.0 - smoothstep(0.5, 1.0, vAge));
+  s.alpha = shape * life * (0.32 + 0.25 * n);
+  s.color = vec3(0.055, 0.045, 0.05);
+  float glow = pow(1.0 - vAge, 2.5);
+  s.emissive = vec3(0.9, 0.16, 0.03) * glow * (0.35 + 0.5 * n) * (0.8 + 0.2 * sin(p0Time * 1.3 + vSeed));
 }
 `,
 );
@@ -166,56 +190,66 @@ void p0Surface(inout P0Surface s) {
 );
 await writeFile(
   join(out, 'build.js'),
-  `// Now and then the pit spits a gob of lava: it arcs out of the hole, lands
-// on the slope around it, cools and sinks away. Throws come from the world
-// clock and a hash of the throw number, so every viewer sees the same ones.
+  `// Now and then the pit spits a gob of lava: it arcs out of the hole and
+// lands on the slope around it (on one of the measured spots below, so it
+// sits exactly on the rock), splats, smoulders there for a few seconds and
+// shrinks away. Throws come from the world clock and a hash of the throw
+// number, so every viewer sees the same ones.
 const LAVA = 6
-const PERIOD = 2.6
-const FLIGHT = 1.7
-const COOL = 2.2
+const PERIOD = 2.2
+const FLIGHT = 1.6
+const SPLAT = 0.15
+const REST = 2.6
+const FADE = 0.7
 const PIT = ${rb.toFixed(2)}
-const LIP = ${rc.toFixed(2)}
-const MOUND = ${hm.toFixed(2)}
-const EDGE = ${edge.toFixed(2)}
+// Landing spots on the slopes, [x, y, z], measured when the lot was built.
+const SPOTS = ${JSON.stringify(landing)}
 const hash = (n) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453
   return x - Math.floor(x)
 }
-// Height of the slope at distance r from the middle (the mound's profile).
-const ground = (r) => {
-  if (r <= LIP) return MOUND
-  const k = Math.min(1, (r - LIP) / Math.max(0.1, EDGE - LIP))
-  return MOUND * Math.pow(1 - k, 1.6) + 0.1
-}
+const LIFE = FLIGHT + SPLAT + REST + FADE
 export default function build(b) {
   b.loop((dt, t) => {
     for (let i = 0; i < LAVA; i++) {
       // Gob i flies on throws i, i + LAVA, ...; a throw starts every PERIOD s.
       const slot = Math.floor((t / PERIOD - i) / LAVA)
       const n = slot * LAVA + i
-      const start = n * PERIOD
-      const age = t - start
-      const skip = hash(n * 3.1) < 0.35
-      if (skip || age < 0 || age > FLIGHT + COOL) {
+      const age = t - n * PERIOD
+      if (hash(n * 3.1) < 0.3 || age < 0 || age > LIFE || !SPOTS.length) {
         b.node('Lava' + i, { scale: [0.001, 0.001, 0.001] })
         continue
       }
-      const a = hash(n) * Math.PI * 2
+      const to = SPOTS[Math.floor(hash(n) * SPOTS.length)]
+      const a = Math.atan2(to[2], to[0])
       const from = [Math.cos(a) * PIT * 0.4, 0.4, Math.sin(a) * PIT * 0.4]
-      const dist = LIP * (1.05 + hash(n + 7.7) * 0.6)
-      const to = [Math.cos(a) * dist, ground(dist), Math.sin(a) * dist]
       const peak = Math.max(to[1], 0) + 5 + hash(n + 2.2) * 6
       if (age <= FLIGHT) {
         const k = age / FLIGHT
         const y = from[1] + (to[1] - from[1]) * k + 4 * (peak - Math.max(from[1], to[1])) * k * (1 - k)
         const s = 1 + 0.25 * Math.sin(age * 18)
         b.node('Lava' + i, { position: [from[0] + (to[0] - from[0]) * k, y, from[2] + (to[2] - from[2]) * k], scale: [s, s * 1.3, s] })
-      } else {
-        // Landed: splats flat, then cools and sinks.
-        const c = (age - FLIGHT) / COOL
-        const w = 1.6 * (1 - c * 0.6)
-        b.node('Lava' + i, { position: [to[0], to[1] - c * 0.3, to[2]], scale: [w, 0.35 * (1 - c), w] })
+        continue
       }
+      // On the ground: a quick splat, a puddle that smoulders and slowly
+      // shrinks, then goes out.
+      const g = age - FLIGHT
+      let w
+      let hgt
+      if (g < SPLAT) {
+        const k = g / SPLAT
+        w = 1 + k * 0.9
+        hgt = 1 - k * 0.7
+      } else if (g < SPLAT + REST) {
+        const k = (g - SPLAT) / REST
+        w = 1.9 - k * 0.4 + Math.sin(g * 6) * 0.03
+        hgt = 0.3 - k * 0.08
+      } else {
+        const k = (g - SPLAT - REST) / FADE
+        w = 1.5 * (1 - k)
+        hgt = 0.22 * (1 - k)
+      }
+      b.node('Lava' + i, { position: [to[0], to[1] + 0.02, to[2]], scale: [Math.max(0.001, w), Math.max(0.001, hgt), Math.max(0.001, w)] })
     }
   })
 }
