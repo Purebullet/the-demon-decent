@@ -6,7 +6,7 @@ import { C, burst } from '../world/Particles.js';
 import { Assets } from '../assets/AssetLibrary.js';
 
 // Loot on the cavern floor. Potions and spell sigils are taken by walking
-// over them; weapons need E so a good blade is never swapped by accident.
+// over them; weapons need F so a good blade is never swapped by accident.
 
 const flaskBody = new THREE.SphereGeometry(0.16, 14, 10);
 const flaskNeck = new THREE.CylinderGeometry(0.05, 0.06, 0.14, 10);
@@ -104,7 +104,7 @@ export class Pickups {
         this.nearWeapon = it;
       }
     }
-    if (this.nearWeapon && ctx.input.wasPressed('KeyE')) {
+    if (this.nearWeapon && ctx.input.wasPressed('KeyF')) {
       const it = this.nearWeapon;
       const old = run.weapon;
       ctx.player.setWeapon(it.weapon);
@@ -122,7 +122,7 @@ export class Pickups {
     if (!it) return null;
     const w = it.weapon;
     const def = WEAPON_TYPES[w.type];
-    return `<b>E</b> take <span style="color:${w.color}">${w.name}</span> (${def.label}, ${w.damage} dmg) &mdash; holding ${run.weapon.name} (${run.weapon.damage})`;
+    return `<b>F</b> take <span style="color:${w.color}">${w.name}</span> (${def.label}, ${w.damage} dmg) &mdash; holding ${run.weapon.name} (${run.weapon.damage})`;
   }
 
   _take(i, ctx, label) {

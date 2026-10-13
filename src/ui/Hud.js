@@ -420,17 +420,9 @@ export class Hud {
     g.fillStyle = hg;
     g.fillRect(pad + 1, hy + 1, (hw - 2) * frac, 20);
     this._text(g, `${Math.ceil(r.health)} / ${r.maxHealth}`, pad + hw / 2, hy + 12, { size: 13, align: 'center', base: 'middle' });
-    for (let k = 0; k < r.potionCap; k++) {
-      const fx = pad + k * 20;
-      const fy = hy + 30;
-      g.fillStyle = k < r.potions ? '#c8141a' : 'rgba(30,6,6,0.8)';
-      g.strokeStyle = '#7a3a30';
-      g.beginPath();
-      g.roundRect ? g.roundRect(fx, fy, 14, 20, [3, 3, 7, 7]) : g.rect(fx, fy, 14, 20);
-      g.fill();
-      g.stroke();
-    }
-    let bx = pad + r.potionCap * 20 + 10;
+    for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, pad + k * 24, hy + 28, k < r.potions);
+    this._text(g, 'E', pad + r.potionCap * 24 + 2, hy + 40, { size: 11, color: C.ash, base: 'middle' });
+    let bx = pad + r.potionCap * 24 + 18;
     if (p.siphonT > 0) bx += this._tag(g, `Blood Siphon ${Math.ceil(p.siphonT)}s`, bx, hy + 40, '#ff6a5a') + 8;
     if (p.invuln > 0.25) this._tag(g, 'Invulnerable', bx, hy + 40, '#c9a0ff');
 
@@ -504,8 +496,52 @@ export class Hud {
     const by = h - 150;
     btn(bx, by, 34, 'STRIKE', 'Mouse0');
     btn(bx - 80, by + 30, 28, 'DODGE', 'Space');
-    btn(bx - 40, by - 75, 26, 'POTION', 'KeyF');
-    btn(bx + 20, by - 80, 24, 'USE', 'KeyE');
+    btn(bx - 40, by - 75, 26, 'POTION', 'KeyE');
+    btn(bx + 20, by - 80, 24, 'USE', 'KeyF');
+  }
+
+  // A little round-bellied flask: cork, neck, glass body with the blood-red
+  // draught and a highlight; an empty one is dark glass.
+  _potionIcon(g, x, y, full) {
+    const cx = x + 10;
+    g.save();
+    g.lineWidth = 1.5;
+    // Cork and neck.
+    g.fillStyle = full ? '#8a5a32' : '#3a2a20';
+    g.fillRect(cx - 3, y, 6, 4);
+    g.fillStyle = full ? 'rgba(200,190,200,0.35)' : 'rgba(80,70,80,0.3)';
+    g.strokeStyle = full ? '#d8c8c0' : '#4a3a38';
+    g.beginPath();
+    g.rect(cx - 2.5, y + 4, 5, 5);
+    g.fill();
+    g.stroke();
+    // Body.
+    g.beginPath();
+    g.arc(cx, y + 16, 8, 0, Math.PI * 2);
+    g.fillStyle = full ? 'rgba(40,10,14,0.9)' : 'rgba(20,12,14,0.85)';
+    g.fill();
+    if (full) {
+      const lg = g.createRadialGradient(cx - 2, y + 15, 1, cx, y + 17, 8);
+      lg.addColorStop(0, '#ff5a4a');
+      lg.addColorStop(0.6, '#c8141a');
+      lg.addColorStop(1, '#5a0408');
+      g.fillStyle = lg;
+      g.beginPath();
+      g.arc(cx, y + 16, 7, -0.15 * Math.PI, 1.15 * Math.PI, true);
+      g.closePath();
+      g.fill();
+    }
+    g.strokeStyle = full ? '#e0c8c0' : '#4a3a38';
+    g.beginPath();
+    g.arc(cx, y + 16, 8, 0, Math.PI * 2);
+    g.stroke();
+    if (full) {
+      g.fillStyle = 'rgba(255,255,255,0.6)';
+      g.beginPath();
+      g.ellipse(cx - 3.5, y + 13, 1.4, 2.6, -0.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
   }
 
   _paintAnnouncement(g) {
@@ -590,8 +626,8 @@ export class Hud {
       const rows = [
         ['W A S D', 'move', 'Mouse', 'aim'],
         ['Left click', 'attack', 'Space / Shift', 'dodge'],
-        ['F', 'drink potion', '1 2 3', 'demon spells'],
-        ['E', 'take / use', 'M', 'mute'],
+        ['E', 'drink potion', '1 2 3', 'demon spells'],
+        ['F', 'take / use', '', ''],
       ];
       let cy = Math.max(y + 20, h - 24 - rows.length * 19);
       for (const [a, b, c2, d] of rows) {

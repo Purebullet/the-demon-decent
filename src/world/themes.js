@@ -1,3 +1,5 @@
+import { Color } from 'three';
+
 // How each floor looks. A floor names its look in LevelData.js (`look`);
 // a look sets the cavern's palette and light and which generated props dress
 // it, so the descent passes through distinct places (dripping fungus caves,
@@ -421,7 +423,12 @@ export function lookFor(def, floor, rand) {
   look.rock = base.rock.map((v) => j(v, 0.12) * 0.85);
   look.hemi = base.hemi * 1.3;
   look.ground = base.ground.map((v) => Math.round(j(v, 0.12)));
-  look.ceiling = j(base.ceiling, 0.1);
+  // Vaulted: the roof is lost in the dark far overhead.
+  look.ceiling = j(base.ceiling, 0.1) * 1.9;
+  // Distance fog close to black, tinted by the look, so whatever lies past
+  // the torchlight sinks into darkness rather than a flat coloured haze.
+  look.mist = base.fog;
+  look.fog = new Color(base.fog).multiplyScalar(0.35).getHex();
   look.hang = j(base.hang, 0.3);
   look.density = j(base.density, 0.2);
   // The deep (floors 11+) runs hotter: faint molten veins where none are set.

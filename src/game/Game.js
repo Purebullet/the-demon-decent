@@ -120,7 +120,7 @@ export class Game {
     this._resize();
     this.fsm.change('title');
     host.hud(
-      'WASD move · mouse aim · click attack · Space/Shift dodge · F potion · 1 2 3 spells · E take/use · M mute.\n' +
+      'WASD move · mouse aim · click attack · Space/Shift dodge · E potion · 1 2 3 spells · F take/use.\n' +
         'Twenty floors, one life: die and you start again at the surface. Your deepest floor goes on the weekly table.\n' +
         'Click or press any key for sound.',
     );
@@ -682,7 +682,7 @@ export class Game {
     const focused = sc.focusedNode(this.camera);
     sc.update(dt, this.ctx, focused);
     this._updateFlash(dt);
-    if (!this.choice && focused && this.input.wasPressed('KeyE')) {
+    if (!this.choice && focused && this.input.wasPressed('KeyF')) {
       const options = NODES[focused.key].options(this.run);
       if (!options.length) this.hud.toast('The circle is silent: your spells are complete.');
       else {
@@ -696,8 +696,8 @@ export class Game {
     }
     let prompt = '';
     if (sc.portalOpen) prompt = 'The way down is open';
-    else if (focused) prompt = `<b>E</b> ${NODES[focused.key].title}`;
-    else prompt = 'Approach an altar and press <b>E</b>';
+    else if (focused) prompt = `<b>F</b> ${NODES[focused.key].title}`;
+    else prompt = 'Approach an altar and press <b>F</b>';
     this.hud.update(dt, p, this.run, { floorLabel: `Sanctum — before Floor ${sc.nextFloor}`, enemyLabel: '', best: this.best, prompt });
   }
 
@@ -772,7 +772,6 @@ export class Game {
       else this.input.pressed.add(code);
       this.input.claimTap?.();
     }
-    if (this.input.wasPressed('KeyM')) this.audio.setMuted(!this.audio.muted);
     if (this.input.pressed.size || this.input.mouseClicked[0]) this.audio.init();
     if (this.paused && (this.input.mouseClicked[0] || this.input.taps.length)) this.input.requestLock();
 

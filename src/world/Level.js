@@ -241,6 +241,7 @@ export class Level {
     this.time += dt;
     const t = this.time;
     this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.viewRange);
+    this.dressing.tick(t);
     if (this.lavaMat) this.lavaMat.uniforms.uTime.value = t;
     this.portalMat.uniforms.uTime.value = t;
     this.portalT = Math.min(1, this.portalT + (this.exitOpen ? dt * 0.8 : 0));

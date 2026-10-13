@@ -181,7 +181,7 @@ export class Player {
 
     if (ctx.combat) {
       for (const id of SPELL_IDS) if (input.wasPressed(SPELLS[id].key)) castSpell(id, this, ctx);
-      if ((input.wasPressed('KeyF') || input.wasPressed('KeyR')) && this.drinkT <= 0) this.drinkPotion(ctx);
+      if ((input.wasPressed('KeyE') || input.wasPressed('KeyR')) && this.drinkT <= 0) this.drinkPotion(ctx);
       if ((input.wasPressed('Space') || input.wasPressed('ShiftLeft') || input.wasPressed('ShiftRight')) && this.dodgeCd <= 0 && this.dodgeT <= 0 && !this.dash) {
         this.moveDirection(this.dodgeDir);
         if (this.dodgeDir.lengthSq() < 0.01) this.dodgeDir.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));

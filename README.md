@@ -18,10 +18,9 @@ npm run build      # dist/experience/ + dist/experience.zip (Project 0) and dist
 | W A S D, mouse | Move, aim (click to capture the mouse; drag to look also works) |
 | Left click (hold to chain) | Melee attack |
 | Space / Shift | Dodge (invulnerability frames) |
-| F | Drink a health potion |
+| E | Drink a health potion |
 | 1 2 3 | Demon spells: Hellfire Nova, Shade Step, Blood Siphon |
-| E | Take a weapon, wake a sanctum altar |
-| M | Mute |
+| F | Take a weapon, wake a sanctum altar |
 
 On phones: the city's stick moves; tap to strike, drag to look; on-screen buttons dodge, drink, use and cast.
 

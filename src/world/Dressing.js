@@ -115,6 +115,8 @@ export class Dressing {
     this._exitGate();
     this._throne();
     this._glowSprites();
+    this._backing();
+    this._mist();
   }
 
   // Themed material for a prop, made once per floor.
@@ -315,10 +317,11 @@ export class Dressing {
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
-    const room = this.ceiling - 2.9;
+    const room = this.ceiling - 3.2;
     for (const t of this.d.floorTiles) {
       if (r() > this.look.hang) continue;
-      const k = Math.min((0.3 + r() * 0.6) * (src ? 1 : 1.8), room / size);
+      // Long fangs from the vault: 1.5 to 5 m.
+      const k = Math.min((0.6 + r() * 1.5) * (src ? 1 : 1.8), room / size);
       p.set(t.x + (r() - 0.5) * 1.6, this.ceiling + 0.05, t.z + (r() - 0.5) * 1.6);
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, r() * Math.PI * 2);
       s.set(k * (0.8 + r() * 0.4), k, k * (0.8 + r() * 0.4));
@@ -372,7 +375,12 @@ export class Dressing {
     for (const pl of this.d.pillars) {
       const id = ids.length ? ids[Math.floor(r() * ids.length)] : null;
       const yaw = r() * Math.PI * 2;
-      if (id === 'pillar') this._place('pillar', pl.x, pl.z, { yaw, stretchY: this.ceiling / Assets.props.get('pillar').entry.size });
+      if (id === 'pillar') {
+        // Grown to reach the vault: partly wider, partly taller.
+        const size = Assets.props.get('pillar').entry.size;
+        const k = Math.pow(this.ceiling / size, 0.55);
+        this._place('pillar', pl.x, pl.z, { yaw, scale: k, stretchY: this.ceiling / (size * k) });
+      }
       else if (id === 'crystal') this._place('crystal', pl.x, pl.z, { yaw, scale: 1.5 + r() * 0.4 });
       else if (id === 'stalagmite') this._place('stalagmite', pl.x, pl.z, { yaw, scale: 1.5 + r() * 0.5 });
       else if (id) this._place(id, pl.x, pl.z, { yaw, scale: 1 + r() * 0.15 });
@@ -437,7 +445,7 @@ export class Dressing {
             add('chains', m.compose(p, q, s.set(0.5, (gap + 0.2) / cs, 0.5)).clone());
           }
         } else {
-          const len = Math.min(size * sc, this.ceiling - 3);
+          const len = Math.min(size * sc * 1.6, this.ceiling - 3.2);
           p.set(x, this.ceiling - len, z);
           add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.set(sc, len / size, sc)).clone());
         }
@@ -508,6 +516,104 @@ export class Dressing {
       sp.scale.setScalar(g.size * 1.5);
       this._chunk(g.x, g.z).add(sp);
     }
+  }
+
+  // Solid black rock one tile behind the boulder walls, floor to vault, so
+  // no gap between the boulders ever shows the void beyond the map.
+  _backing() {
+    const geo = new THREE.BoxGeometry(TILE, this.ceiling + 0.2, TILE);
+    geo.translate(0, (this.ceiling + 0.2) / 2 - 0.1, 0);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const m = new THREE.Matrix4();
+    const d = this.d;
+    const edge = new Set(this.wallTiles.map((t) => t.r * d.cols + t.c));
+    const behind = new Set();
+    for (const t of this.wallTiles) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const c = t.c + dc;
+          const r = t.r + dr;
+          if (c < 0 || r < 0 || c >= d.cols || r >= d.rows) continue;
+          const k = r * d.cols + c;
+          if (!edge.has(k) && !d.nav.isWalkable(c, r)) behind.add(k);
+        }
+      }
+    }
+    const list = [...behind].map((k) => m.makeTranslation(((k % d.cols) + 0.5) * TILE, 0, (Math.floor(k / d.cols) + 0.5) * TILE).clone());
+    this._instances(geo, mat, list);
+  }
+
+  // Ground mist: three drifting sheets of noise at knee, waist and chest
+  // height that you wade through, thicker in the hollows, glowing faintly
+  // with the floor's light, thinning out as they approach you so they never
+  // smear across the view. One mesh, one draw each.
+  _mist() {
+    const d = this.d;
+    const W = d.cols * TILE;
+    const H = d.rows * TILE;
+    // Pale ash-grey with a breath of the floor's glow in it.
+    const tint = new THREE.Color(0x6a6468).lerp(new THREE.Color(this.look.glow), 0.08).multiplyScalar(0.5);
+    this.mistMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      fog: true,
+      side: THREE.DoubleSide,
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uColor: { value: tint }, uLayer: { value: 0 } }]),
+      vertexShader: /* glsl */ `
+        #include <fog_pars_vertex>
+        varying vec3 vWorld;
+        varying float vDepth;
+        varying float vSlope;
+        void main() {
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          vSlope = abs(normalize(cameraPosition - wp.xyz).y);
+          vec4 mvPosition = viewMatrix * wp;
+          vDepth = -mvPosition.z;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */ `
+        #include <fog_pars_fragment>
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform float uLayer;
+        varying vec3 vWorld;
+        varying float vDepth;
+        varying float vSlope;
+        float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float n2(vec2 p) {
+          vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h(i), h(i + vec2(1.0, 0.0)), u.x), mix(h(i + vec2(0.0, 1.0)), h(i + vec2(1.0, 1.0)), u.x), u.y);
+        }
+        void main() {
+          vec2 p = vWorld.xz * 0.11 + uLayer * 7.3;
+          float t = uTime * (0.05 + uLayer * 0.02);
+          float n = n2(p + vec2(t, t * 0.6)) * 0.55 + n2(p * 2.3 - vec2(t * 1.7, -t)) * 0.3 + n2(p * 5.1 + t * 2.0) * 0.15;
+          float wisp = smoothstep(0.38, 0.85, n);
+          float near = smoothstep(0.6, 4.0, vDepth);
+          // Seen edge-on a sheet would stack into a hard band: fade it out.
+          float slope = smoothstep(0.04, 0.3, vSlope);
+          float a = wisp * near * slope * (0.28 - uLayer * 0.05);
+          gl_FragColor = vec4(uColor * (0.6 + 0.6 * n), a);
+          #include <fog_fragment>
+        }`,
+    });
+    const heights = [0.35, 0.95, 1.45];
+    this.mist = heights.map((y, i) => {
+      const mat = this.mistMat.clone();
+      mat.uniforms.uLayer.value = i;
+      const sheet = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat);
+      sheet.rotation.x = -Math.PI / 2;
+      sheet.position.set(W / 2, y, H / 2);
+      sheet.renderOrder = 2;
+      this.group.add(sheet);
+      return mat;
+    });
+  }
+
+  tick(t) {
+    for (const m of this.mist || []) m.uniforms.uTime.value = t;
   }
 
   // Up to `n` glowing set pieces spread over the floor, for point lights.
