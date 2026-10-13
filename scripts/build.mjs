@@ -82,6 +82,8 @@ async function buildExperience() {
   if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com); creatures rigged and animated in code' });
   await writeFile(join(out, 'experience.json'), `${JSON.stringify({ ...EXPERIENCE, credits }, null, 2)}\n`);
   const a = await copyAssets(out);
+  // PNG textures inside the models as JPEG: half the download.
+  execFileSync('python3', [join(root, 'scripts/shrink-textures.py'), join(out, 'assets/models')], { stdio: 'inherit' });
   await rm(join(dist, 'experience.zip'), { force: true });
   execFileSync('zip', ['-qr', join(dist, 'experience.zip'), '.'], { cwd: out });
   const zipSize = (await stat(join(dist, 'experience.zip'))).size;
