@@ -31,7 +31,7 @@ export class Sanctum {
     const floorMap = map.clone();
     floorMap.repeat.set(5, 5);
     floorMap.needsUpdate = true;
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(R + 1, 48), new THREE.MeshStandardMaterial({ map: floorMap, bumpMap: bump, bumpScale: 2, roughness: 0.95 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(R + 1, 96), new THREE.MeshStandardMaterial({ map: floorMap, bumpMap: bump, bumpScale: 2, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2;
     this.group.add(floor);
 
@@ -41,7 +41,7 @@ export class Sanctum {
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
       const h = 5 + rr() * 3;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, h, 10), stone);
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, h, 24), stone);
       col.position.set(Math.cos(a) * R, h / 2, Math.sin(a) * R);
       this.group.add(col);
       const wall = new THREE.Mesh(new THREE.BoxGeometry(4.6, 9, 1.4), stone);
@@ -50,7 +50,7 @@ export class Sanctum {
       wall.rotation.y = -b + Math.PI / 2;
       this.group.add(wall);
     }
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(R + 2, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x0c0606, side: THREE.BackSide, roughness: 1 }));
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(R + 2, 48, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x0c0606, side: THREE.BackSide, roughness: 1 }));
     dome.position.y = 6;
     this.group.add(dome);
 
@@ -61,7 +61,7 @@ export class Sanctum {
       const a = rr() * Math.PI * 2;
       const r = 8.5 + rr() * 1.8;
       const h = 0.15 + rr() * 0.35;
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, h, 8), wax);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, h, 14), wax);
       c.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
       this.group.add(c);
       this.candles.push(new THREE.Vector3(c.position.x, h + 0.05, c.position.z));
@@ -89,13 +89,13 @@ export class Sanctum {
   _bloodWell(x, z) {
     const n = this._node('well', x, z, 0xff1a1a, 1.4);
     const stone = new THREE.MeshStandardMaterial({ color: 0x3a3230, roughness: 0.9 });
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.28, 10, 28), stone);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.28, 18, 56), stone);
     rim.rotation.x = -Math.PI / 2;
     rim.position.y = 0.75;
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.25, 0.75, 28, 1, true), stone);
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.25, 0.75, 56, 1, true), stone);
     wall.position.y = 0.37;
     this.wellMat = bloodMaterial();
-    const blood = new THREE.Mesh(new THREE.CircleGeometry(1.0, 32), this.wellMat);
+    const blood = new THREE.Mesh(new THREE.CircleGeometry(1.0, 64), this.wellMat);
     blood.rotation.x = -Math.PI / 2;
     blood.position.y = 0.62;
     const gen = Assets.instanceProp('well');
@@ -109,11 +109,11 @@ export class Sanctum {
     // Iron frame and chain.
     const iron = new THREE.MeshStandardMaterial({ color: 0x2a2626, metalness: 0.8, roughness: 0.5 });
     for (const s of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 2.6, 8), iron);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 2.6, 14), iron);
       post.position.set(s * 1.25, 1.3, 0);
       n.group.add(post);
     }
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 8), iron);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 14), iron);
     bar.rotation.z = Math.PI / 2;
     bar.position.y = 2.55;
     n.group.add(bar);
@@ -153,11 +153,11 @@ export class Sanctum {
   _burningSigil(x, z) {
     const n = this._node('sigil', x, z, 0xff7a20, 1.2);
     const iron = new THREE.MeshStandardMaterial({ color: 0x1e1a18, metalness: 0.7, roughness: 0.5 });
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 0.5, 10), iron);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 0.5, 28), iron);
     base.position.y = 0.25;
     n.group.add(base);
     const ringMat = new THREE.MeshStandardMaterial({ color: 0x331a0a, emissive: 0xff5a10, emissiveIntensity: 1.8, metalness: 0.5, roughness: 0.4 });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 8, 40), ringMat);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 12, 80), ringMat);
     ring.position.y = 2.0;
     const glyph = new THREE.Mesh(
       new THREE.PlaneGeometry(2.0, 2.0),
@@ -180,7 +180,7 @@ export class Sanctum {
     const g = new THREE.Group();
     g.position.copy(this.portalPos);
     this.portalMat = portalMaterial();
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.5, 40), this.portalMat);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.5, 72), this.portalMat);
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = 0.05;
     g.add(disc);

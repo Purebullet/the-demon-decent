@@ -81,7 +81,7 @@ burning), **Storm Chain** (lightning to three more demons within 7 m, or down on
 detonates, 4.5 m), **Phantom Echo** (a ghost blade repeats the blow at 60%).
 
 Eleven relics (chests: the first always holds one; elite demons from floor 3; bosses) and five
-weapon enchantments (tier 1+ weapons) carry them. Passive relics change rules: a wider window,
+weapon enchantments (Uncommon weapons and rarer, more often the rarer) carry them. Passive relics change rules: a wider window,
 less damage and shorter staggers, a farther torch and brighter tells, or every blow after you are
 struck counting as a counter.
 

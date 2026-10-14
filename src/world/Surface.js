@@ -330,7 +330,7 @@ export class Surface {
       return gen;
     }
     const g = new THREE.Group();
-    const shaftGeo = new THREE.CylinderGeometry(0.55, 0.62, h, 12, 4);
+    const shaftGeo = new THREE.CylinderGeometry(0.55, 0.62, h, 24, 4);
     if (broken) {
       const p = shaftGeo.attributes.position;
       for (let i = 0; i < p.count; i++) if (p.getY(i) > h / 2 - 0.01) p.setY(i, p.getY(i) - this.rand() * 0.7);
@@ -401,7 +401,7 @@ export class Surface {
       const z = Math.sin(a) * rad;
       if (Math.abs(x) < 3 && z > 8) continue;
       const len = 3 + r() * 3;
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, len, 12), this.stone);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, len, 24), this.stone);
       c.rotation.set(0, r() * 6, Math.PI / 2);
       c.position.set(x, this.heightAt(x, z) + 0.35, z);
       this.group.add(c);
@@ -481,9 +481,9 @@ export class Surface {
       this.group.add(p);
       this.circles.push({ x: s * 3, z, r: 1.0 });
       // Braziers either side.
-      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.3, 0.4, 12, 1, true), new THREE.MeshStandardMaterial({ color: 0x221e1c, metalness: 0.8, roughness: 0.5 }));
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.3, 0.4, 28, 1, true), new THREE.MeshStandardMaterial({ color: 0x221e1c, metalness: 0.8, roughness: 0.5 }));
       bowl.position.set(s * 4.6, 1.3 + this.heightAt(s * 4.6, z - 1), z - 1);
-      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 8), bowl.material);
+      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 14), bowl.material);
       stand.position.set(s * 4.6, 0.6 + this.heightAt(s * 4.6, z - 1), z - 1);
       const gen = Assets.instanceProp('brazier');
       if (gen) {

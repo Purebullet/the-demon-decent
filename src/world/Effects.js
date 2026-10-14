@@ -6,9 +6,9 @@ import { C, burst, ring, spawnFlame } from './Particles.js';
 // the blow lands. Also the travelling and timed parts of procs: streams of
 // stolen blood, lightning bolts, and blows that land a moment later.
 
-const ringGeo = new THREE.RingGeometry(0.9, 1, 48);
-const discGeo = new THREE.CircleGeometry(1, 48);
-const orbGeo = new THREE.SphereGeometry(1, 12, 8);
+const ringGeo = new THREE.RingGeometry(0.9, 1, 72);
+const discGeo = new THREE.CircleGeometry(1, 72);
+const orbGeo = new THREE.SphereGeometry(1, 24, 16);
 const _t = new THREE.Vector3();
 const _target = new THREE.Vector3();
 

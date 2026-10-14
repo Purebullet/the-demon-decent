@@ -1,19 +1,17 @@
 import * as THREE from 'three';
+import { fbmNoiseTexture, FBM_PERIOD } from './Textures.js';
 
 // Animated surface shaders: molten lava, the exit vortex, and the blood
 // well. All respect scene fog.
 
+// Their noise is read from a painted texture, not computed per pixel: five
+// octaves of hashed noise for every pixel of a portal filling half the
+// screen made the frame rate sag as you walked up to it.
 const NOISE = /* glsl */ `
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
+uniform sampler2D uNoise;
 float fbm(vec2 p) {
-  float s = 0.0; float a = 0.5;
-  for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; }
-  return s;
+  vec4 t = texture2D(uNoise, p * ${(1 / FBM_PERIOD).toFixed(6)});
+  return t.r + t.g / 255.0;
 }`;
 
 const VERT = /* glsl */ `
@@ -31,7 +29,7 @@ void main() {
 
 function make(frag, uniforms = {}, opts = {}) {
   return new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }, uniforms]),
+    uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }, uniforms]), uNoise: { value: fbmNoiseTexture() } },
     vertexShader: VERT,
     fragmentShader: frag,
     fog: true,

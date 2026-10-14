@@ -93,7 +93,7 @@ function toTexture(c, { repeat = 1, srgb = true } = {}) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -147,6 +147,62 @@ export function softDotTexture() {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 64, 64);
     return toTexture(c, { srgb: false });
+  });
+}
+
+// Fractal value noise for the animated surfaces (lava, the portal, the blood
+// well), painted once instead of computed for every pixel: FBM_PERIOD units
+// square, tiling, five octaves. The value is red plus green / 255 (red alone
+// would show steps), which stays exact under linear filtering.
+export const FBM_PERIOD = 8;
+export function fbmNoiseTexture() {
+  return cached('fbm', () => {
+    const S = 256;
+    const data = new Uint8Array(S * S * 4);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const v = tileFbm((x / S) * FBM_PERIOD, (y / S) * FBM_PERIOD, FBM_PERIOD, 5, 5) * 0.97 * 255;
+        const hi = Math.floor(v);
+        const i = (y * S + x) * 4;
+        data[i] = hi;
+        data[i + 1] = Math.round((v - hi) * 255);
+        data[i + 3] = 255;
+      }
+    }
+    const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
+    t.needsUpdate = true;
+    return t;
+  });
+}
+
+// A shaft of light standing on the floor: soft at its sides, brightest at
+// its foot, fading out upward (white, for additive glows tinted by colour).
+export function lightShaftTexture() {
+  return cached('shaft', () => {
+    const W = 64;
+    const H = 128;
+    const c = makeCanvas(W, H);
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      const up = 1 - y / (H - 1); // 0 at the foot of the shaft, 1 at its top
+      const fade = Math.pow(1 - up, 1.6) * Math.min(1, up * 14);
+      for (let x = 0; x < W; x++) {
+        const across = Math.abs(x / (W - 1) - 0.5) * 2;
+        const k = Math.exp(-across * across * 5) * (1 - across) * fade;
+        const i = (y * W + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.min(255, k * 255);
+        img.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = toTexture(c, { srgb: false });
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    return t;
   });
 }
 

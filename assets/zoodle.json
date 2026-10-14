@@ -259,6 +259,51 @@
       "id": 266,
       "source": "objects",
       "status": "done"
+    },
+    "swordBone": {
+      "id": 267,
+      "source": "objects",
+      "status": "done"
+    },
+    "swordFlame": {
+      "id": 268,
+      "source": "objects",
+      "status": "done"
+    },
+    "swordGreat": {
+      "id": 269,
+      "source": "objects",
+      "status": "done"
+    },
+    "axeTwin": {
+      "id": 270,
+      "source": "objects",
+      "status": "done"
+    },
+    "axeHeadsman": {
+      "id": 271,
+      "source": "objects",
+      "status": "done"
+    },
+    "axeHorn": {
+      "id": 272,
+      "source": "objects",
+      "status": "done"
+    },
+    "maceStar": {
+      "id": 273,
+      "source": "objects",
+      "status": "done"
+    },
+    "maceHammer": {
+      "id": 274,
+      "source": "objects",
+      "status": "done"
+    },
+    "maceClub": {
+      "id": 275,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

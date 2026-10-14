@@ -15,7 +15,7 @@ export function newRun() {
     potionCap: 2,
     dmgMul: 1,
     speedMul: 1,
-    weapon: makeWeapon('sword', 0),
+    weapon: makeWeapon('sword'),
     spells: { nova: 0, step: 0, siphon: 0 },
     // Learned skills (Phantom Step: dodge on a double tap) and carried relics
     // (id -> how many: combat/Relics.js).

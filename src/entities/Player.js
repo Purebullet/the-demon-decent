@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OBB } from '../physics/OBB.js';
 import { queryHurtboxes } from '../physics/Hitbox.js';
-import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc } from './Weapons.js';
+import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc, weaponReach, applyRim } from './Weapons.js';
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
 import { TorchFire } from '../world/TorchFire.js';
@@ -90,7 +90,17 @@ const VIEW_FOV = 62;
 // Depth slices a swing is tested in, as multiples of the blade's own distance
 // from the eye (see _sweep), and a little grace either side of the edge.
 const SLICES = [1, 1.3, 1.65, 2.05, 2.5, 3.1, 3.8];
-const BLADE_GRACE = 0.02;
+const BLADE_GRACE = 0.035;
+// Leeway on the side the blade is travelling to (metres at the blade's own
+// distance, so an angle): a blow still lands on a demon a little past where
+// the swing ends, left or right as it sweeps.
+const SWING_LEEWAY = 0.22;
+// And across the view: a blade sweeping leftward also catches what stands
+// up to this much further left (radians), rightward likewise; a straight
+// chop down, nothing either side.
+const SIDE_LEEWAY = 0.35;
+// How brightly the weapon in hand shows its rarity at its edges (common first).
+const HELD_RIM = [0.12, 0.2, 0.24, 0.3, 0.4];
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -110,6 +120,10 @@ const _ca = new THREE.Vector3();
 const _cb = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _tm = new THREE.Vector3();
+const _tv = new THREE.Vector3();
+const _ga = new THREE.Vector3();
+const _gb = new THREE.Vector3();
+const _Y = new THREE.Vector3(0, 1, 0);
 const _tilt = new THREE.Quaternion();
 const _side = new THREE.Vector3(1, 0, 0);
 const _up = new THREE.Vector3(0, 1, 0);
@@ -172,9 +186,9 @@ export class Player {
       g.add(model);
       rags = TORCH_BASE + (Assets.props.get('torch')?.entry.size ?? 0.72) * TORCH_RAGS;
     } else {
-      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.95 }));
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.032, 0.7, 16), new THREE.MeshStandardMaterial({ color: 0x2c1c10, roughness: 0.95 }));
       stick.position.y = -0.1;
-      const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 8), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
+      const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.034, 0.12, 16), new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 1 }));
       wrap.position.y = 0.24;
       g.add(stick, wrap);
     }
@@ -263,28 +277,48 @@ export class Player {
   setWeapon(weapon) {
     this.run.weapon = weapon;
     this.weaponDef = WEAPON_TYPES[weapon.type];
+    // Where this one's blade (or head) is, from its own model.
+    const { blade, steel } = weaponReach(weapon);
+    this.bladeSpan = blade;
     this.weaponPivot.clear();
     this.weaponMesh = buildWeaponMesh(weapon, { own: true });
     this.weaponPivot.add(this.weaponMesh);
     this.weaponMats = [];
-    const [b0, b1] = this.weaponDef.blade;
+    const [b0, b1] = blade;
     this.weaponPivot.updateMatrixWorld(true);
     const fromPivot = new THREE.Matrix4().copy(this.weaponPivot.matrixWorld).invert();
     this.weaponMesh.traverse((o) => {
       if (o.isMesh && o.material.emissive) {
-        const u = bladeMask(o.material, new THREE.Matrix4().multiplyMatrices(fromPivot, o.matrixWorld), this.weaponDef.steel ?? b0);
+        const u = bladeMask(o.material, new THREE.Matrix4().multiplyMatrices(fromPivot, o.matrixWorld), steel);
+        // Its rarity, faintly, along its edges.
+        if (weapon.rarity >= 0) applyRim(o.material, weapon.color, HELD_RIM[weapon.rarity]);
         this.weaponMats.push({ m: o.material, c: o.material.emissive.clone(), i: o.material.emissiveIntensity, u });
       }
     });
     // Flames ride up the blade (or the head of an axe or mace).
+    const tip = b1 - 0.1;
+    const n = this.bladeFx.fires.length;
     this.bladeFx.fires.forEach((f, k) => {
-      f.group.position.set(0, b0 + (b1 - b0) * (0.18 + k * 0.27), 0);
+      f.group.position.set(0, steel + (tip - steel) * (0.06 + (k / (n - 1)) * 0.9), 0);
       this.weaponPivot.add(f.group);
     });
     this.swing = null;
     this.momentum = 0;
     this.chain = 0;
     this._glow = this._glowSet = 0;
+  }
+
+  // A weapon dressed as setWeapon dresses the one in hand (its glow kept to
+  // the blade, its rarity at its edges), without taking it up: the warm-up
+  // draws one, so taking the first rare weapon doesn't stall on its shader.
+  previewWeapon(weapon) {
+    const mesh = buildWeaponMesh(weapon, { own: true });
+    mesh.traverse((o) => {
+      if (!o.isMesh || !o.material.emissive) return;
+      bladeMask(o.material, new THREE.Matrix4(), 0);
+      if (weapon.rarity >= 0) applyRim(o.material, weapon.color, HELD_RIM[weapon.rarity]);
+    });
+    return mesh;
   }
 
   spawnAt(x, z, yaw) {
@@ -715,7 +749,7 @@ export class Player {
   _bladePoints(arc, k, base, tip) {
     arcDirection(arc, k, _a);
     gripPose(_a, arc.axis, _b, _quat);
-    const [b0, b1] = this.weaponDef.blade;
+    const [b0, b1] = this.bladeSpan;
     base.copy(_b).addScaledVector(_a, b0 + 0.05);
     tip.copy(_b).addScaledVector(_a, b1 + 0.1);
   }
@@ -826,8 +860,10 @@ export class Player {
 
   _trail(s, k) {
     const bonus = chainBonus(s.chain);
-    const style = trailStyle({ perfect: s.perfect, chain: s.chain, sluggish: s.sluggish, heavy: s.heavy, counter: s.counter, glow: s.perfect ? bonus.glow : s.heavy ? 0.55 : 0.32 });
-    this.trail.trace(Math.max(0, k - (s.heavy ? 0.6 : 0.5)), k, (kk, base, tip) => this._bladePoints(s.arc, kk, base, tip), style);
+    const flame = this.flameT > 0;
+    const style = trailStyle({ perfect: s.perfect, chain: s.chain, sluggish: s.sluggish, heavy: s.heavy, counter: s.counter, flame, glow: s.perfect ? bonus.glow : s.heavy ? 0.55 : 0.32 });
+    // A burning blade leaves a long sheet of fire behind it.
+    this.trail.trace(Math.max(0, k - (flame ? 0.8 : s.heavy ? 0.6 : 0.5)), k, (kk, base, tip) => this._bladePoints(s.arc, kk, base, tip), style);
   }
 
   // Momentum shows in the blade: it heats as the dance builds.
@@ -835,7 +871,9 @@ export class Player {
     const m = this.weaponDef === WEAPON_TYPES.sword ? this.momentum / MOMENTUM_MAX : 0;
     const flame = this.flameT > 0;
     const slime = !flame && this.coatT > 0;
-    const want = flame ? 0.32 : slime ? 0.25 : Math.max(m, this.wrathT > 0 ? 0.7 : 0);
+    // A burning blade glows like a coal from the guard to the tip, flickering.
+    const flicker = flame ? 0.85 + Math.sin(performance.now() * 0.019) * 0.1 + Math.sin(performance.now() * 0.047) * 0.05 : 1;
+    const want = flame ? 0.55 * flicker : slime ? 0.25 : Math.max(m, this.wrathT > 0 ? 0.7 : 0);
     const col = flame ? _flameCol : slime ? _slimeCol : this.wrathT > 0 ? _wrathCol : _heatCol;
     // The slime itself: the blade goes green while it is coated.
     this._coat = (this._coat ?? 0) + ((slime ? 1 : 0) - (this._coat ?? 0)) * Math.min(1, dt * 8);
@@ -845,7 +883,7 @@ export class Player {
     this._glowKey = key;
     for (const w of this.weaponMats) {
       w.m.emissive.copy(w.c).lerp(col, Math.min(1, this._glow));
-      w.m.emissiveIntensity = w.i + this._glow * 0.9;
+      w.m.emissiveIntensity = w.i + this._glow * (flame ? 1.05 : 0.9);
       w.u.uSlime.value = this._coat * 0.8;
     }
   }
@@ -855,7 +893,8 @@ export class Player {
   // The flames along the blade (shown while it burns) and the slime that
   // drips off it (while it is coated), drawn with the viewmodel.
   _buildBladeFx() {
-    const fires = [0, 1, 2, 3].map((k) => new TorchFire({ height: 0.2 - k * 0.02, width: 0.05, seed: 3.1 + k * 1.7, embers: 6, intensity: 1.1 }));
+    // Fire the length of the blade, tallest at its root, shedding embers.
+    const fires = [0, 1, 2, 3, 4, 5].map((k) => new TorchFire({ height: 0.32 - k * 0.025, width: 0.12 - k * 0.008, seed: 3.1 + k * 1.7, embers: 12, intensity: 1.6 }));
     for (const f of fires) f.setIntensity(0);
     const N = 18;
     const geo = new THREE.BufferGeometry();
@@ -920,7 +959,7 @@ export class Player {
     const coated = this.coatT > 0 && this.flameT <= 0;
     fx.drips.visible = coated || fx.drops.some((d) => d.life > 0);
     if (!fx.drips.visible) return;
-    const [b0, b1] = this.weaponDef.blade;
+    const [b0, b1] = this.bladeSpan;
     this.viewRoot.updateMatrixWorld(true);
     _q2.copy(this.viewRoot.quaternion).invert();
     const down = _v2.set(0, -1, 0).applyQuaternion(_q2);
@@ -957,8 +996,9 @@ export class Player {
   // seen (the viewmodel's narrower lens pushed out: see VIEW_FOV), then
   // carried out along those lines of sight in depth slices to the reach.
   // Each slice is a thin box around that stretch of the line of sight: a
-  // demon is struck exactly where the blade crosses it on screen, if it
-  // stands within reach, and nowhere else.
+  // demon is struck where the blade crosses it on screen, if it stands
+  // within reach, with some leeway on the side the swing is heading to
+  // (SWING_LEEWAY, SIDE_LEEWAY).
   _sweep(s, k0, k1, ctx) {
     const arc = s.arc;
     const cam = this.camera;
@@ -966,7 +1006,7 @@ export class Player {
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(k1 - k0) * arc.angle, camAngle) / 0.04));
     const lens = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)) / Math.tan(THREE.MathUtils.degToRad(VIEW_FOV / 2));
     const def = this.weaponDef;
-    const [b0, b1] = def.blade;
+    const [b0, b1] = this.bladeSpan;
     const r = def.width + BLADE_GRACE;
     const reach = def.reach;
     const hits = [];
@@ -977,18 +1017,33 @@ export class Player {
       _camP.lerpVectors(this.prevCamP, cam.position, f);
       arcDirection(arc, k, _v);
       gripPose(_v, arc.axis, _pos, _quat);
-      // Blade centre line in camera space, where it is seen.
+      // Blade centre line in camera space, where it is seen, and which way
+      // the swing carries it.
       _ca.copy(_pos).addScaledVector(_v, b0);
       _cb.copy(_pos).addScaledVector(_v, b1 + 0.08);
       _ca.x *= lens;
       _ca.y *= lens;
       _cb.x *= lens;
       _cb.y *= lens;
-      for (let j = 0; j < SLICES.length - 1; j++) {
-        if (!this._slice(_ca, _cb, SLICES[j], SLICES[j + 1], r, reach)) continue;
-        queryHurtboxes(this.blade, ctx.enemies, s.hitSet, hits, this.bladeSeg);
-        if (ctx.props) queryHurtboxes(this.blade, ctx.props.targets, s.hitSet, hits, this.bladeSeg);
-        if (j === 0) _tm.copy(this.blade.center);
+      _tv.crossVectors(arc.axis, _v);
+      _tv.x *= lens;
+      _tv.y *= lens;
+      // The blade where it is, then (with leeway) turned about the eye
+      // toward the side the swing is heading.
+      const side = _tv.x / (Math.hypot(_tv.x, _tv.y) || 1);
+      for (let ghost = 0; ghost < (Math.abs(side) > 0.05 ? 2 : 1); ghost++) {
+        let a = _ca;
+        let b = _cb;
+        if (ghost) {
+          a = _ga.copy(_ca).applyAxisAngle(_Y, -side * SIDE_LEEWAY);
+          b = _gb.copy(_cb).applyAxisAngle(_Y, -side * SIDE_LEEWAY);
+        }
+        for (let j = 0; j < SLICES.length - 1; j++) {
+          if (!this._slice(a, b, SLICES[j], SLICES[j + 1], r, reach, _tv)) continue;
+          queryHurtboxes(this.blade, ctx.enemies, s.hitSet, hits, this.bladeSeg);
+          if (ctx.props) queryHurtboxes(this.blade, ctx.props.targets, s.hitSet, hits, this.bladeSeg);
+          if (j === 0 && !ghost) _tm.copy(this.blade.center);
+        }
       }
       // Which way the blade is travelling (for blood and the body's flinch).
       if (s.lastMid) {
@@ -1007,8 +1062,10 @@ export class Player {
   // One depth slice of the swept line of sight: the blade's camera-space
   // centre line a-b scaled out from the eye by s0..s1 (which keeps it on the
   // same pixels), cut off at the reach, as a box in the world (this.blade)
-  // with its centre line (this.bladeSeg). False if the slice is out of reach.
-  _slice(a, b, s0, s1, r, reach) {
+  // with its centre line (this.bladeSeg), stretched SWING_LEEWAY ahead
+  // toward `travel` (the way the swing moves it). False if the slice is out
+  // of reach.
+  _slice(a, b, s0, s1, r, reach, travel) {
     const sm = (s0 + s1) / 2;
     // Clip the line at this depth to the sphere of reach round the eye.
     _d.subVectors(b, a);
@@ -1041,7 +1098,9 @@ export class Player {
     if (_az.lengthSq() < 1e-6) _az.set(0, 0, 1);
     _az.normalize();
     _ax.crossVectors(_seg, _az);
-    _half.set(r * sm, len / 2, (along * (s1 - s0)) / (2 * sm) + r * sm);
+    const lead = SWING_LEEWAY * sm;
+    _half.set(r * sm + lead / 2, len / 2, (along * (s1 - s0)) / (2 * sm) + r * sm);
+    _mid.addScaledVector(_ax, travel.dot(_ax) >= 0 ? lead / 2 : -lead / 2);
     // Into the world.
     _mid.applyQuaternion(_camQ).add(_camP);
     _ax.applyQuaternion(_camQ);
@@ -1213,12 +1272,12 @@ export class Player {
     this.torch.getWorldPosition(_v);
     this.torchLight.position.copy(_v).add(_v2.set(0, this.flameY + 0.1, 0));
     const burning = this.bladeFx.heat;
-    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit * (1 + 0.25 * burning);
+    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit * (1 + 0.6 * burning);
     this.torchLight.distance = (ctx.torchRange ?? 16) * (relicPassive(this.run || { relics: {} }, 'light') ?? 1) * (1 + (FLAME_LIGHT - 1) * burning);
     const fl = this.flashFx;
     const k = fl.t > 0 ? fl.t / fl.dur : 0;
     fl.t = Math.max(0, fl.t - dt);
-    this.torchLight.color.copy(_torchCol).lerp(fl.color, k * 0.85);
+    this.torchLight.color.copy(_torchCol).lerp(_burnCol, burning * 0.5).lerp(fl.color, k * 0.85);
     this.torchLight.intensity += fl.base * k;
   }
 
@@ -1415,11 +1474,12 @@ export class Player {
 }
 
 const _heatCol = new THREE.Color(1, 0.45, 0.1);
-const _flameCol = new THREE.Color(1, 0.42, 0.1);
+const _flameCol = new THREE.Color(1, 0.3, 0.05);
 const _slimeCol = new THREE.Color(0.35, 1, 0.15);
 const _slimeBody = new THREE.Color(0.32, 0.75, 0.16);
 const _q2 = new THREE.Quaternion();
 const _torchCol = new THREE.Color(0xffb070);
+const _burnCol = new THREE.Color(0xff6a1c);
 const _wrathCol = new THREE.Color(1, 0.12, 0.04);
 const easeOut = (k) => 1 - (1 - k) * (1 - k);
 const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);

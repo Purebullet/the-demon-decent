@@ -72,6 +72,8 @@ loader.register((parser) => new InlineTexturePlugin(parser));
 const _box = new THREE.Box3();
 const _v = new THREE.Vector3();
 const _c = new THREE.Vector3();
+// Half a turn about the forward axis: a weapon upside down stood the right way.
+const _flip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI);
 
 // Package paths -> URLs (Project 0's p0.asset(); a page uses them as-is).
 let resolveUrl = (p) => p;
@@ -239,12 +241,15 @@ export const Assets = {
     let box = boundsOf(holder);
     const size = box.getSize(_v);
     if (entry.weapon) {
-      // Turn the longest axis upright, handle (the thinner end) down.
+      // Turn the longest axis upright (stood straight if it was modelled at a
+      // slant), handle (the thinner end) down.
       if (size.x >= size.y && size.x >= size.z) scene.rotation.z = Math.PI / 2;
       else if (size.z >= size.y && size.z >= size.x) scene.rotation.x = -Math.PI / 2;
+      for (let i = 0; i < 2; i++) straighten(holder, scene);
       box = boundsOf(holder);
-      if (headIsDown(holder, box, entry.guard)) {
-        scene.rotation.z += Math.PI;
+      if (headIsDown(holder, box, entry.guard) !== !!entry.flip) {
+        scene.quaternion.premultiply(_flip);
+        scene.updateMatrixWorld(true);
         box = boundsOf(holder);
       }
     }
@@ -253,8 +258,16 @@ export const Assets = {
     const unitScale = entry.size / Math.max(1e-3, s.y);
     // Weapons hang from the grip (a little above the bottom); props stand on 0.
     const base = entry.weapon ? box.min.y + s.y * 0.12 : box.min.y;
-    this.props.set(id, { holder, entry, unitScale, offset: new THREE.Vector3(-c.x, -base, -c.z) });
+    const shape = entry.weapon ? weaponShape(holder, box, base, unitScale, entry.guard) : null;
+    this.props.set(id, { holder, entry, unitScale, shape, offset: new THREE.Vector3(-c.x, -base, -c.z) });
     this.loaded.push(entry.model);
+  },
+
+  // Where a weapon's working part is, in metres up from its grip: { tip,
+  // from } - from the guard to the tip of a sword's blade, or the head of an
+  // axe or a mace (null for a model not loaded).
+  weaponShape(id) {
+    return this.props.get(id)?.shape ?? null;
   },
 
   // A fresh, normalized copy of a character: { inner, model, clips, entry }.
@@ -376,8 +389,19 @@ function straighten(holder, scene) {
 // its head; a sword is widest at its cross-guard, which sits next to the grip,
 // so its blade is the end farther from the widest point (`guard`).
 function headIsDown(holder, box, guard) {
+  const bins = sliceWidths(holder, box, 20);
+  let widest = 0;
+  for (let b = 1; b < 20; b++) if (bins[b] > bins[widest]) widest = b;
+  const widestHigh = widest >= 10;
+  return guard ? widestHigh : !widestHigh;
+}
+
+// How wide an upright model is in each of n slices up its height (each
+// slice's own extent, wherever the model's origin happens to be).
+function sliceWidths(holder, box, n) {
   const h = box.max.y - box.min.y;
-  const bins = new Float32Array(20);
+  const lo = new Float32Array(n * 2).fill(Infinity);
+  const hi = new Float32Array(n * 2).fill(-Infinity);
   const v = new THREE.Vector3();
   holder.updateMatrixWorld(true);
   holder.traverse((o) => {
@@ -386,12 +410,33 @@ function headIsDown(holder, box, guard) {
     const step = Math.max(1, Math.floor(pos.count / 6000));
     for (let i = 0; i < pos.count; i += step) {
       v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
-      const b = Math.min(19, Math.floor(((v.y - box.min.y) / h) * 20));
-      bins[b] = Math.max(bins[b], Math.hypot(v.x, v.z));
+      const b = Math.min(n - 1, Math.floor(((v.y - box.min.y) / h) * n)) * 2;
+      lo[b] = Math.min(lo[b], v.x);
+      hi[b] = Math.max(hi[b], v.x);
+      lo[b + 1] = Math.min(lo[b + 1], v.z);
+      hi[b + 1] = Math.max(hi[b + 1], v.z);
     }
   });
-  let widest = 0;
-  for (let b = 1; b < 20; b++) if (bins[b] > bins[widest]) widest = b;
-  const widestHigh = widest >= 10;
-  return guard ? widestHigh : !widestHigh;
+  return Array.from({ length: n }, (_, b) => Math.max(0, hi[b * 2] - lo[b * 2], hi[b * 2 + 1] - lo[b * 2 + 1]));
+}
+
+// A weapon's working part, from its outline: a sword's blade starts above
+// its guard (the widest slice of its lower half); an axe's or a mace's head
+// is the wide part at the top, down to where it narrows to the haft.
+function weaponShape(holder, box, base, scale, guard) {
+  const N = 40;
+  const w = sliceWidths(holder, box, N);
+  const h = box.max.y - box.min.y;
+  const up = (k) => (box.min.y + (k / N) * h - base) * scale;
+  let k = 0;
+  if (guard) {
+    for (let b = 1; b < N / 2; b++) if (w[b] > w[k]) k = b;
+    k += 1;
+  } else {
+    k = N / 2;
+    for (let b = N / 2; b < N; b++) if (w[b] > w[k]) k = b;
+    const wide = w[k] * 0.35;
+    while (k > N / 4 && w[k - 1] > wide) k--;
+  }
+  return { tip: up(N), from: up(k) };
 }

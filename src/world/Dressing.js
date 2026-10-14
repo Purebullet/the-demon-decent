@@ -364,7 +364,7 @@ export class Dressing {
       material.color.multiplyScalar(0.75);
       size = Assets.props.get('stalagmite').entry.size;
     } else {
-      geometry = new THREE.ConeGeometry(1, 1, 6).rotateX(Math.PI).translate(0, -0.5, 0);
+      geometry = new THREE.ConeGeometry(1, 1, 10).rotateX(Math.PI).translate(0, -0.5, 0);
       material = this.rockShape.material;
       size = 1;
     }
@@ -444,7 +444,7 @@ export class Dressing {
       else if (id === 'stalagmite') this._place('stalagmite', pl.x, pl.z, { yaw, scale: 1.5 + r() * 0.5 });
       else if (id) this._place(id, pl.x, pl.z, { yaw, scale: 1 + r() * 0.15 });
       else {
-        const g = new THREE.CylinderGeometry(0.85, 1.1, this.ceiling, 9, 8);
+        const g = new THREE.CylinderGeometry(0.85, 1.1, this.ceiling, 16, 8);
         const o = new THREE.Mesh(g, this.rockShape.material);
         o.position.set(pl.x, this.ceiling / 2, pl.z);
         this._chunk(pl.x, pl.z).add(o);

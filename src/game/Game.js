@@ -16,7 +16,7 @@ import { Enemy } from '../entities/Enemy.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss } from '../entities/Bosses.js';
 import { Pickups } from '../entities/Pickups.js';
-import { rollWeapon } from '../entities/Weapons.js';
+import { rollWeapon, makeWeapon } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
@@ -34,6 +34,24 @@ const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019
 // sandbox or a plain web page (src/platform).
 
 const PLAYING = new Set(['surface', 'floor', 'sanctum']);
+
+// How the 3D view is drawn, best first: how wide it renders (device pixels,
+// never past the screen's own) and how many samples smooth its edges. It
+// starts at the top; frames running long step it down a rung at a time
+// (_adaptQuality), the edge smoothing going before the sharpness.
+const QUALITY = [
+  { width: 1600, samples: 4 },
+  { width: 1440, samples: 4 },
+  { width: 1280, samples: 4 },
+  { width: 1280, samples: 2 },
+  { width: 1088, samples: 2 },
+  { width: 920, samples: 0 },
+  { width: 780, samples: 0 },
+  { width: 640, samples: 0 },
+];
+// From this rung down there is no ground mist; further down, sparser scenery.
+const NO_MIST = 6;
+const SLOW = 6;
 const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
@@ -54,13 +72,16 @@ export class Game {
     r.setClearColor(0x000000, 1);
     this.uiRatio = Math.min(host.pixelRatio || 1, 2);
     r.setPixelRatio(this.uiRatio);
-    this.sceneScale = Math.min(1, 1280 / Math.max(1, host.width * this.uiRatio));
-    this.sceneTarget = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
+    this.maxSamples = msaaLimit(r);
+    this.qualityLevel = 0;
+    this.sceneScale = this._sceneScaleAt(0);
+    this.sceneTarget = this._sceneTargetWith(QUALITY[0].samples);
     this.blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.blitScene = new THREE.Scene();
-    const blit = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: this.sceneTarget.texture, depthTest: false, depthWrite: false }));
+    const blit = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blitMaterial(this.sceneTarget.texture));
     blit.frustumCulled = false;
     this.blitScene.add(blit);
+    this.blit = blit;
     this.slow = 0;
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300);
@@ -144,7 +165,13 @@ export class Game {
       c.updateProjectionMatrix();
     }
     const k = this.uiRatio * this.sceneScale;
-    this.sceneTarget.setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    const tw = Math.max(1, Math.round(w * k));
+    const th = Math.max(1, Math.round(h * k));
+    this.sceneTarget.setSize(tw, th);
+    // Stretched up to the screen: sharpen back what the stretch blurs.
+    const u = this.blit.material.uniforms;
+    u.uTexel.value.set(1 / tw, 1 / th);
+    u.uSharp.value = this.sceneScale < 0.95 ? Math.min(0.6, (1 / this.sceneScale - 1) * 0.6) : 0;
     const ph = h * k;
     this.fx.add.setViewport(ph, this.camera.fov);
     this.fx.alpha.setViewport(ph, this.camera.fov);
@@ -280,6 +307,11 @@ export class Game {
         far(it.mesh);
       }
     }
+    // The weapon in hand once a rare one is taken up.
+    const held = this.player.previewWeapon(makeWeapon('swordBone', 2));
+    held.position.set(0, -50, 0);
+    this.viewRoot.add(held);
+    staged.push(held);
     if (this.effects) {
       const t = this.effects.telegraph(0, 0, 1, 1e9, null);
       this.effects.items.splice(this.effects.items.indexOf(t), 1);
@@ -955,7 +987,8 @@ export class Game {
       this.goto('floor', { floor: sc.nextFloor });
     }
     let prompt = '';
-    if (sc.portalOpen) prompt = 'The way down is open';
+    if (this.choice) prompt = '';
+    else if (sc.portalOpen) prompt = 'The way down is open';
     else if (focused) prompt = `<b>F</b> ${NODES[focused.key].title}`;
     else prompt = 'Approach an altar and press <b>F</b>';
     this.hud.update(dt, p, this.run, { floorLabel: `Sanctum — before Floor ${sc.nextFloor}`, enemyLabel: '', best: this.best, prompt });
@@ -1082,27 +1115,47 @@ export class Game {
   _adaptQuality(rawDt) {
     // A hidden tab, or a floor being built: not a measure of anything.
     if (rawDt > 1 || this.busy || this.compiling) return;
-    const q = (this.quality ||= { avg: 1 / 60, t: 0, good: 0, drops: 0 });
+    const q = (this.quality ||= { avg: 1 / 60, t: 0, good: 0 });
     q.avg += (Math.min(rawDt, 0.1) - q.avg) * 0.06;
     q.t += rawDt;
     if (q.t < 1.5) return;
     q.t = 0;
-    const base = Math.min(1, 1280 / Math.max(1, this.host.width * this.uiRatio));
-    if (q.avg > 1 / 45 && this.sceneScale > base * 0.52) {
-      this.sceneScale = Math.max(base * 0.5, this.sceneScale * 0.85);
-      q.drops++;
+    const level = this.qualityLevel;
+    if (q.avg > 1 / 45 && level < QUALITY.length - 1) {
       q.good = 0;
       q.avg = 1 / 60;
-      this.slow = q.drops >= 3 ? 1 : 0;
-      this._resize();
-    } else if (q.avg < 1 / 80 && this.sceneScale < base) {
+      this._setQuality(level + 1);
+    } else if (q.avg < 1 / 80 && level > 0) {
       if (++q.good >= 4) {
-        this.sceneScale = Math.min(base, this.sceneScale / 0.85);
         q.good = 0;
-        this._resize();
+        this._setQuality(level - 1);
       }
     } else q.good = 0;
-    this.level?.dressing?.setMist?.(this.sceneScale > base * 0.7);
+    this.slow = this.qualityLevel >= SLOW ? 1 : 0;
+    this.level?.dressing?.setMist?.(this.qualityLevel < NO_MIST);
+  }
+
+  // The view's width at a rung, as a fraction of the screen's.
+  _sceneScaleAt(level) {
+    return Math.min(1, QUALITY[level].width / Math.max(1, this.host.width * this.uiRatio));
+  }
+
+  // The target the world draws into, multisampled (as far as this machine
+  // can for half-float colour) to smooth the edges of everything in it.
+  _sceneTargetWith(samples) {
+    return new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true, samples: Math.min(samples, this.maxSamples) });
+  }
+
+  _setQuality(level) {
+    this.qualityLevel = level;
+    const samples = Math.min(QUALITY[level].samples, this.maxSamples);
+    if (samples !== this.sceneTarget.samples) {
+      this.sceneTarget.dispose();
+      this.sceneTarget = this._sceneTargetWith(samples);
+      this.blit.material.uniforms.tScene.value = this.sceneTarget.texture;
+    }
+    this.sceneScale = this._sceneScaleAt(level);
+    this._resize();
   }
 
   // The render camera stays at the host's anchor (inside the lot's box on
@@ -1151,7 +1204,8 @@ export class Game {
       this.viewRoot.updateMatrixWorld(true);
       this.viewCamera.position.copy(rc.position);
       this.viewCamera.quaternion.copy(rc.quaternion);
-      this.viewGlow.intensity = 6 * (0.85 + Math.sin(this.time * 13) * 0.1) * this.player.torchLit;
+      // (Brighter while the blade burns: its fire lights the hand.)
+      this.viewGlow.intensity = 6 * (0.85 + Math.sin(this.time * 13) * 0.1) * this.player.torchLit * (1 + this.player.bladeFx.heat * 0.8);
       r.autoClear = false;
       r.clearDepth();
       r.render(this.viewScene, this.viewCamera);
@@ -1168,6 +1222,50 @@ export class Game {
       this.scene.updateMatrixWorld(true);
     }
   }
+}
+
+// The largest multisample count this machine can give the half-float
+// target the world draws into (0: none).
+function msaaLimit(r) {
+  try {
+    const gl = r.getContext();
+    const counts = gl.getInternalformatParameter?.(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES);
+    return counts?.length ? Math.max(...counts) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// The world, onto the screen: tone-mapped, and (when it was drawn smaller
+// than the screen) sharpened back after the stretch, each pixel held within
+// its neighbours' range so no edge gets a halo.
+function blitMaterial(map) {
+  return new THREE.ShaderMaterial({
+    uniforms: { tScene: { value: map }, uTexel: { value: new THREE.Vector2(1, 1) }, uSharp: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tScene;
+      uniform vec2 uTexel;
+      uniform float uSharp;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(tScene, vUv).rgb;
+        if (uSharp > 0.0) {
+          vec3 n = texture2D(tScene, vUv + vec2(0.0, uTexel.y)).rgb;
+          vec3 s = texture2D(tScene, vUv - vec2(0.0, uTexel.y)).rgb;
+          vec3 e = texture2D(tScene, vUv + vec2(uTexel.x, 0.0)).rgb;
+          vec3 w = texture2D(tScene, vUv - vec2(uTexel.x, 0.0)).rgb;
+          vec3 lo = min(c, min(min(n, s), min(e, w)));
+          vec3 hi = max(c, max(max(n, s), max(e, w)));
+          c = clamp(c + (c - (n + s + e + w) * 0.25) * uSharp, lo, hi);
+        }
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+    depthTest: false,
+    depthWrite: false,
+  });
 }
 
 // A pair of glowing chevrons lying on the floor, pointing along +Z.

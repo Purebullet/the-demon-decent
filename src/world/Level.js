@@ -101,14 +101,14 @@ export class Level {
       const g = new THREE.Group();
       g.visible = !generated;
       g.position.set(b.x, 0, b.z);
-      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.3, 0.35, 12, 1, true), iron);
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.3, 0.35, 28, 1, true), iron);
       bowl.position.y = 1.15;
-      const coals = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), coal);
+      const coals = new THREE.Mesh(new THREE.CircleGeometry(0.5, 28), coal);
       coals.rotation.x = -Math.PI / 2;
       coals.position.y = 1.22;
       g.add(bowl, coals);
       for (let k = 0; k < 3; k++) {
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.2, 6), iron);
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.2, 10), iron);
         const a = (k / 3) * Math.PI * 2;
         leg.position.set(Math.cos(a) * 0.3, 0.55, Math.sin(a) * 0.3);
         leg.rotation.set(Math.sin(a) * 0.25, 0, -Math.cos(a) * 0.25);
@@ -164,7 +164,7 @@ export class Level {
     if (this.ventTiles.length) {
       const grate = new THREE.MeshStandardMaterial({ color: 0x1a1210, emissive: 0xff3a00, emissiveIntensity: 0.3, roughness: 0.7 });
       for (const v of this.ventTiles) {
-        const o = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.12, 10), grate.clone());
+        const o = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.12, 28), grate.clone());
         o.position.set(v.x, 0.06, v.z);
         v.mesh = o;
         this.group.add(o);
@@ -240,7 +240,7 @@ export class Level {
     const g = new THREE.Group();
     g.position.set(x.x, 0, x.z);
     this.portalMat = portalMaterial();
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 40), this.portalMat);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 72), this.portalMat);
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = 0.05;
     g.add(disc);
@@ -253,7 +253,7 @@ export class Level {
     const r = mulberry32(99);
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2;
-      const s = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.9 + r() * 0.9, 5), rockMat);
+      const s = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.9 + r() * 0.9, 7), rockMat);
       s.position.set(Math.cos(a) * 1.55, 0.35, Math.sin(a) * 1.55);
       s.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
       g.add(s);
@@ -265,7 +265,7 @@ export class Level {
       const line = new THREE.Group();
       line.rotation.y = rot;
       for (let k = -6; k <= 6; k++) {
-        const link = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 5, 10), chainMat);
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 8, 16), chainMat);
         link.position.set(k * 0.17, 0.15, 0);
         link.rotation.set(0, Math.PI / 2, (k % 2) * (Math.PI / 2));
         line.add(link);
@@ -279,7 +279,7 @@ export class Level {
     // Once the seal breaks, a pillar of hellfire light stands over the
     // portal, seen through the dark from across the cavern.
     const beamMat = new THREE.MeshBasicMaterial({ color: 0xff5a1a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
-    const beamGeo = new THREE.CylinderGeometry(0.7, 1.2, 30, 20, 1, true);
+    const beamGeo = new THREE.CylinderGeometry(0.7, 1.2, 30, 40, 1, true);
     beamGeo.translate(0, 15, 0);
     this.beam = new THREE.Mesh(beamGeo, beamMat);
     this.beam.visible = false;

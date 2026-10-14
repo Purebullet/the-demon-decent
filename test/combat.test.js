@@ -4,7 +4,8 @@ import { classifyPress, lightTiming, chainBonus, WINDOW_EARLY, WINDOW_LATE, CHAI
 import { momentumSpeed, MOMENTUM_MAX, sunderDamage, SUNDER_MAX, guardOutcome } from '../src/combat/Styles.js';
 import { RELICS, RELIC_IDS, rollRelic, addRelic, relicPassive } from '../src/combat/Relics.js';
 import { ProcEngine, procChance, procSources, PROCS, ENCHANTS } from '../src/combat/Procs.js';
-import { WEAPON_TYPES } from '../src/entities/Weapons.js';
+import { WEAPON_TYPES, WEAPON_MODELS, RARITIES, makeWeapon, rollWeapon } from '../src/entities/Weapons.js';
+import { PROPS } from '../src/assets/manifest.js';
 import { ENEMY_TYPES } from '../src/entities/EnemyTypes.js';
 import { BOSS_TYPES } from '../src/entities/Bosses.js';
 
@@ -65,6 +66,33 @@ test('weapon personalities: momentum caps, sunder stacks cap, guards answer to t
   assert.equal(guardOutcome('mace', false, 0), 'bounce');
   assert.equal(guardOutcome('mace', true, 0.8), 'crash');
   for (const t of Object.values(WEAPON_TYPES)) assert.ok(t.style && t.width > 0 && t.width <= 0.12);
+});
+
+test('dropped weapons: never the starting sword, always better, legendary twice as hard, rarer deeper', () => {
+  const starter = makeWeapon('sword');
+  assert.equal(starter.rarity, -1);
+  for (const type of Object.keys(WEAPON_TYPES)) assert.equal(Object.values(WEAPON_MODELS).filter((m) => m.type === type).length, 4, type);
+  for (const id of Object.keys(WEAPON_MODELS)) assert.ok(PROPS[id]?.weapon, `${id} has a weapon model`);
+  const seen = new Set();
+  const tally = (floor) => {
+    const n = RARITIES.map(() => 0);
+    for (let i = 0; i < 4000; i++) {
+      const w = rollWeapon(floor);
+      assert.ok(!WEAPON_MODELS[w.model].starter && WEAPON_MODELS[w.model].type === w.type);
+      assert.ok(w.damage > starter.damage, `${w.name} hits harder than the ${starter.name}`);
+      assert.equal(w.color, RARITIES[w.rarity].color);
+      seen.add(w.model);
+      n[w.rarity]++;
+    }
+    return n;
+  };
+  const shallow = tally(1);
+  const deep = tally(20);
+  // Anything can turn up anywhere; the rare ones far more often deep down.
+  for (let k = 0; k < RARITIES.length; k++) assert.ok(shallow[k] > 0 && deep[k] > 0, RARITIES[k].name);
+  assert.ok(deep[4] > shallow[4] * 4 && deep[3] > shallow[3] * 3 && deep[0] < shallow[0] / 2);
+  assert.equal(seen.size, Object.keys(WEAPON_MODELS).length - 1);
+  assert.equal(makeWeapon('swordBone', RARITIES.length - 1).damage, starter.damage * 2);
 });
 
 test('relics: every one does something, stacks deepen it, passives combine', () => {

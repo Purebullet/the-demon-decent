@@ -111,8 +111,10 @@ export class SwingTrail {
 }
 
 // Trail colours by how the swing was made.
-export function trailStyle({ perfect, chain, sluggish, heavy, counter, glow }) {
+export function trailStyle({ perfect, chain, sluggish, heavy, counter, flame, glow }) {
   if (counter) return { color: '#fff4e0', edge: '#ff8a3a', glow: 1.0 };
+  // A burning blade: a sheet of fire, yellow-white at the edge, deep orange behind.
+  if (flame) return { color: '#fff0b0', edge: '#ff4a08', glow: Math.max(0.95, glow) };
   if (sluggish) return { color: '#6a5048', edge: '#2a1410', glow: 0.18 };
   if (perfect) return { color: chain >= 4 ? '#fffbe8' : '#ffe08a', edge: chain >= 3 ? '#ff9a2a' : '#ff6a14', glow };
   if (heavy) return { color: '#ff7a3a', edge: '#9a1404', glow: 0.55 };

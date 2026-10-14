@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SPELLS, SPELL_IDS } from '../entities/Spells.js';
-import { WEAPON_TYPES } from '../entities/Weapons.js';
+import { WEAPON_TYPES, RARITIES } from '../entities/Weapons.js';
 import { makeCanvas } from '../world/Textures.js';
 import { IconAtlas } from './IconAtlas.js';
 import { RELICS, relicPassive } from '../combat/Relics.js';
@@ -41,6 +41,8 @@ const C = {
   edge: '#6a1a10',
   iron: '#1e0c09',
 };
+// The Back buttons' glow and rim.
+const BACK_HUE = { glow: 'rgba(200,50,0,0.85)', accent: '#a8401c' };
 
 // Room left at the top of the screen for Project 0's own bar and labels
 // (the lot's name, who is here), above the floor and demon counts.
@@ -513,7 +515,7 @@ export class Hud {
     c.on = on;
     c.x = x;
     c.y = y;
-    const code = on && (this.panel === 'choice' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
+    const code = on && (this.panel === 'choice' || this.panel === 'pause' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
     if (code !== this.hoverCode) {
       this.hoverCode = code;
       this.dirty = true;
@@ -892,6 +894,8 @@ export class Hud {
       r.potions,
       r.potionCap,
       r.weapon.name,
+      r.weapon.rarity,
+      r.weapon.damage,
       p?.armed,
       r.dmgMul.toFixed(2),
       r.speedMul.toFixed(2),
@@ -1459,8 +1463,9 @@ export class Hud {
     const unarmed = p?.armed === false;
     const wd = unarmed ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
     const def = WEAPON_TYPES[wd.type];
+    const R = unarmed ? null : RARITIES[wd.rarity];
     const dmg = Math.round(wd.damage * r.dmgMul);
-    const statLine = wd.damage ? `${def.label} · ${def.style} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
+    const statLine = wd.damage ? `${R ? `${R.name} · ` : ''}${def.label} · ${def.style} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
     g.font = `18px ${SERIF}`;
     let need = g.measureText(wd.name).width;
     g.font = `10px ${SERIF}`;
@@ -1472,6 +1477,20 @@ export class Hud {
     const wx = w - pad - ww;
     const wy = h - pad - wh;
     this._box(g, wx, wy, ww, wh, C.panel, C.edge);
+    if (R) {
+      // Its rarity: the icon backlit in the colour, a lit seam along the top.
+      g.save();
+      const glow = g.createRadialGradient(wx + wh / 2, wy + wh / 2, 2, wx + wh / 2, wy + wh / 2, wh * 0.5);
+      glow.addColorStop(0, hexA(R.color, 0.45));
+      glow.addColorStop(1, hexA(R.color, 0));
+      g.fillStyle = glow;
+      g.fillRect(wx + 4, wy + 4, wh - 8, wh - 8);
+      g.fillStyle = R.color;
+      g.shadowColor = R.color;
+      g.shadowBlur = 8;
+      g.fillRect(wx + 10, wy + 4, ww - 20, 2);
+      g.restore();
+    }
     if (!unarmed) IconAtlas.draw(g, wd.type, wx + 6, wy + 6, wh - 12);
     const tx = wx + wh + 2;
     this._text(g, wd.name, tx, wy + 26, { size: 18, color: wd.color, glow: 'rgba(40,0,0,0.95)' });
@@ -1677,18 +1696,20 @@ export class Hud {
   _paintPause(g) {
     this._dim(g);
     const relics = Object.entries(this.info.run?.relics || {});
-    const y0 = relics.length ? this.vh * 0.22 : this.vh * 0.45;
+    const y0 = relics.length ? this.vh * 0.2 : this.vh * 0.4;
     const pw = Math.min(420, this.vw - 40);
     this._box(g, (this.vw - pw) / 2, y0 - 62, pw, 112, C.panel, C.edge);
     this._text(g, 'PAUSED', this.vw / 2, y0, { size: 40, ls: 4, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
     this._divider(g, this.vw / 2, y0 + 14, pw * 0.7);
     this._label(g, 'Click to return to the dark', this.vw / 2, y0 + 36, { align: 'center', color: C.bone });
+    // Back into the game.
+    this._backButton(g, this.vw / 2, y0 + 92, 'Back', 'Resume');
     if (!relics.length) return;
     // Your relics, and what each one does.
     const bw = Math.min(640, this.vw - 40);
     const rowH = 52;
     const bx = (this.vw - bw) / 2;
-    let y = y0 + 80;
+    let y = y0 + 132;
     this._box(g, bx, y, bw, relics.length * rowH + 40, C.panel, C.edge);
     this._label(g, 'Relics carried', this.vw / 2, y + 24, { align: 'center', size: 12 });
     y += 36;
@@ -1721,6 +1742,28 @@ export class Hud {
       y += bh + 10;
     });
     this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Click one (or press its number) · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
+    // Step away from the altar without choosing (as Q does).
+    this._backButton(g, w / 2, y + 66, 'Back', 'KeyQ');
+  }
+
+  // A forged button that takes you back, centred on x, y: pressing it acts
+  // as `code` (a key the game already answers, or 'Resume').
+  _backButton(g, x, y, label, code) {
+    const bw = 200;
+    const bh = 46;
+    const hot = this.hoverCode === code;
+    this._button(g, x - bw / 2, y - bh / 2, bw, bh, label.toUpperCase(), hot, 0.5 + 0.5 * Math.sin(this.time * 3), BACK_HUE);
+    // The arrow before the word.
+    g.save();
+    g.fillStyle = hot ? '#fff1dc' : C.ember;
+    g.beginPath();
+    g.moveTo(x - bw / 2 + 26, y);
+    g.lineTo(x - bw / 2 + 38, y - 8);
+    g.lineTo(x - bw / 2 + 38, y + 8);
+    g.closePath();
+    g.fill();
+    g.restore();
+    this.buttons.push({ x: x * this.u, y: y * this.u, w: bw * this.u, h: bh * this.u, code, rect: true });
   }
 
   _wrap(g, text, x, y, maxW, size, color) {
@@ -2119,6 +2162,12 @@ export class Hud {
     g.restore();
     this._text(g, label, x + w / 2, y + h / 2 + 1, { size: 20, weight: 'bold ', ls: 4, color: hot ? '#fff1dc' : C.light, align: 'center', base: 'middle', glow: hue.glow });
   }
+}
+
+// '#rrggbb' at alpha a, for canvas gradients.
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
 // Four splats of blood, 2 x 2, as density in the red channel: a lumpy

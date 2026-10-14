@@ -9,17 +9,26 @@ attribute float size;
 attribute float alpha;
 attribute vec3 color;
 uniform float uScale;
+uniform float uMaxSize;
 uniform float uFogDensity;
 varying vec3 vColor;
 varying float vAlpha;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float depth = -mv.z;
-  gl_PointSize = size * uScale / max(depth, 0.1);
+  // Right at the eye a particle would cover the whole screen (a flame
+  // rising past your face, a dozen times over): those fade out before they
+  // get there, and none grows past a fraction of the screen.
+  float near = smoothstep(0.3, 0.9, depth);
+  gl_PointSize = min(size * uScale / max(depth, 0.1), uMaxSize);
   gl_Position = projectionMatrix * mv;
+  if (near <= 0.0) {
+    gl_PointSize = 0.0;
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
   float fogF = exp(-uFogDensity * uFogDensity * depth * depth);
   vColor = color;
-  vAlpha = alpha * fogF;
+  vAlpha = alpha * fogF * near;
 }`;
 
 const FRAG_ADD = /* glsl */ `
@@ -76,7 +85,7 @@ export class ParticleSystem {
     geo.setDrawRange(0, 0);
 
     this.material = new THREE.ShaderMaterial({
-      uniforms: { uScale: { value: 600 }, uFogDensity: { value: 0 } },
+      uniforms: { uScale: { value: 600 }, uMaxSize: { value: 200 }, uFogDensity: { value: 0 } },
       vertexShader: VERT,
       fragmentShader: additive ? FRAG_ADD : FRAG_ALPHA,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
@@ -90,6 +99,7 @@ export class ParticleSystem {
 
   setViewport(height, fovDeg) {
     this.material.uniforms.uScale.value = height / (2 * Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2));
+    this.material.uniforms.uMaxSize.value = height * 0.3;
   }
 
   setFogDensity(d) {
