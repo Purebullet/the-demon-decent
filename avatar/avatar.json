@@ -29,6 +29,10 @@
       },
       "transparent": true,
       "doubleSided": true
+    },
+    "Arc": {
+      "lighting": "unlit",
+      "surface": "arc-hide.glsl"
     }
   },
   "motion": {

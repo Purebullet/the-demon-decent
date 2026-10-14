@@ -10,6 +10,13 @@
 #define BOLT_TRAIL_COUNT 8.0
 #define BOLT_EXHAUST_FIRST 19.0
 #define BOLT_FOLD 0.3
+// The body's bolts (below BOLT_TRAIL_FIRST) are stored shrunk BOLT_SQUASH
+// times toward the middle of the round (the tip's, the first BOLT_TIP_COUNT,
+// toward the tip, BOLT_TIP_Y up), out of a game's sight.
+#define BOLT_SQUASH 0.15
+#define BOLT_TIP_COUNT 2.0
+#define BOLT_TIP_Y 0.8500
+#define BOLT_MIDDLE 0.9000
 varying vec3 vBolt;
 vec3 boltDecode(vec3 n) {
   n = normalize(n);

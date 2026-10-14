@@ -12,6 +12,16 @@ vec3 p0Vertex(vec3 position, vec3 normal, vec2 uv) {
   float id = b.x;
   float along = b.y;
   vec3 p = position;
+  // The body's bolts are stored squashed into the round, so a game drawing
+  // the bare model never shows them frozen (make-avatar.mjs): out they go,
+  // about the round's middle (stored, they lie within a few centimetres of
+  // it; should positions come measured from the feet, it is BOLT_MIDDLE up).
+  if (id < BOLT_TRAIL_FIRST) {
+    float o = p.y > BOLT_MIDDLE * 0.5 ? BOLT_MIDDLE : 0.0;
+    p.y -= o;
+    p = (id < BOLT_TIP_COUNT ? vec3(0.0, BOLT_TIP_Y, 0.0) : vec3(0.0)) + p / BOLT_SQUASH;
+    p.y += o;
+  }
   float seg = floor(along * 12.0 + 0.5);
   float rate = 7.0 + 12.0 * storm;
   float amp = sin(along * 3.14159) * (0.025 + 0.05 * storm);
