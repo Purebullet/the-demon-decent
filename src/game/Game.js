@@ -128,10 +128,10 @@ export class Game {
     // Project 0's "How to play" box takes plain text: the keys are set in
     // Unicode bold so they stand out.
     host.hud(
-      `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Left click')} attack (tap or hold) · ${bold('Right click')} block · ` +
-        `${bold('Shift')} sprint · ${bold('E')} potion · ${bold('1 2 3')} spells · ${bold('F')} take/use\n` +
-        'Twenty floors, one life: die and you start again at the surface. Your deepest floor goes on the weekly table.\n' +
-        'Click or press any key for sound.',
+      `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Quick left click')} light attack · ${bold('Hold left click')} heavy attack · ` +
+        `${bold('Multiple hits')} chain attack · ${bold('Hit a wind-up')} stagger · ${bold('Right click')} block · ${bold('Shift')} sprint · ${bold('E')} potion · ${bold('F')} take/use\n` +
+        `Once learned: ${bold('AA / DD')} dodge · ${bold('1 2 3')} demon spells\n` +
+        'One life: die and you start again. Click or press any key for sound.',
     );
     host.loop((dt) => this._frame(dt));
   }
@@ -196,15 +196,30 @@ export class Game {
     for (const [o, scene, cam] of jobs) {
       // The world draws into the scene target (a different shader variant
       // from drawing to the screen); the interface draws to the screen.
-      r.setRenderTarget(scene === this.hud.scene ? null : this.sceneTarget);
+      const screen = scene === this.hud.scene;
+      r.setRenderTarget(screen ? null : this.sceneTarget);
       this._drawAlone(r, o, scene, cam);
       r.setRenderTarget(null);
+      if (screen) this._cover(r);
       await nextFrame();
     }
     this._drawAlone(r, this.blitScene.children[0], this.blitScene, this.blitCamera);
+    this._cover(r);
     for (const o of staged) o.removeFromParent();
     this.compiling = false;
     this.host.log(`[t] warm-up: ${jobs.length} programs in ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  // Project 0's canvas is see-through: a frame that only drew a warm-up
+  // corner into it would show the city behind the game. Cover it in black
+  // (and the interface, the fade on top) again at once.
+  _cover(r) {
+    r.setRenderTarget(null);
+    r.setClearColor(0x000000, 1);
+    r.clear();
+    r.autoClear = false;
+    this.hud.render(r, 0);
+    r.autoClear = true;
   }
 
   _drawAlone(r, obj, scene, cam) {
@@ -412,6 +427,7 @@ export class Game {
     this._surfaceScene();
     // Permadeath: a fresh run every time you stand on the surface.
     this.run = newRun();
+    this.bestAtStart = this.best;
     this.player.reset();
     this.player.attachRun(this.run);
     const sp = this.surface.spawn;
@@ -504,7 +520,7 @@ export class Game {
 
     this.ctx = this._baseCtx({
       world: level.world,
-      ground: look.step,
+      ground: 'gravel',
       nav: level.nav,
       director: this.director,
       pathService: this.pathService,
@@ -902,7 +918,7 @@ export class Game {
     this.player.spawnAt(this.sanctum.spawn.x, this.sanctum.spawn.z, 0);
     this.player.position.y = 0;
     this.choice = null;
-    this.ctx = this._baseCtx({ world: this.sanctum.world, torchRange: 14, ground: 'stone' });
+    this.ctx = this._baseCtx({ world: this.sanctum.world, torchRange: 14, ground: 'gravel' });
     this.hud.announce('Sanctum', `Wake one altar before Floor ${next}`);
   }
 
@@ -979,18 +995,21 @@ export class Game {
     this.viewRoot.visible = false;
     const name = FLOORS[run.floor - 1]?.name || '';
     this.hud.setEnd({
+      won,
       lines: won
         ? ['Azrakel has fallen.', 'You climb out of the pit with nothing but the memory of it.']
-        : [`Slain on floor ${run.floor} — ${name}.`, 'Everything you carried is lost.'],
+        : [`Slain on floor ${run.floor} — ${name}`, 'Everything you carried is lost.'],
+      floor: run.floor,
+      floors: FLOORS.length,
+      deepest: Math.max(this.best, run.floor),
+      record: !run.dev && run.floor > (this.bestAtStart ?? 0),
       stats: [
-        ['Floor reached', run.floor],
-        ['Deepest', Math.max(this.best, run.floor)],
-        ['Demons slain', run.kills],
-        ['Longest chain', run.best?.chain || 0],
-        ['Counters', run.best?.counters || 0],
-        ['Parries', run.best?.parries || 0],
-        ['Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
-        ['Time', time],
+        ['skull', 'Demons slain', run.kills],
+        ['chain', 'Longest chain', run.best?.chain || 0],
+        ['blades', 'Counters', run.best?.counters || 0],
+        ['shield', 'Parries', run.best?.parries || 0],
+        ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
+        ['glass', 'Time', time],
       ],
       ready: false,
     });

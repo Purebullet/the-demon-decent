@@ -9,8 +9,6 @@ import { Color } from 'three';
 //
 //   rock      albedo multiplier for the walls, pillars and stalactites
 //   ground    floor colour (0-255) for the painted cave-floor texture
-//   step      what footsteps sound like on it: stone, gravel, wet, bone,
-//             ash or flesh (assets/sounds/step_*)
 //   veins     glowing cracks in floor and walls: [r, g, b] (0-255) and strength
 //   fog       fog and background colour; `haze` scales the floor's fog density
 //   sky/earth/hemi  the hemisphere light (colours and intensity)
@@ -29,7 +27,6 @@ import { Color } from 'three';
 export const LOOKS = {
   // Floors 1-2: wet violet stone, pale fungus glowing sick green.
   maw: {
-    step: 'wet',
     rock: [0.52, 0.47, 0.58],
     ground: [50, 44, 58],
     veins: null,
@@ -55,7 +52,6 @@ export const LOOKS = {
     pillars: ['pillar', 'stalagmite'],
   },
   weeping: {
-    step: 'wet',
     rock: [0.46, 0.5, 0.6],
     ground: [44, 48, 60],
     veins: null,
@@ -82,7 +78,6 @@ export const LOOKS = {
   },
   // Bone-strewn halls: skulls, ribcages and the chained dead.
   ossuary: {
-    step: 'bone',
     rock: [0.62, 0.56, 0.54],
     ground: [62, 54, 50],
     veins: null,
@@ -111,7 +106,6 @@ export const LOOKS = {
   },
   // Iron: hanging chains and gibbets, the chained dead, braziers.
   chains: {
-    step: 'stone',
     rock: [0.55, 0.48, 0.46],
     ground: [56, 46, 42],
     veins: null,
@@ -138,7 +132,6 @@ export const LOOKS = {
   },
   // Sulphur: yellow crystal and choking amber haze.
   brimstone: {
-    step: 'gravel',
     rock: [0.6, 0.5, 0.4],
     ground: [62, 50, 34],
     veins: [255, 170, 40, 0.35],
@@ -164,7 +157,6 @@ export const LOOKS = {
   },
   // A jaw of stone: stalagmite teeth everywhere, stakes, red light.
   teeth: {
-    step: 'stone',
     rock: [0.6, 0.42, 0.42],
     ground: [62, 40, 38],
     veins: null,
@@ -190,7 +182,6 @@ export const LOOKS = {
   },
   // Ash-grey stone split by embers; rune stones.
   cinder: {
-    step: 'gravel',
     rock: [0.42, 0.4, 0.42],
     ground: [46, 42, 42],
     veins: [255, 90, 20, 0.4],
@@ -216,7 +207,6 @@ export const LOOKS = {
   },
   // Raw red rock, stakes and gibbets.
   flayed: {
-    step: 'stone',
     rock: [0.66, 0.38, 0.38],
     ground: [66, 34, 34],
     veins: null,
@@ -243,7 +233,6 @@ export const LOOKS = {
   },
   // Grey ash, silent statues and rune stones.
   ash: {
-    step: 'ash',
     rock: [0.5, 0.48, 0.5],
     ground: [52, 50, 52],
     veins: null,
@@ -269,7 +258,6 @@ export const LOOKS = {
   },
   // Gorvath's arena: fire, braziers and statues around the lava.
   crucible: {
-    step: 'gravel',
     rock: [0.5, 0.36, 0.32],
     ground: [56, 36, 28],
     veins: [255, 80, 15, 0.6],
@@ -296,7 +284,6 @@ export const LOOKS = {
   },
   // Obsidian split by molten rivers; red crystal.
   molten: {
-    step: 'stone',
     rock: [0.34, 0.3, 0.34],
     ground: [38, 30, 32],
     veins: [255, 70, 10, 0.8],
@@ -323,7 +310,6 @@ export const LOOKS = {
   },
   // A living pit: egg clutches, fungus and bones in raw pink rock.
   flesh: {
-    step: 'flesh',
     rock: [0.66, 0.42, 0.46],
     ground: [64, 36, 42],
     veins: [255, 40, 70, 0.45],
@@ -350,7 +336,6 @@ export const LOOKS = {
   },
   // The screaming deep: violet crystal, rune stones and statues.
   void: {
-    step: 'stone',
     rock: [0.42, 0.36, 0.52],
     ground: [42, 34, 54],
     veins: [170, 60, 255, 0.5],
@@ -376,7 +361,6 @@ export const LOOKS = {
   },
   // Before Azrakel: a processional of statues and rune stones.
   gate: {
-    step: 'stone',
     rock: [0.44, 0.34, 0.36],
     ground: [48, 34, 36],
     veins: [255, 60, 20, 0.8],
@@ -404,7 +388,6 @@ export const LOOKS = {
   },
   // Azrakel's hall: the throne, red crystal, molten floor.
   throne: {
-    step: 'stone',
     rock: [0.38, 0.28, 0.3],
     ground: [42, 28, 28],
     veins: [255, 50, 15, 0.8],

@@ -62,7 +62,8 @@ export const ENEMY_TYPES = {
     attacks: [
       // A quick snap: little warning and little harm, but it may run straight
       // on into the full rake.
-      { name: 'snap', clip: 'claw', windup: 0.2, strike: 0.1, recover: 0.34, dmg: 0.45, minRange: 0, maxRange: 1.75, volume: { c: [0, 0.85, 0.8], h: [0.45, 0.5, 0.6] }, lunge: 2.5, knockback: 1, weight: 2, combo: { next: 'claw', chance: 0.4, windup: 0.8 } },
+      // It is also what it punishes a sluggish swing with: at once, quicker.
+      { name: 'snap', clip: 'claw', windup: 0.2, strike: 0.1, recover: 0.34, dmg: 0.45, minRange: 0, maxRange: 1.75, volume: { c: [0, 0.85, 0.8], h: [0.45, 0.5, 0.6] }, lunge: 2.5, knockback: 1, weight: 2, punish: true, combo: { next: 'claw', chance: 0.4, windup: 0.8 } },
       { name: 'claw', windup: 0.45, strike: 0.16, recover: 0.5, dmg: 1, minRange: 0, maxRange: 1.9, volume: { c: [0, 0.9, 0.85], h: [0.55, 0.55, 0.65] }, lunge: 3, knockback: 2, weight: 1.4 },
       { name: 'pounce', windup: 0.55, strike: 0.36, recover: 0.65, dmg: 1.35, minRange: 3, maxRange: 6, volume: { c: [0, 0.8, 0.55], h: [0.45, 0.55, 0.55] }, lunge: 11, knockback: 4, feint: 0.2 },
     ],

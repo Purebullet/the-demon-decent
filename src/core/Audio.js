@@ -127,7 +127,7 @@ export class Audio {
     else this.play(`swing_heavy_${take(2)}`, { volume: sluggish ? 0.5 : 0.8, rate: sluggish ? 0.9 : 1.15 });
     if (flame) this.play('flame_swing', { volume: 0.7, gap: 0.05 });
   }
-  footstep(ground = 'stone', pace = 1) {
+  footstep(ground = 'gravel', pace = 1) {
     this.play(`step_${ground}_${1 + Math.floor(Math.random() * 3)}`, { volume: 0.22 + 0.12 * Math.min(1.6, pace), gap: 0.12, rate: 0.95 + 0.05 * Math.min(1.6, pace) });
   }
   slime() {

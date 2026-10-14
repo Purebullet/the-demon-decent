@@ -26,6 +26,8 @@ const HP_SCALE = 1.3;
 const BOSS_HP_SCALE = 1.15;
 const DAMAGE_SCALE = 1.8;
 const WINDUP_SCALE = 1.35;
+// A punish (a quick attack into a sluggish swing) winds up this much faster.
+const PUNISH = 0.55;
 // The answer to a blow on a raised guard comes quicker than a normal attack.
 const RIPOSTE = 0.55;
 // How long a guard takes to come up, and the arc it covers (cos of half-angle).
@@ -269,7 +271,11 @@ export class Enemy {
         break;
       case 'recover':
         this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.3);
-        if (this.stateT >= this.stateDur) this._endAttack(ctx);
+        // A quick demon cuts its recovery short to punish a sluggish swing.
+        if (this.stateT >= this.stateDur || (player.exposed && this.stateT > 0.1 && dist < 2.2 && this.type.attacks.some((a) => a.punish))) {
+          this._endAttack(ctx);
+          if (this.state === 'chase') this._considerAttack(dt, ctx, dist);
+        }
         break;
       case 'stagger':
         if (this.stateT >= this.stateDur) {
@@ -515,11 +521,19 @@ export class Enemy {
     }
     // Blinkers vanish and come back where you are not looking.
     if (this.type.blink && this.blinkCd <= 0 && this._tryBlink(ctx, dist)) return;
-    // A sluggish, fumbled swing is an opening: every demon in reach takes it.
+    // A sluggish, fumbled swing is an opening: every demon in reach takes it,
+    // and one with a quick attack for it (the stalker's snap) strikes at once.
     const opening = player.exposed && dist <= this.type.attacks[0].maxRange + 0.6;
-    if (opening) this.cooldown = Math.min(this.cooldown, 0.08);
-    if (this.cooldown > 0) return;
     const off = Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z)));
+    if (opening) {
+      const quick = this.type.attacks.find((a) => a.punish && dist <= a.maxRange + 0.4);
+      if (quick && off < 1.4) {
+        this._startAttack(quick, ctx, PUNISH);
+        return;
+      }
+      this.cooldown = Math.min(this.cooldown, 0.08);
+    }
+    if (this.cooldown > 0) return;
     // Behind it, or pressed right up against it: what only that answers.
     const behind = off > 1.6 || dist < 1.3;
     const options = this.type.attacks.filter((a) => !a.comboOnly && dist >= a.minRange && dist <= a.maxRange && (!a.behind || behind));
@@ -1092,9 +1106,12 @@ export class Enemy {
     ctx.director.releaseToken(this);
     ctx.pathService.cancel(this);
     this.attack = null;
-    // A model with its own death clip is thrown along the killing blow, falls
-    // and flops (see _updateDying), lies there for a while, then sinks.
-    this.setState('dying', this.model.ownDeath ? CORPSE_TIME : 1.6);
+    // A rigged demon goes limp: a ragdoll, thrown along the killing blow, that
+    // lies where it falls and shifts when walked into. A model with its own
+    // death clip (a boss) is thrown, falls and flops (see _updateDying). Both
+    // lie there for a while, then sink.
+    this.ragdolled = !this.isBoss && !!this.model.canRagdoll;
+    this.setState('dying', this.ragdolled ? RAGDOLL_TIME : this.model.ownDeath ? CORPSE_TIME : 1.6);
     this.deathYaw = this.yaw;
     const hit = this.lastHit || { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw), knockback: 3 };
     const mass = this.isBoss ? 30 : this.type.mass || 1;
@@ -1106,6 +1123,7 @@ export class Enemy {
       const along = Math.atan2(hit.x, hit.z);
       this.deathYaw = this.model.fallsForward ? along : along + Math.PI;
     }
+    if (this.ragdolled) this.model.startRagdoll({ x: this.rag.vx, y: this.rag.vy, z: this.rag.vz });
     burst(ctx.fx.alpha, tmpV.set(this.position.x, 1, this.position.z), { count: 60, speed: 5, color: C.blood, colorEnd: C.bloodDark, size: 0.18, life: 1.1 });
     ctx.audio?.death(this.typeKey, this.position);
     ctx.audio?.kill?.();
@@ -1117,6 +1135,15 @@ export class Enemy {
   _updateDying(dt, ctx) {
     const k = Math.min(1, this.stateT / this.stateDur);
     for (const e of this.emitters) e.rate *= 1 - Math.min(1, dt * 3);
+    if (this.ragdolled) {
+      // The body is the ragdoll's now; the player shoves it walking through.
+      const p = ctx.player;
+      const pushers = p.dead ? [] : [{ x: p.position.x, z: p.position.z, r: 0.42, h: 1.1 }];
+      const sink = Math.max(0, (this.stateT - (this.stateDur - 1.5)) / 1.5) * 1.5 * (this.type.scale || 1);
+      this.model.stepRagdoll(dt, ctx.world, pushers, sink);
+      if (k >= 1) this.removed = true;
+      return;
+    }
     if (!this.model.ownDeath) {
       const fall = Math.min(1, this.stateT / 0.45);
       this.root.rotation.set(-fall * fall * 1.35, this.deathYaw, 0, 'YXZ');
@@ -1150,8 +1177,10 @@ export class Enemy {
   }
 }
 
-// How long a body stays on the floor (with its death clip), sinking at the end.
+// How long a body stays on the floor (with its death clip, or as a ragdoll),
+// sinking at the end.
 const CORPSE_TIME = 9;
+const RAGDOLL_TIME = 16;
 
 // The guard made visible: a burning ward of runes held before the chest.
 const wardGeo = new THREE.PlaneGeometry(1, 1);

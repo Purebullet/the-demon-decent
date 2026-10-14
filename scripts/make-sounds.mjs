@@ -7,7 +7,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { INTRO_SECONDS } from '../src/core/soundFormat.js';
+import { song } from './make-music.mjs';
 
 const RATE = 22050;
 
@@ -420,33 +420,10 @@ const SOUNDS = {
     for (let i = 0; i < 6; i++) noise(o, { type: 'highpass', freq: 2500, decay: 0.01, gain: 0.12, delay: 0.05 + rnd() * 0.2 });
     punch(o, 1.8);
   },
-  // Footsteps, three takes of each ground.
-  ...steps('stone', (o, k) => {
-    noise(o, { type: 'lowpass', freq: 420 + 80 * k, freqEnd: 140, decay: 0.07, gain: 0.7 });
-    noise(o, { freq: 1700 + 400 * k, q: 1.3, decay: 0.045, gain: 0.18, delay: 0.005 });
-    noise(o, { type: 'highpass', freq: 3500, decay: 0.006, gain: 0.12 });
-  }),
+  // Footsteps on gravel (the surface's, kept all the way down), three takes.
   ...steps('gravel', (o, k) => {
     noise(o, { type: 'lowpass', freq: 380, freqEnd: 120, decay: 0.06, gain: 0.55 });
     for (let i = 0; i < 7; i++) noise(o, { freq: 1800 + rnd() * 2600, q: 3, decay: 0.012 + rnd() * 0.015, gain: 0.22, delay: 0.004 + rnd() * 0.09 + k * 0.004 });
-  }),
-  ...steps('wet', (o, k) => {
-    noise(o, { type: 'lowpass', freq: 380, freqEnd: 130, decay: 0.06, gain: 0.5 });
-    squelch(o, { dur: 0.14 + 0.03 * k, gain: 0.4, freq: 700 + 150 * k });
-    noise(o, { freq: 1400 + 200 * k, freqEnd: 700, q: 1.2, attack: 0.01, decay: 0.12, gain: 0.25, delay: 0.02 });
-  }),
-  ...steps('bone', (o, k) => {
-    noise(o, { type: 'lowpass', freq: 350, freqEnd: 120, decay: 0.05, gain: 0.45 });
-    for (let i = 0; i < 3; i++) tone(o, { type: 'triangle', freq: 900 + rnd() * 900 + 120 * k, freqEnd: 700, decay: 0.03 + rnd() * 0.03, gain: 0.14, delay: i * (0.018 + rnd() * 0.02) });
-    noise(o, { freq: 2600, q: 2, decay: 0.03, gain: 0.15, delay: 0.01 });
-  }),
-  ...steps('ash', (o, k) => {
-    noise(o, { type: 'lowpass', freq: 1100 + 200 * k, freqEnd: 300, attack: 0.008, decay: 0.11, gain: 0.45 });
-    for (let i = 0; i < 4; i++) noise(o, { freq: 1500 + rnd() * 1500, q: 2, decay: 0.02, gain: 0.08, delay: 0.01 + rnd() * 0.07 });
-  }),
-  ...steps('flesh', (o, k) => {
-    noise(o, { type: 'lowpass', freq: 300, freqEnd: 100, decay: 0.08, gain: 0.55 });
-    squelch(o, { dur: 0.18 + 0.03 * k, gain: 0.5, freq: 450 + 100 * k });
   }),
 };
 
@@ -522,104 +499,6 @@ function drone() {
     o[i] = o[i] * k + o[n - fade + i] * (1 - k);
   }
   return o.subarray(0, n - fade);
-}
-
-// ---- The intro song ------------------------------------------------------
-//
-// For the title and the surface, until you jump: the earth itself groaning
-// (a low drone, a rumble and a throat-sung vowel slowly shifting over it),
-// then a war drum, far apart at first, beating quicker and quicker, a
-// higher drum and rattles joining it, until it runs into a driving loop
-// (intro_loop) that plays on at that pace.
-
-const SONG_BUILD = INTRO_SECONDS;
-const BEAT_START = 1.5;
-const BEAT_END = 0.25;
-const LOOP = 8;
-
-// The groaning earth: E1, its octave, a rumble, a vowel. Whole cycles in
-// LOOP seconds, so the loop's copy of it loops seamlessly.
-function earth(o, from, secs, swell = () => 1) {
-  const f = 41.25;
-  const n = Math.floor(secs * RATE);
-  const lp = biquad('lowpass', 0.7);
-  const rum = biquad('lowpass', 0.6);
-  const vowel = biquad('bandpass', 4);
-  let p1 = 0;
-  let p2 = 0;
-  let p3 = 0;
-  for (let i = 0; i < n; i++) {
-    const t = from + i / RATE;
-    p1 = (p1 + f / RATE) % 1;
-    p2 = (p2 + (f * 2.004) / RATE) % 1;
-    p3 = (p3 + (f * 2) / RATE) % 1;
-    const saw = (2 * p1 - 1) * 0.6 + (2 * p2 - 1) * 0.4;
-    let v = lp(saw, 140 + 90 * (0.5 + 0.5 * Math.sin((2 * Math.PI * t) / LOOP))) * 0.55;
-    v += Math.sin(2 * Math.PI * f * t) * 0.35;
-    v += rum(rnd() * 2 - 1, 90) * 1.6;
-    const throat = (2 * p3 - 1) * 0.5;
-    v += vowel(throat, 380 + 260 * (0.5 + 0.5 * Math.sin((2 * Math.PI * t) / LOOP + 1))) * 0.35;
-    o[i] += v * swell(t);
-  }
-}
-
-// A war drum: a deep skin whose pitch drops as it rings, a slap of the
-// stick, and air.
-function drum(o, at, { f0 = 95, f1 = 44, decay = 0.65, gain = 0.9, slap = 0.35 } = {}) {
-  const start = Math.floor(at * RATE);
-  const n = Math.floor((decay + 0.05) * RATE);
-  const lp = biquad('lowpass', 0.7);
-  let ph = 0;
-  for (let i = 0; i < n && start + i < o.length; i++) {
-    if (start + i < 0) continue;
-    const t = i / RATE;
-    const f = f1 + (f0 - f1) * Math.exp(-t / 0.05);
-    ph += f / RATE;
-    const env = Math.exp(-t / (decay * 0.35));
-    o[start + i] += (Math.sin(2 * Math.PI * ph) * env + lp(rnd() * 2 - 1, 900) * Math.exp(-t / 0.02) * slap) * gain;
-  }
-}
-const hiDrum = (o, at, gain = 0.4) => drum(o, at, { f0: 240, f1: 170, decay: 0.18, gain, slap: 0.6 });
-function rattle(o, at, gain = 0.12) {
-  noise(o, { type: 'highpass', freq: 5000, attack: 0.006, decay: 0.05, gain, delay: at });
-}
-
-function song() {
-  // The build: the drum's beat shrinks from BEAT_START to BEAT_END seconds.
-  const intro = track(SONG_BUILD + 1.5);
-  earth(intro, 0, SONG_BUILD + 1.5, (t) => Math.min(1, t / 5) * (0.8 + 0.2 * Math.min(1, t / SONG_BUILD)));
-  const lead = 6;
-  const span = SONG_BUILD - lead;
-  let t = lead;
-  let k = 0;
-  while (t < SONG_BUILD - 0.01) {
-    const u = (t - lead) / span;
-    const beat = BEAT_START * Math.pow(BEAT_END / BEAT_START, u);
-    const accent = k % 4 === 0;
-    drum(intro, t, { gain: (accent ? 0.95 : 0.7) * (0.6 + 0.4 * u), f0: accent ? 90 : 105, decay: accent ? 0.75 : 0.5 });
-    if (u > 0.35) hiDrum(intro, t + beat / 2, 0.22 + 0.25 * u);
-    if (u > 0.65) {
-      rattle(intro, t + beat / 4, 0.06 + 0.1 * u);
-      rattle(intro, t + (beat * 3) / 4, 0.06 + 0.1 * u);
-    }
-    t += beat;
-    k++;
-  }
-  // The loop: the same earth and drums at the final pace, LOOP seconds that
-  // join end to start (rendered with a second either side, then cut).
-  const pad = 1;
-  const whole = track(LOOP + 2 * pad);
-  earth(whole, -pad, LOOP + 2 * pad);
-  for (let b = -8; b < (LOOP + 2 * pad) / BEAT_END + 8; b++) {
-    const at = pad + b * BEAT_END;
-    const accent = ((b % 4) + 4) % 4 === 0;
-    drum(whole, at, { gain: accent ? 1 : 0.72, f0: accent ? 90 : 105, decay: accent ? 0.75 : 0.5 });
-    hiDrum(whole, at + BEAT_END / 2, 0.45);
-    rattle(whole, at + BEAT_END / 4, 0.15);
-    rattle(whole, at + (BEAT_END * 3) / 4, 0.15);
-  }
-  const loop = whole.slice(Math.floor(pad * RATE), Math.floor((pad + LOOP) * RATE));
-  return { intro, loop };
 }
 
 function normalize(o, peak = 0.8) {

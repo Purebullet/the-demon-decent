@@ -3,6 +3,7 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { Hurtbox, AnchoredHurtbox } from '../physics/Hitbox.js';
 import { attackWeights, FLAMES } from './poses.js';
 import { attackClipTime } from './clipPhases.js';
+import { Ragdoll } from './Ragdoll.js';
 
 // Wraps an AI-generated GLB creature for the game: root, joints, body-part
 // hurtboxes, fire emitters and an animate() driven by the AI state.
@@ -362,10 +363,31 @@ export function buildGltfCharacter(id, rootScale = 1) {
     rec.out.copy(bone.quaternion);
   }
 
+  // A rigged body goes limp when it dies: a ragdoll takes the skeleton over
+  // from the clips (see Ragdoll.js) and the body lies where it fell.
+  let rag = null;
+  function startRagdoll(impulse) {
+    root.updateMatrixWorld(true);
+    rag = new Ragdoll(bones, H, impulse);
+    // It can end up well away from where it stood: never culled for that.
+    inst.model.traverse((o) => {
+      if (o.isSkinnedMesh) o.frustumCulled = false;
+    });
+  }
+  function stepRagdoll(dt, world, pushers, sink) {
+    if (!rag) return;
+    rag.sink = sink;
+    rag.step(dt, world, pushers);
+  }
+
   const tmp = new THREE.Vector3();
   function animate(e, dt, t) {
     // Frozen solid: the pose stays exactly where the ice caught it.
     if (e.state === 'frozen') return;
+    if (rag) {
+      rag.apply();
+      return;
+    }
     pose.rotation.set(0, 0, 0);
     const sdt = Math.min(dt, 1 / 30);
     spring.vx += (-SPRING_K * spring.x - SPRING_C * spring.vx) * sdt;
@@ -433,6 +455,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
     // Long beasts reach further from their centre than they are tall.
     hitRadius: Math.max(H * 0.6, reach),
     ownDeath: !!clips.death && !!mixer,
+    canRagdoll: rigged && !!mixer,
+    startRagdoll,
+    stepRagdoll,
     fallsForward: inst.rig?.death === 'forward',
     generated: true,
     rigged,

@@ -397,6 +397,7 @@ export class Hud {
   }
 
   setEnd(info) {
+    if (!info.ready) this.endShownAt = this.time;
     this.endInfo = info;
     this.dirty = true;
   }
@@ -512,7 +513,7 @@ export class Hud {
     c.on = on;
     c.x = x;
     c.y = y;
-    const code = on && this.panel === 'choice' ? this.buttonAt(x, y) : null;
+    const code = on && (this.panel === 'choice' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
     if (code !== this.hoverCode) {
       this.hoverCode = code;
       this.dirty = true;
@@ -1604,7 +1605,7 @@ export class Hud {
     y += big * 0.9;
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 2.6);
     g.font = `${Math.max(16, big * 0.27)}px ${SERIF}`;
-    const label = 'Enter the pit';
+    const label = 'Fall into the pit';
     const bw = g.measureText(label).width + 48;
     this._box(g, (w - bw) / 2, y - 24, bw, 48, `rgba(${40 + pulse * 30},6,4,0.88)`, '#8a2210');
     this._text(g, label.toUpperCase(), w / 2, y, { size: Math.max(14, big * 0.22), ls: 2, color: C.light, align: 'center', base: 'middle', glow: `rgba(200,40,0,${0.5 + pulse * 0.4})` });
@@ -1629,26 +1630,47 @@ export class Hud {
         y += 17;
       });
     }
-    // Controls.
+    // Controls, in three columns: getting about, fighting, and what you
+    // can do once you have learned it. Keys bold and bright, what they do
+    // quieter beside them.
     if (!this.touch && h > 420) {
-      // Keys bold and bright, what they do quieter beside them.
-      const rows = [
-        ['W A S D', 'move', 'Mouse', 'aim'],
-        ['Left click', 'attack: tap or hold', 'Right click', 'block'],
-        ['Click as it lands', 'Perfect Chain', 'Hit a wind-up', 'counter'],
-        ['Shift', 'sprint', 'A A / D D', 'dodge (once learned)'],
-        ['E', 'drink potion', '1 2 3', 'demon spells'],
-        ['F', 'take / use', '', ''],
+      const cols = [
+        { title: 'Move', keyW: 78, rows: [['W A S D', 'move'], ['Mouse', 'aim'], ['Shift', 'sprint'], ['E', 'drink potion'], ['F', 'take / use']] },
+        {
+          title: 'Fight',
+          keyW: 186,
+          rows: [
+            ['Quick left click', 'light attack'],
+            ['Hold left click', 'heavy attack'],
+            ['Multiple hits', 'chain attack'],
+            ['Hit enemy during wind-up', 'stagger'],
+            ['Right click', 'block'],
+          ],
+        },
+        { title: 'Once learned', keyW: 86, rows: [['A A / D D', 'dodge'], ['1 2 3', 'demon spells']] },
       ];
-      let cy = Math.max(y + 20, h - 24 - rows.length * 20);
-      this._box(g, w / 2 - 250, cy - 22, 500, rows.length * 20 + 18, 'rgba(10,2,2,0.7)', C.edge);
-      for (const [a, b, c2, d] of rows) {
-        this._text(g, a, w / 2 - 230, cy, { size: 14, weight: 'bold ', color: C.light });
-        this._text(g, b, w / 2 - 105, cy, { size: 13, color: C.ash });
-        this._text(g, c2, w / 2 + 30, cy, { size: 14, weight: 'bold ', color: C.light });
-        this._text(g, d, w / 2 + 145, cy, { size: 13, color: C.ash });
-        cy += 20;
-      }
+      const colW = [214, 330, 196];
+      const pw = colW.reduce((a, b) => a + b, 0) + 40;
+      const rows = Math.max(...cols.map((c) => c.rows.length));
+      const ph = 34 + rows * 20 + 12;
+      let cy = Math.max(y + 20, h - 16 - ph);
+      const px = w / 2 - pw / 2;
+      this._box(g, px, cy, pw, ph, 'rgba(10,2,2,0.72)', C.edge);
+      let cx = px + 22;
+      cols.forEach((col, k) => {
+        this._label(g, col.title, cx, cy + 24, { size: 11, color: k === 2 ? C.ember : C.ash });
+        col.rows.forEach(([key, what], r) => {
+          const ry = cy + 46 + r * 20;
+          this._text(g, key, cx, ry, { size: 14, weight: 'bold ', color: C.light });
+          this._text(g, what, cx + col.keyW, ry, { size: 13, color: C.ash });
+        });
+        cx += colW[k];
+        // A rule between columns.
+        if (k < cols.length - 1) {
+          g.fillStyle = 'rgba(106,26,16,0.6)';
+          g.fillRect(cx - 14, cy + 14, 1, ph - 28);
+        }
+      });
     }
   }
 
@@ -1716,32 +1738,386 @@ export class Hud {
     if (line) this._text(g, line, x, y, { size, color });
   }
 
+  // The end of a run: a sigil turning slowly behind the verdict, the cause
+  // of it, and a framed panel: how deep you got (with the descent's twenty
+  // floors as a gauge), and six stones, each with its own mark, for what you
+  // did on the way. Then the way back up. Each part comes in after the last.
   _paintEnd(g) {
     const { vw: w, vh: h } = this;
+    const e = this.endInfo || {};
     const won = this.panel === 'victory';
-    const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
-    grad.addColorStop(0, won ? 'rgba(80,30,0,0.5)' : 'rgba(60,0,0,0.55)');
-    grad.addColorStop(1, won ? 'rgba(4,1,0,0.9)' : 'rgba(4,0,0,0.92)');
+    const t = this.time - (this.endShownAt ?? this.time);
+    const appear = (at, dur = 0.5) => Math.max(0, Math.min(1, (t - at) / dur));
+    const hue = won ? { main: '#ffd28a', deep: 'rgba(255,140,20,', glow: 'rgba(255,120,0,0.85)', accent: '#ffb347', edge: '#8a5a10' } : { main: '#c8160c', deep: 'rgba(170,10,0,', glow: 'rgba(140,0,0,1)', accent: C.ember, edge: C.edge };
+
+    // The dark, a pool of red at its heart.
+    const grad = g.createRadialGradient(w / 2, h * 0.42, 0, w / 2, h * 0.42, Math.max(w, h) * 0.75);
+    grad.addColorStop(0, won ? 'rgba(60,26,0,0.8)' : 'rgba(58,0,0,0.82)');
+    grad.addColorStop(0.55, 'rgba(12,0,0,0.88)');
+    grad.addColorStop(1, 'rgba(2,0,0,0.97)');
     g.fillStyle = grad;
     g.fillRect(0, 0, w, h);
-    const e = this.endInfo || {};
-    const big = Math.max(40, Math.min(110, w * 0.09));
-    this._text(g, won ? 'HELL IS CONQUERED' : 'YOU DIED', w / 2, h * 0.36, { size: won ? big * 0.75 : big, ls: big * 0.08, color: won ? '#ffd28a' : '#c01a0e', align: 'center', glow: won ? 'rgba(255,120,0,0.8)' : 'rgba(120,0,0,1)' });
-    this._divider(g, w / 2, h * 0.36 + 16, Math.min(w * 0.6, big * 7));
-    let y = h * 0.36 + 46;
-    for (const line of e.lines || []) {
-      this._text(g, line, w / 2, y, { size: 17, align: 'center' });
-      y += 24;
-    }
-    y += 18;
+    this._sigil(g, w / 2, h * 0.24, Math.min(w, h) * 0.3, this.time * 0.05, `${hue.deep}${0.16 * appear(0, 1.2)})`);
+    this._embers(g, w, h, won);
+
+    // The verdict.
+    const big = Math.max(40, Math.min(104, w * 0.085));
+    const ty = h * 0.22;
+    g.save();
+    g.globalAlpha = appear(0, 0.7);
+    this._text(g, won ? 'HELL IS CONQUERED' : 'YOU DIED', w / 2, ty, { size: won ? big * 0.72 : big, ls: big * 0.1, color: hue.main, align: 'center', glow: hue.glow });
+    this._ornament(g, w / 2, ty + big * 0.24, Math.min(w * 0.62, 760), hue.accent);
+    const [cause, after] = e.lines || [];
+    if (cause) this._text(g, cause, w / 2, ty + big * 0.24 + 40, { size: 21, color: C.light, align: 'center' });
+    if (after) this._text(g, after, w / 2, ty + big * 0.24 + 66, { size: 15, color: C.ash, align: 'center' });
+    g.restore();
+
+    // The panel: depth on the left, the stones on the right.
+    const pw = Math.min(900, w - 40);
+    const ph = 214;
+    const px = (w - pw) / 2;
+    const py = ty + big * 0.24 + 96;
+    g.save();
+    g.globalAlpha = appear(0.45);
+    this._frame(g, px, py, pw, ph, hue);
+    const dw = Math.min(250, pw * 0.3);
+    const dx = px + dw / 2 + 14;
+    this._label(g, won ? 'The whole descent' : 'Depth reached', dx, py + 34, { size: 11, align: 'center', color: C.ash });
+    this._text(g, String(e.floor ?? 0), dx - 10, py + 108, { size: 70, color: hue.accent, align: 'center', glow: hue.glow });
+    this._text(g, `/ ${e.floors ?? 20}`, dx + 34, py + 108, { size: 20, color: C.ash });
+    this._gauge(g, dx - (dw - 40) / 2, py + 132, dw - 40, e.floor ?? 0, e.deepest ?? 0, e.floors ?? 20, hue);
+    if (e.record) this._badge(g, dx, py + 182, 'New deepest', hue);
+    else this._label(g, `Deepest: Floor ${e.deepest ?? 0}`, dx, py + 186, { size: 11, align: 'center', color: C.bone });
+    // The rule between the two halves.
+    g.fillStyle = `${hue.deep}0.45)`;
+    g.fillRect(px + dw + 26, py + 22, 1, ph - 44);
     const stats = e.stats || [];
-    const colW = Math.min(140, (w - 40) / Math.max(1, stats.length));
-    stats.forEach(([label, value], k) => {
-      const x = w / 2 + (k - (stats.length - 1) / 2) * colW;
-      this._label(g, label, x, y, { size: 10, align: 'center' });
-      this._text(g, String(value), x, y + 32, { size: 28, color: C.ember, align: 'center', glow: 'rgba(160,30,0,0.9)' });
+    const gx = px + dw + 44;
+    const gw = pw - dw - 66;
+    const tw = (gw - 24) / 3;
+    const th = (ph - 52) / 2;
+    stats.forEach(([icon, label, value], k) => {
+      const tx = gx + (k % 3) * (tw + 12);
+      const tyy = py + 22 + Math.floor(k / 3) * (th + 8);
+      g.save();
+      g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
+      this._tile(g, tx, tyy, tw, th, icon, label, value, hue);
+      g.restore();
     });
-    if (e.ready) this._label(g, this.touch ? 'Tap to rise again at the surface' : 'Click to rise again at the surface', w / 2, y + 80, { size: 12, align: 'center', color: C.bone });
+    g.restore();
+
+    // The way back up.
+    const by = py + ph + 46;
+    if (e.ready) {
+      const a = Math.min(appear(1.2, 0.6), 1);
+      const hot = this.hoverCode === 'Space';
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * 3);
+      const label = won ? 'Return to the surface' : 'Rise again';
+      g.save();
+      g.globalAlpha = a;
+      g.font = `bold 20px ${SERIF}`;
+      const bw = Math.max(260, g.measureText(label.toUpperCase()).width + 90);
+      this._button(g, w / 2 - bw / 2, by - 26, bw, 52, label.toUpperCase(), hot, pulse, hue);
+      this._label(g, this.touch ? 'Tap to begin again at the surface' : 'Click, or press Space, to begin again at the surface', w / 2, by + 50, { size: 11, align: 'center', color: C.ash });
+      g.restore();
+      this.buttons.push({ x: (w / 2) * this.u, y: by * this.u, w: bw * this.u, h: 52 * this.u, code: 'Space', rect: true });
+    }
+  }
+
+  // A ring of runes and a five-pointed star, turning.
+  _sigil(g, x, y, r, angle, color) {
+    g.save();
+    g.translate(x, y);
+    g.rotate(angle);
+    g.strokeStyle = color;
+    g.lineWidth = 2;
+    for (const k of [1, 0.86, 0.5]) {
+      g.beginPath();
+      g.arc(0, 0, r * k, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.beginPath();
+    for (let i = 0; i <= 5; i++) {
+      const a = -Math.PI / 2 + (i * 4 * Math.PI) / 5;
+      const px = Math.cos(a) * r * 0.86;
+      const py = Math.sin(a) * r * 0.86;
+      if (i) g.lineTo(px, py);
+      else g.moveTo(px, py);
+    }
+    g.stroke();
+    // Rune ticks between the outer rings.
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const l = i % 5 ? 0.06 : 0.12;
+      g.beginPath();
+      g.moveTo(Math.cos(a) * r * 0.88, Math.sin(a) * r * 0.88);
+      g.lineTo(Math.cos(a) * r * (0.88 + l), Math.sin(a) * r * (0.88 + l));
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  // Ash and embers drifting up the screen.
+  _embers(g, w, h, gold) {
+    g.save();
+    for (let i = 0; i < 46; i++) {
+      const sx = ((i * 97.13) % 1) * w;
+      const speed = 14 + ((i * 31.7) % 1) * 30;
+      const y = h - ((this.time * speed + i * 53) % (h + 40)) + 20;
+      const x = sx + Math.sin(this.time * 0.7 + i) * 18 + ((i * 0.618) % 1) * w * 0.9;
+      const r = 0.8 + ((i * 7.31) % 1) * 1.8;
+      const a = 0.25 + 0.5 * ((i * 3.7) % 1);
+      g.fillStyle = gold ? `rgba(255,190,90,${a})` : `rgba(255,${70 + ((i * 13) % 60)},20,${a})`;
+      g.beginPath();
+      g.arc(x % w, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // A rule that fades out at both ends, a diamond at its heart and two horns.
+  _ornament(g, cx, y, w, color) {
+    g.save();
+    const grad = g.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(0.5, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(cx - w / 2, y - 1, w, 2);
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(cx, y - 8);
+    g.lineTo(cx + 8, y);
+    g.lineTo(cx, y + 8);
+    g.lineTo(cx - 8, y);
+    g.closePath();
+    g.fill();
+    for (const s of [-1, 1]) {
+      g.beginPath();
+      g.moveTo(cx + s * 14, y);
+      g.quadraticCurveTo(cx + s * 26, y - 9, cx + s * 40, y - 3);
+      g.quadraticCurveTo(cx + s * 26, y - 4, cx + s * 14, y);
+      g.fill();
+      g.beginPath();
+      g.arc(cx + s * 52, y, 2.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // An iron-bound panel: dark plate, a double rim, studs and spiked corners.
+  _frame(g, x, y, w, h, hue) {
+    this._box(g, x, y, w, h, 'rgba(12,3,2,0.9)', hue.edge);
+    g.save();
+    g.strokeStyle = `${hue.deep}0.35)`;
+    g.lineWidth = 1;
+    g.strokeRect(x + 9.5, y + 9.5, w - 19, h - 19);
+    g.fillStyle = hue.accent;
+    for (const [cx, cy] of [[x + 9.5, y + 9.5], [x + w - 9.5, y + 9.5], [x + 9.5, y + h - 9.5], [x + w - 9.5, y + h - 9.5]]) {
+      g.beginPath();
+      g.arc(cx, cy, 2.6, 0, Math.PI * 2);
+      g.fill();
+    }
+    // A spike out of the middle of the top and bottom edges.
+    for (const [sy, d] of [[y, -1], [y + h, 1]]) {
+      g.beginPath();
+      g.moveTo(x + w / 2 - 12, sy);
+      g.lineTo(x + w / 2, sy + d * 10);
+      g.lineTo(x + w / 2 + 12, sy);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // The descent's floors as a row of notches: the ones you went down lit,
+  // the deepest you ever reached marked above.
+  _gauge(g, x, y, w, floor, deepest, floors, hue) {
+    const step = w / floors;
+    g.save();
+    for (let i = 0; i < floors; i++) {
+      const gone = i < floor;
+      g.fillStyle = gone ? hue.accent : 'rgba(120,60,40,0.35)';
+      const bh = i % 5 === 4 ? 14 : 10;
+      g.fillRect(x + i * step + 1, y + (14 - bh), Math.max(2, step - 3), bh);
+    }
+    if (deepest > 0) {
+      const mx = x + (Math.min(deepest, floors) - 0.5) * step;
+      g.fillStyle = '#f2c79e';
+      g.beginPath();
+      g.moveTo(mx - 5, y - 8);
+      g.lineTo(mx + 5, y - 8);
+      g.lineTo(mx, y - 2);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // A small banner: a record set.
+  _badge(g, cx, cy, text, hue) {
+    g.save();
+    g.font = `bold 12px ${SERIF}`;
+    const tw = g.measureText(text.toUpperCase()).width + 30;
+    g.fillStyle = hue.accent;
+    g.beginPath();
+    g.moveTo(cx - tw / 2 - 8, cy - 11);
+    g.lineTo(cx + tw / 2 + 8, cy - 11);
+    g.lineTo(cx + tw / 2, cy);
+    g.lineTo(cx + tw / 2 + 8, cy + 11);
+    g.lineTo(cx - tw / 2 - 8, cy + 11);
+    g.lineTo(cx - tw / 2, cy);
+    g.closePath();
+    g.fill();
+    g.restore();
+    this._text(g, text.toUpperCase(), cx, cy + 1, { size: 12, weight: 'bold ', color: '#1a0503', align: 'center', base: 'middle', ls: 1.5 });
+  }
+
+  // One stone: its mark, the number, and what it counts.
+  _tile(g, x, y, w, h, icon, label, value, hue) {
+    g.save();
+    g.fillStyle = 'rgba(30,8,5,0.75)';
+    g.fillRect(x, y, w, h);
+    g.strokeStyle = `${hue.deep}0.4)`;
+    g.lineWidth = 1;
+    g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    g.fillStyle = hue.accent;
+    g.fillRect(x, y, 3, h);
+    g.restore();
+    const s = Math.min(34, h * 0.5);
+    this._glyph(g, icon, x + 14 + s / 2, y + h / 2, s, hue.accent);
+    this._text(g, String(value), x + 26 + s, y + h / 2 + 4, { size: 28, color: C.light, glow: 'rgba(120,20,0,0.7)' });
+    this._label(g, label, x + 26 + s, y + h / 2 + 22, { size: 10, color: C.ash });
+  }
+
+  // The marks on the stones, drawn as small silhouettes.
+  _glyph(g, kind, cx, cy, s, color) {
+    g.save();
+    g.translate(cx, cy);
+    g.scale(s / 32, s / 32);
+    g.fillStyle = color;
+    g.strokeStyle = color;
+    g.lineWidth = 2.6;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    if (kind === 'skull') {
+      g.beginPath();
+      g.arc(0, -3, 11, Math.PI * 0.9, Math.PI * 2.1);
+      g.lineTo(7, 10);
+      g.lineTo(-7, 10);
+      g.closePath();
+      g.fill();
+      g.fillStyle = 'rgba(30,8,5,1)';
+      g.beginPath();
+      g.arc(-4.5, -2, 3.2, 0, Math.PI * 2);
+      g.arc(4.5, -2, 3.2, 0, Math.PI * 2);
+      g.fill();
+      g.fillRect(-0.8, 3, 1.6, 4);
+      g.fillRect(-4, 8, 1.2, 3);
+      g.fillRect(2.8, 8, 1.2, 3);
+    } else if (kind === 'chain') {
+      for (const [dx, dy] of [[-6, 5], [6, -5]]) {
+        g.save();
+        g.translate(dx, dy);
+        g.rotate(-Math.PI / 4);
+        g.beginPath();
+        g.ellipse(0, 0, 9, 5, 0, 0, Math.PI * 2);
+        g.stroke();
+        g.restore();
+      }
+    } else if (kind === 'blades') {
+      for (const sgn of [-1, 1]) {
+        g.save();
+        g.rotate((sgn * Math.PI) / 4);
+        g.beginPath();
+        g.moveTo(0, -14);
+        g.lineTo(2.5, -10);
+        g.lineTo(2.5, 6);
+        g.lineTo(-2.5, 6);
+        g.lineTo(-2.5, -10);
+        g.closePath();
+        g.fill();
+        g.fillRect(-6, 6, 12, 2.5);
+        g.fillRect(-1.2, 8.5, 2.4, 6);
+        g.restore();
+      }
+    } else if (kind === 'shield') {
+      g.beginPath();
+      g.moveTo(0, -13);
+      g.lineTo(11, -9);
+      g.lineTo(10, 2);
+      g.quadraticCurveTo(7, 10, 0, 14);
+      g.quadraticCurveTo(-7, 10, -10, 2);
+      g.lineTo(-11, -9);
+      g.closePath();
+      g.fill();
+      g.fillStyle = 'rgba(30,8,5,1)';
+      g.fillRect(-1, -9, 2, 18);
+      g.fillRect(-7, -2, 14, 2);
+    } else if (kind === 'gem') {
+      g.beginPath();
+      g.moveTo(-11, -4);
+      g.lineTo(-6, -11);
+      g.lineTo(6, -11);
+      g.lineTo(11, -4);
+      g.lineTo(0, 13);
+      g.closePath();
+      g.fill();
+      g.strokeStyle = 'rgba(30,8,5,0.9)';
+      g.lineWidth = 1.4;
+      g.beginPath();
+      g.moveTo(-11, -4);
+      g.lineTo(11, -4);
+      g.moveTo(-4, -4);
+      g.lineTo(0, 13);
+      g.lineTo(4, -4);
+      g.stroke();
+    } else if (kind === 'glass') {
+      g.fillRect(-10, -14, 20, 3);
+      g.fillRect(-10, 11, 20, 3);
+      g.beginPath();
+      g.moveTo(-7, -11);
+      g.lineTo(7, -11);
+      g.lineTo(1.5, 0);
+      g.lineTo(7, 11);
+      g.lineTo(-7, 11);
+      g.lineTo(-1.5, 0);
+      g.closePath();
+      g.stroke();
+      g.beginPath();
+      g.moveTo(-4, 11);
+      g.lineTo(4, 11);
+      g.lineTo(0, 5);
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+  }
+
+  // A forged button: hammered plate, a glowing rim, the word in the middle.
+  _button(g, x, y, w, h, label, hot, pulse, hue) {
+    g.save();
+    g.shadowColor = hue.glow;
+    g.shadowBlur = hot ? 26 : 10 + pulse * 10;
+    const fill = g.createLinearGradient(0, y, 0, y + h);
+    fill.addColorStop(0, hot ? 'rgba(120,24,10,0.96)' : 'rgba(70,12,6,0.94)');
+    fill.addColorStop(1, hot ? 'rgba(60,8,4,0.96)' : 'rgba(26,4,2,0.94)');
+    g.fillStyle = fill;
+    g.beginPath();
+    g.moveTo(x + 14, y);
+    g.lineTo(x + w - 14, y);
+    g.lineTo(x + w, y + h / 2);
+    g.lineTo(x + w - 14, y + h);
+    g.lineTo(x + 14, y + h);
+    g.lineTo(x, y + h / 2);
+    g.closePath();
+    g.fill();
+    g.shadowBlur = 0;
+    g.lineWidth = 1.5;
+    g.strokeStyle = hot ? '#ffb070' : hue.accent;
+    g.stroke();
+    g.restore();
+    this._text(g, label, x + w / 2, y + h / 2 + 1, { size: 20, weight: 'bold ', ls: 4, color: hot ? '#fff1dc' : C.light, align: 'center', base: 'middle', glow: hue.glow });
   }
 }
 
