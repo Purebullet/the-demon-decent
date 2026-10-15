@@ -13,7 +13,7 @@
   // The generated street-view pieces (assets/models/lot-*.glb).
   const loader = new GLTFLoader();
   window.lotModels = {};
-  for (const kind of ['spire', 'crag', 'pillar-a', 'pillar-b', 'pillar-c']) {
+  for (const kind of ['horn', 'tower', 'crag', 'pillar-a', 'pillar-b', 'pillar-c']) {
     try {
       window.lotModels[kind] = (await loader.loadAsync(`../assets/models/lot-${kind}.glb`)).scene;
     } catch (e) {

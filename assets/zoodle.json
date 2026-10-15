@@ -304,6 +304,16 @@
       "id": 275,
       "source": "objects",
       "status": "done"
+    },
+    "horn": {
+      "id": 276,
+      "source": "objects",
+      "status": "done"
+    },
+    "tower": {
+      "id": 277,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

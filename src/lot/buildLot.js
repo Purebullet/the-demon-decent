@@ -7,20 +7,21 @@ import { mulberry32, fbm2 } from '../core/rng.js';
 
 // The lot's street view: a hell-mouth diorama that stays inside the lot's
 // box (origin at the middle of the floor, metres, +Y up). A volcanic mound
-// torn open by a glowing pit, a ring of razor-sharp rock spires and crags
-// leaning over it, three kinds of broken pillar standing on its slopes (their
-// shapes generated with Zoodle, all of the mound's own rock), billows of fog boiling
+// torn open by a crater holding a lake of fire, two colossal demon horns
+// rising from its lip and curling over it, ruined hell towers and broken
+// pillars on its slopes and jagged crags round the lip (their shapes
+// generated with Zoodle, all of the mound's own rock), billows of fog boiling
 // up out of the hole, and gobs of lava it spits out now and then, which land
 // on the slopes, smoulder and go out. The game itself lives inside, as an experience.
 //
 // Three levels of detail, as Project 0 asks (skill.md section 3):
-//   LOD0  materials Rock (the mound and the pieces), Glow, Smoke; the Fog
+//   LOD0  materials Rock (the mound and the pieces), Lava, Glow, Smoke; the Fog
 //         shader and the Lava nodes move (lot.json)
 //   LOD1  every piece again, cut down by meshoptimizer, static: Rock and Glow
 //         (the same shaders, as Project 0 gives LOD1 the materials it shares
 //         by name with LOD0)
 //   LOD2  one mesh, one material, one 256 px texture: the mound, the pit and
-//         very light copies of the spires and pillars
+//         very light copies of the horns, towers and pillars
 
 const TAU = Math.PI * 2;
 
@@ -153,7 +154,7 @@ export const LAVA_COUNT = 6;
 // The pieces from Zoodle (loaded by tools/lot.html into `models`), each
 // normalized to stand on y = 0, centred, 1 tall. Only their shapes are used:
 // they wear the mound's rock texture, so they read as the same stone.
-const KINDS = ['spire', 'crag', 'pillar-a', 'pillar-b', 'pillar-c'];
+const KINDS = ['horn', 'tower', 'crag', 'pillar-a', 'pillar-b', 'pillar-c'];
 
 // The rock texture laid on the placed pieces from the side each face looks
 // toward (a box projection per triangle), as dense as on the mound: one
@@ -205,10 +206,27 @@ function lowPoly(geo, tris) {
   return flat;
 }
 
-// Triangles per piece in LOD1 (all 42 pieces, about 8,500 in all) and LOD2
-// (spires and pillars only).
-const LOD1_TRIS = { spire: 220, crag: 130, 'pillar-a': 340, 'pillar-b': 240, 'pillar-c': 340 };
-const LOD2_TRIS = { spire: 26, crag: 0, 'pillar-a': 30, 'pillar-b': 24, 'pillar-c': 30 };
+// Triangles per piece in LOD1 and LOD2 (the tall pieces only).
+const LOD1_TRIS = { horn: 420, tower: 460, crag: 130, 'pillar-a': 300, 'pillar-b': 220, 'pillar-c': 300 };
+const LOD2_TRIS = { horn: 44, tower: 44, crag: 0, 'pillar-a': 24, 'pillar-b': 0, 'pillar-c': 24 };
+
+// Which way a piece leans or curls (the direction from the middle of its
+// foot to the middle of its top, as an angle in its own x-z), so a horn can
+// be turned to curl in over the crater.
+function leanOf(g) {
+  const p = g.attributes.position;
+  const lo = [0, 0, 0];
+  const hi = [0, 0, 0];
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    const a = y < 0.15 ? lo : y > 0.85 ? hi : null;
+    if (!a) continue;
+    a[0] += p.getX(i);
+    a[1] += p.getZ(i);
+    a[2]++;
+  }
+  return Math.atan2(hi[1] / Math.max(1, hi[2]) - lo[1] / Math.max(1, lo[2]), hi[0] / Math.max(1, hi[2]) - lo[0] / Math.max(1, lo[2]));
+}
 
 function bakePiece(scene) {
   scene.updateMatrixWorld(true);
@@ -237,66 +255,70 @@ async function kit(models) {
     const m = models?.[kind];
     if (!m) continue;
     const high = bakePiece(m);
-    pieces[kind] = { high, low: lowPoly(high, LOD1_TRIS[kind]), far: LOD2_TRIS[kind] ? lowPoly(high, LOD2_TRIS[kind]) : null };
+    pieces[kind] = { high, lean: leanOf(high), low: lowPoly(high, LOD1_TRIS[kind]), far: LOD2_TRIS[kind] ? lowPoly(high, LOD2_TRIS[kind]) : null };
   }
   kitCache = { pieces };
   return kitCache;
 }
 
-// Where everything stands, decided once and shared by LOD0 and LOD1:
-// spires and crags in a ring at the crater's lip leaning in over the hole
-// like broken teeth, a few crags scattered down the slopes, and the broken
-// pillars spaced around the mound's skirt. Heights come from the mound
+// Where everything stands, decided once and shared by every LOD. Two
+// colossal horns rise from the crater's lip at its ends, curling in over
+// the lake of fire; ruined hell towers stand on the slopes toward the
+// corners; broken pillars between them; a ring of jagged crags round the
+// lip. Every piece keeps its own proportions (scaled whole, never
+// stretched) and stays under the lot's roof. Heights come from the mound
 // itself (a ray straight down), so nothing floats or sinks.
 function placements(dims, height, groundAt, rnd) {
   const out = [];
-  // Tall pieces are stretched up rather than grown all over (slender, so
-  // they fill the lot's height without crowding the crater), and never
-  // reach past its roof.
-  const tall = (h, y, slim) => {
-    const hh = Math.min(h, height - y - 0.6);
-    return [hh * slim, hh, hh * slim];
-  };
-  const ring = 26;
+  const fit = (h, y) => Math.max(0.5, Math.min(h, height - y - 0.4));
+  const at = (x, z) => [x, groundAt(x, z), z];
+  // The horns, on the lot's long axis.
+  const long = dims.hz >= dims.hx;
+  for (const side of [-1, 1]) {
+    const r = dims.rc * 1.12;
+    const x = long ? (rnd() - 0.5) * 1.2 : side * r;
+    const z = long ? side * r : (rnd() - 0.5) * 1.2;
+    const [, y] = at(x, z);
+    const h = fit(height * 0.92, y);
+    out.push({ kind: 'horn', pos: [x, y - h * 0.03, z], rot: [0, 0, 0], scale: [h, h, h], order: 'XYZ', faceIn: true });
+  }
+  // The towers, out toward the corners.
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const a = Math.atan2(sz * dims.hz, sx * dims.hx);
+    const edge = edgeRadius(a, dims.hx, dims.hz);
+    const r = dims.rc + (edge - dims.rc) * (0.42 + rnd() * 0.12);
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    const [, y] = at(x, z);
+    const h = fit(height * (0.6 + rnd() * 0.14), y);
+    out.push({ kind: 'tower', pos: [x, y - 0.2, z], rot: [0, rnd() * TAU, 0], scale: [h, h, h], order: 'XYZ' });
+  }
+  // Jagged crags round the lip, between the horns.
+  const ring = 14;
   for (let i = 0; i < ring; i++) {
-    const a = (i / ring) * TAU + rnd() * 0.12;
-    const spire = i % 2 === 0 || rnd() < 0.25;
-    const r = dims.rc * (spire ? 0.98 + rnd() * 0.16 : 1.05 + rnd() * 0.25);
+    const a = (i / ring) * TAU + rnd() * 0.15;
+    const r = dims.rc * (1.0 + rnd() * 0.18);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    const y = groundAt(x, z);
-    // The crown of fangs round the lip: most of the lot's height, a few
-    // shorter between them; crags at their feet.
-    const h = spire ? height * (i % 4 === 0 ? 0.45 + rnd() * 0.15 : 0.6 + rnd() * 0.22) : dims.S * (0.07 + rnd() * 0.07);
-    const lean = spire ? 0.06 + rnd() * 0.16 : rnd() * 0.25;
-    const scale = spire ? tall(h, y, 0.55) : [h, h, h];
-    out.push({ kind: spire ? 'spire' : 'crag', pos: [x, y - scale[1] * 0.06, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale, order: 'ZXY' });
+    const [, y] = at(x, z);
+    const h = dims.S * (0.09 + rnd() * 0.07);
+    const lean = rnd() * 0.2;
+    out.push({ kind: 'crag', pos: [x, y - h * 0.08, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h, h, h], order: 'ZXY' });
   }
-  for (let i = 0; i < 9; i++) {
-    const a = rnd() * TAU;
+  // Broken pillars on the sides, between the towers.
+  const kinds = ['pillar-a', 'pillar-c', 'pillar-b'];
+  const spots = long ? [0, Math.PI, Math.PI * 0.5 + 0.35, Math.PI * 1.5 - 0.35] : [Math.PI * 0.5, Math.PI * 1.5, 0.35, Math.PI - 0.35];
+  spots.forEach((a, i) => {
     const edge = edgeRadius(a, dims.hx, dims.hz);
-    const r = dims.rc * 1.35 + (edge - dims.rc * 1.35) * rnd() * 0.75;
+    const r = dims.rc + (edge - dims.rc) * (0.5 + rnd() * 0.15);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    const h = dims.S * (0.05 + rnd() * 0.06);
-    out.push({ kind: 'crag', slope: true, pos: [x, groundAt(x, z) - h * 0.08, z], rot: [(rnd() - 0.5) * 0.3, rnd() * TAU, (rnd() - 0.5) * 0.3], scale: [h, h, h], order: 'XYZ' });
-  }
-  const kinds = ['pillar-a', 'pillar-b', 'pillar-c'];
-  const n = 7;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * TAU + 0.4 + rnd() * 0.3;
-    const edge = edgeRadius(a, dims.hx, dims.hz);
-    const r = dims.rc + (edge - dims.rc) * (0.55 + rnd() * 0.15);
-    const x = Math.cos(a) * r;
-    const z = Math.sin(a) * r;
+    const [, y] = at(x, z);
     const kind = kinds[i % 3];
-    const y = groundAt(x, z);
-    // Ruined columns standing as tall as the crown; the broken one shorter.
-    const h = kind === 'pillar-b' ? height * (0.3 + rnd() * 0.12) : height * (0.55 + rnd() * 0.25);
-    // A few lean as if about to topple.
-    const tilt = rnd() < 0.35 ? 0.06 + rnd() * 0.08 : 0;
-    out.push({ kind, pos: [x, y - 0.15, z], rot: [tilt * Math.cos(a), rnd() * TAU, tilt * Math.sin(a)], scale: tall(h, y, kind === 'pillar-b' ? 0.75 : 0.6), order: 'YXZ' });
-  }
+    const h = fit(kind === 'pillar-b' ? height * 0.24 : height * (0.36 + rnd() * 0.1), y);
+    const tilt = rnd() < 0.3 ? 0.05 + rnd() * 0.06 : 0;
+    out.push({ kind, pos: [x, y - 0.15, z], rot: [tilt * Math.cos(a), rnd() * TAU, tilt * Math.sin(a)], scale: [h, h, h], order: 'YXZ' });
+  });
   return out;
 }
 
@@ -305,7 +327,9 @@ function piecesGeometry(list, pieces, which, dims) {
   for (const p of list) {
     const piece = pieces[p.kind];
     if (!piece?.[which]) continue;
-    const g = placed(piece[which], { pos: p.pos, rot: p.rot, order: p.order, scale: p.scale });
+    // A horn turned so that it curls in over the crater.
+    const rot = p.faceIn ? [p.rot[0], piece.lean - Math.atan2(-p.pos[2], -p.pos[0]), p.rot[2]] : p.rot;
+    const g = placed(piece[which], { pos: p.pos, rot, order: p.order, scale: p.scale });
     // A big piece near the lot's side is drawn back inside it.
     g.computeBoundingBox();
     const b = g.boundingBox;
@@ -475,7 +499,7 @@ export async function buildLod2(width, depth, height, models) {
   const list = placements(dims, height, groundSampler(mound(dims, { segs: 160, rings: 18, lift: 0.1 })), mulberry32(266));
   const rockGeo = toHalf(mound(dims, { segs: 24, rings: 3, lift: 1.0 }), false);
   const fire = toHalf(pitFloor(dims, 10), true);
-  // The spires and pillars as a few dozen triangles each (no crags).
+  // The horns, towers and pillars as a few dozen triangles each (no crags).
   const pieces = piecesGeometry(list, K.pieces, 'far', dims);
   const parts = [rockGeo, fire];
   if (pieces) parts.push(toHalf(pieces, false));

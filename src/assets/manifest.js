@@ -204,6 +204,9 @@ export const PROPS = {
   crag: { model: 'assets/models/lot-crag.glb', size: 2.5, maxTris: 900, lot: true, prompt: `Cluster of sharp jagged broken dark rock shards bursting up from the ground, splintered angular crystalline stone blades, ${LOOK}` },
   pillarA: { model: 'assets/models/lot-pillar-a.glb', size: 5, maxTris: 1600, lot: true, prompt: `Tall ancient gothic stone pillar snapped off at a jagged angle near the top, carved demon faces, chunks missing, cracked plinth, ${LOOK}` },
   pillarB: { model: 'assets/models/lot-pillar-b.glb', size: 3, maxTris: 1600, lot: true, prompt: `Short stump of a thick fluted stone column broken off low with a ragged top, fallen drum segment leaning against it, rubble at the base, ${LOOK}` },
+  // The tall set pieces of the street view, made tall (never stretched).
+  horn: { model: 'assets/models/lot-horn.glb', size: 18, maxTris: 3000, lot: true, prompt: `One colossal curved demon horn rising straight up out of the ground, thick ridged ribbed black horn sweeping up and curling slightly inward to a sharp point, cracked base, tall and narrow, ${LOOK}` },
+  tower: { model: 'assets/models/lot-tower.glb', size: 16, maxTris: 3000, lot: true, prompt: `Tall narrow ruined gothic hell tower of black stone, pointed spire roof, thin arched glowing windows, iron spikes and carved skulls on its buttresses, crumbling battlements, tall and slender, ${LOOK}` },
   pillarC: { model: 'assets/models/lot-pillar-c.glb', size: 4.5, maxTris: 1600, lot: true, prompt: `Ruined twisted spiral stone column wrapped in rusted chains, split down the middle with a crack, top shattered, skull carved on the base, ${LOOK}` },
   // ---- The surface and the sanctums.
   well: { model: 'assets/models/blood-well.glb', size: 2.7, prompt: `Ancient round stone well filled with dark blood, iron frame with hanging chains, ${LOOK}` },
