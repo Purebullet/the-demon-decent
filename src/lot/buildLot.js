@@ -60,7 +60,9 @@ function shape(width, depth, height) {
   const rc = 0.27 * S; // crater lip
   const rb = 0.11 * S; // pit floor
   const hm = Math.min(0.2 * height, 0.3 * S, 6); // mound height at the lip
-  return { S, hx, hz, rc, rb, hm };
+  const dims = { S, hx, hz, rc, rb, hm, lavaY: LAVA_Y };
+  dims.pool = lavaRadius(dims);
+  return dims;
 }
 
 // Mound + funnel + skirt as one radial mesh.
@@ -248,6 +250,13 @@ async function kit(models) {
 // itself (a ray straight down), so nothing floats or sinks.
 function placements(dims, height, groundAt, rnd) {
   const out = [];
+  // Tall pieces are stretched up rather than grown all over (slender, so
+  // they fill the lot's height without crowding the crater), and never
+  // reach past its roof.
+  const tall = (h, y, slim) => {
+    const hh = Math.min(h, height - y - 0.6);
+    return [hh * slim, hh, hh * slim];
+  };
   const ring = 26;
   for (let i = 0; i < ring; i++) {
     const a = (i / ring) * TAU + rnd() * 0.12;
@@ -255,9 +264,13 @@ function placements(dims, height, groundAt, rnd) {
     const r = dims.rc * (spire ? 0.98 + rnd() * 0.16 : 1.05 + rnd() * 0.25);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    const h = spire ? Math.min(height * 0.42, dims.S * (0.13 + rnd() * 0.17)) : dims.S * (0.05 + rnd() * 0.06);
-    const lean = spire ? 0.22 + rnd() * 0.4 : rnd() * 0.25;
-    out.push({ kind: spire ? 'spire' : 'crag', pos: [x, groundAt(x, z) - h * 0.06, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: h, order: 'ZXY' });
+    const y = groundAt(x, z);
+    // The crown of fangs round the lip: most of the lot's height, a few
+    // shorter between them; crags at their feet.
+    const h = spire ? height * (i % 4 === 0 ? 0.45 + rnd() * 0.15 : 0.6 + rnd() * 0.22) : dims.S * (0.07 + rnd() * 0.07);
+    const lean = spire ? 0.06 + rnd() * 0.16 : rnd() * 0.25;
+    const scale = spire ? tall(h, y, 0.55) : [h, h, h];
+    out.push({ kind: spire ? 'spire' : 'crag', pos: [x, y - scale[1] * 0.06, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale, order: 'ZXY' });
   }
   for (let i = 0; i < 9; i++) {
     const a = rnd() * TAU;
@@ -265,8 +278,8 @@ function placements(dims, height, groundAt, rnd) {
     const r = dims.rc * 1.35 + (edge - dims.rc * 1.35) * rnd() * 0.75;
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    const h = dims.S * (0.035 + rnd() * 0.045);
-    out.push({ kind: 'crag', slope: true, pos: [x, groundAt(x, z) - h * 0.08, z], rot: [(rnd() - 0.5) * 0.3, rnd() * TAU, (rnd() - 0.5) * 0.3], scale: h, order: 'XYZ' });
+    const h = dims.S * (0.05 + rnd() * 0.06);
+    out.push({ kind: 'crag', slope: true, pos: [x, groundAt(x, z) - h * 0.08, z], rot: [(rnd() - 0.5) * 0.3, rnd() * TAU, (rnd() - 0.5) * 0.3], scale: [h, h, h], order: 'XYZ' });
   }
   const kinds = ['pillar-a', 'pillar-b', 'pillar-c'];
   const n = 7;
@@ -277,20 +290,29 @@ function placements(dims, height, groundAt, rnd) {
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
     const kind = kinds[i % 3];
-    const h = kind === 'pillar-b' ? dims.S * (0.09 + rnd() * 0.04) : dims.S * (0.17 + rnd() * 0.08);
+    const y = groundAt(x, z);
+    // Ruined columns standing as tall as the crown; the broken one shorter.
+    const h = kind === 'pillar-b' ? height * (0.3 + rnd() * 0.12) : height * (0.55 + rnd() * 0.25);
     // A few lean as if about to topple.
-    const tilt = rnd() < 0.35 ? 0.12 + rnd() * 0.12 : 0;
-    out.push({ kind, pos: [x, groundAt(x, z) - 0.15, z], rot: [tilt * Math.cos(a), rnd() * TAU, tilt * Math.sin(a)], scale: h, order: 'YXZ' });
+    const tilt = rnd() < 0.35 ? 0.06 + rnd() * 0.08 : 0;
+    out.push({ kind, pos: [x, y - 0.15, z], rot: [tilt * Math.cos(a), rnd() * TAU, tilt * Math.sin(a)], scale: tall(h, y, kind === 'pillar-b' ? 0.75 : 0.6), order: 'YXZ' });
   }
   return out;
 }
 
-function piecesGeometry(list, pieces, which) {
+function piecesGeometry(list, pieces, which, dims) {
   const geos = [];
   for (const p of list) {
     const piece = pieces[p.kind];
     if (!piece?.[which]) continue;
-    geos.push(placed(piece[which], { pos: p.pos, rot: p.rot, order: p.order, scale: [p.scale, p.scale, p.scale] }));
+    const g = placed(piece[which], { pos: p.pos, rot: p.rot, order: p.order, scale: p.scale });
+    // A big piece near the lot's side is drawn back inside it.
+    g.computeBoundingBox();
+    const b = g.boundingBox;
+    const X = dims.hx + 0.2;
+    const Z = dims.hz + 0.2;
+    g.translate(Math.min(0, X - b.max.x) + Math.max(0, -X - b.min.x), 0, Math.min(0, Z - b.max.z) + Math.max(0, -Z - b.min.z));
+    geos.push(g);
   }
   return geos.length ? boxUv(mergeGeometries(geos.map(prep))) : null;
 }
@@ -332,10 +354,17 @@ function landingSpots(dims, ground, propsMesh, rnd) {
   return spots;
 }
 
+// The lake of fire filling the bottom of the crater: up the funnel to
+// LAVA_Y, its edge tucked into the funnel's wall.
+export const LAVA_Y = 1.3;
+export function lavaRadius(dims) {
+  const k = (LAVA_Y - 0.25) / (dims.hm - 0.25);
+  return dims.rb + (dims.rc - dims.rb) * Math.pow(k, 0.7) + 0.35;
+}
 function pitFloor(dims, segs) {
-  const g = new THREE.CircleGeometry(dims.rb * 1.05, segs);
+  const g = new THREE.CircleGeometry(lavaRadius(dims), segs, 0, TAU);
   g.rotateX(-Math.PI / 2);
-  g.translate(0, 0.26, 0);
+  g.translate(0, LAVA_Y, 0);
   return g;
 }
 
@@ -360,6 +389,8 @@ function materials() {
     rock: new THREE.MeshStandardMaterial({ name: 'Rock', map: rock.map, roughness: 0.95, metalness: 0 }),
     smoke: new THREE.MeshStandardMaterial({ name: 'Smoke', color: 0x2a2224, roughness: 1, metalness: 0, transparent: true, opacity: 0.6, depthWrite: false }),
     glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1.6, roughness: 0.6, color: 0x220400 }),
+    // The lake: its crust, seams and ripples are all its shader's (lava.glsl).
+    lava: new THREE.MeshStandardMaterial({ name: 'Lava', color: 0x140302, emissive: 0xff5010, emissiveIntensity: 1, roughness: 0.9 }),
   };
 }
 
@@ -380,10 +411,10 @@ export async function buildLod0(width, depth, height, models) {
   const ground = groundSampler(groundGeo);
   const list = placements(dims, height, ground, mulberry32(266));
   root.add(mesh('Ground', prep(groundGeo), M.rock));
-  const props = piecesGeometry(list, K.pieces, 'high');
+  const props = piecesGeometry(list, K.pieces, 'high', dims);
   let propsMesh = null;
   if (props) root.add((propsMesh = mesh('Pieces', props, M.rock)));
-  root.add(mesh('Pit', prep(pitFloor(dims, 48)), M.glow));
+  root.add(mesh('Pit', prep(pitFloor(dims, 72)), M.lava));
   root.add(mesh('Fog', merge(fogPuffs(dims, 34, rnd)), M.smoke));
   for (let i = 0; i < LAVA_COUNT; i++) {
     // Each gob sits at the lot's origin; the script moves the node.
@@ -407,7 +438,7 @@ export async function buildLod1(width, depth, height, models) {
   const groundHigh = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
   const list = placements(dims, height, groundSampler(groundHigh), mulberry32(266));
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
-  const pieces = piecesGeometry(list, K.pieces, 'low');
+  const pieces = piecesGeometry(list, K.pieces, 'low', dims);
   root.add(mesh('Ground', pieces ? mergeGeometries([ground, pieces]) : ground, M.rock));
   root.add(mesh('Glow', prep(pitFloor(dims, 20)), M.glow));
   return { root, dims };
@@ -445,7 +476,7 @@ export async function buildLod2(width, depth, height, models) {
   const rockGeo = toHalf(mound(dims, { segs: 24, rings: 3, lift: 1.0 }), false);
   const fire = toHalf(pitFloor(dims, 10), true);
   // The spires and pillars as a few dozen triangles each (no crags).
-  const pieces = piecesGeometry(list, K.pieces, 'far');
+  const pieces = piecesGeometry(list, K.pieces, 'far', dims);
   const parts = [rockGeo, fire];
   if (pieces) parts.push(toHalf(pieces, false));
   const root = new THREE.Group();
@@ -484,7 +515,7 @@ export async function buildLot({ width, depth, height }, models = globalThis.lot
     let s = '';
     const b = new Uint8Array(buf);
     for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
-    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm }, landing };
+    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, lavaY: dims.lavaY }, landing };
   }
   return out;
 }
