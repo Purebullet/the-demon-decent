@@ -209,8 +209,8 @@ void p0Surface(inout P0Surface s) {
   vec3 tint = mix(vec3(0.6, 0.6, 0.66), vec3(1.3, 0.95, 0.78), smoothstep(0.3, 0.72, m1 * 0.7 + m2 * 0.3));
   s.color *= tint * (0.72 + 0.45 * m2) * (0.85 + 0.3 * m3);
   s.color *= 1.0 + 0.14 * sin(y * 2.4 + m1 * 9.0);
-  float flat = smoothstep(0.8, 0.97, s.normal.y) * smoothstep(0.45, 0.7, m2);
-  s.color = mix(s.color, vec3(0.2, 0.18, 0.17), flat * 0.45);
+  float ash = smoothstep(0.8, 0.97, s.normal.y) * smoothstep(0.45, 0.7, m2);
+  s.color = mix(s.color, vec3(0.2, 0.18, 0.17), ash * 0.45);
   s.color *= 1.0 - 0.3 * smoothstep(mound * 1.2, mound * 2.6, y);
   float n = rockNoise(s.position * 1.3) * 0.6 + rockNoise(s.position * 3.7) * 0.4;
   float crack = smoothstep(0.05, 0.0, abs(n - 0.5));
