@@ -227,9 +227,14 @@ void p0Surface(inout P0Surface s) {
   float run = rockNoise(vec3(a * 9.0, y * 1.6 + p0Time * 1.3, 0.7));
   float hot = smoothstep(0.35, 0.75, run);
   s.emissive += mix(vec3(0.9, 0.12, 0.01), vec3(1.0, 0.55, 0.12), hot) * stream * (0.6 + 1.6 * hot);
-  // The rocks standing in the lake: dark, glowing where the melt laps them.
+  // Inside the lake's rim: the rocks standing in it glow only in a thin band
+  // where the melt laps them, and the opening's throat below (in the far
+  // view, where it is rock) stays dark.
   float sunk = 1.0 - smoothstep(pool - 0.6, pool - 0.35, r);
-  s.emissive += vec3(1.0, 0.22, 0.02) * sunk * (1.0 - smoothstep(lake - 0.05, lake + 0.3, y)) * (0.8 + 0.3 * sin(p0Time * 2.0 + a * 3.0));
+  float deep = sunk * (1.0 - smoothstep(lake - 0.45, lake - 0.2, y));
+  s.emissive *= 1.0 - deep;
+  s.color *= 1.0 - 0.85 * deep;
+  s.emissive += vec3(0.9, 0.2, 0.02) * sunk * smoothstep(lake - 0.3, lake - 0.08, y) * (1.0 - smoothstep(lake, lake + 0.25, y)) * 0.7;
   // The lake's light on the crater wall just above it.
   s.emissive += vec3(1.0, 0.25, 0.03) * inside * (1.0 - smoothstep(lake, lake + 1.4, y)) * (0.5 + 0.2 * sin(p0Time * 1.3));
 }
