@@ -287,6 +287,15 @@ export class Hud {
       life: 1,
     }));
     this.compass = this._spriteLayer(64, 64, 6, (g) => this._paintNeedle(g));
+    // The boss's health: a gradient quad over the bar the canvas paints.
+    this.bossFill = this._spriteLayer(64, 4, 6, (g) => {
+      const grad = g.createLinearGradient(0, 0, 64, 0);
+      grad.addColorStop(0, '#6a0a04');
+      grad.addColorStop(0.6, '#d4300c');
+      grad.addColorStop(1, '#ff8a3a');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 4);
+    });
     this.callouts = [0, 1, 2].map(() => ({ ...this._canvasLayer(768, 112, 7), t: 9, life: 0 }));
     this.announceL = this._canvasLayer(1400, 260, 7);
     this.toastL = this._canvasLayer(560, 260, 7);
@@ -904,7 +913,8 @@ export class Hud {
     const r = i.run;
     const p = i.player;
     if (!this.playing || !r) return `${this.panel}`;
-    const cds = p ? SPELL_IDS.map((id) => Math.ceil(p.spellCd[id] || 0)).join(',') : '';
+    // (Spell cooldowns have their own layer, and the boss's health its own
+    // bar on the GPU: neither repaints the whole interface.)
     return [
       this.panel,
       r.potions,
@@ -922,19 +932,17 @@ export class Hud {
       JSON.stringify(r.spells),
       JSON.stringify(r.spellUses || {}),
       JSON.stringify(r.relics),
-      cds,
       i.floorLabel,
       i.enemyLabel,
       i.best,
       i.prompt,
-      i.boss ? Math.ceil((i.boss.health / i.boss.maxHealth) * 200) : '',
+      i.boss?.name || '',
       i.compass?.kind || '',
-      p?.siphonT > 0 ? Math.ceil(p.siphonT) : '',
-      p?.invuln > 0.25,
+      p?.siphonT > 0,
       p?.wrathT > 0,
       p?.burnT > 0,
-      Math.ceil(p?.flameT || 0),
-      Math.ceil(p?.coatT || 0),
+      p?.flameT > 0,
+      p?.coatT > 0,
       Math.floor(p?.momentum || 0),
       this.touch,
       this.w,
@@ -1040,6 +1048,14 @@ export class Hud {
     this._updateSplats(dt, shown);
 
     // Compass needle.
+    // The boss's blood, as long as its share of the bar.
+    const bb = L?.boss;
+    this.bossFill.mesh.visible = shown && !!bb && !!i.boss;
+    if (this.bossFill.mesh.visible) {
+      const k = Math.max(0, Math.min(1, i.boss.health / i.boss.maxHealth));
+      this._place(this.bossFill.mesh, bb.x, bb.y, Math.max(0.01, bb.w * k), bb.h);
+    }
+
     const cmp = i.compass;
     this.compass.mesh.visible = play && !!cmp && !this.announcement;
     if (this.compass.mesh.visible) {
@@ -1163,8 +1179,10 @@ export class Hud {
     g.clearRect(0, 0, L.cw, L.ch);
     if (!a) return;
     g.save();
-    const size = 88;
-    this._text(g, a.text.toUpperCase(), L.cw / 2, 110, { size, ls: size * 0.08, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.95)' });
+    // As large as fits across the layer.
+    const title = a.text.toUpperCase();
+    const size = Math.min(88, (88 * (L.cw - 40)) / Math.max(1, this._measure(g, title, { size: 88, ls: 88 * 0.08 })));
+    this._text(g, title, L.cw / 2, 110, { size, ls: size * 0.08, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.95)' });
     this._divider(g, L.cw / 2, 140, Math.min(L.cw * 0.6, 760));
     if (a.sub) this._text(g, a.sub, L.cw / 2, 196, { size: 36, ls: 1, color: C.bone, align: 'center' });
     g.restore();
@@ -1407,9 +1425,11 @@ export class Hud {
       grad.addColorStop(0, '#6a0a04');
       grad.addColorStop(0.6, '#d4300c');
       grad.addColorStop(1, '#ff8a3a');
-      g.fillStyle = grad;
-      g.fillRect(bx + 1, 149, (bw - 2) * Math.max(0, i.boss.health / i.boss.maxHealth), 12);
-    }
+      g.fillStyle = 'rgba(30,4,2,0.9)';
+      g.fillRect(bx + 1, 149, bw - 2, 12);
+      // (The blood in it is its own quad: _updateLayers.)
+      this.layout.boss = { x: bx + 1, y: 149, w: bw - 2, h: 12 };
+    } else if (this.layout) this.layout.boss = null;
 
     // ---- Bottom centre: skills, then health beneath ----
     const sz = 66;
@@ -1500,12 +1520,11 @@ export class Hud {
     this._key(g, 'E', hx - 40 - r.potionCap * 26, hy + 13);
     // Buffs above the skills.
     const tags = [];
-    if (p.siphonT > 0) tags.push([`Blood Siphon ${Math.ceil(p.siphonT)}s`, '#ff6a5a']);
+    if (p.siphonT > 0) tags.push(['Blood Siphon', '#ff6a5a']);
     if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
     if (p.burnT > 0) tags.push(['Burning: shade step (Space) to put it out', '#ff8a2a']);
-    if (p.flameT > 0) tags.push([`Flaming blade ${Math.ceil(p.flameT)}s`, '#ff9a3a']);
+    if (p.flameT > 0) tags.push(['Flaming blade', '#ff9a3a']);
     else if (p.coatT > 0) tags.push(['Slime-coated: block to ignite', '#8ef05a']);
-    if (p.invuln > 0.25) tags.push(['Invulnerable', '#c9a0ff']);
     if (tags.length) {
       g.font = `12px ${SERIF}`;
       const widths = tags.map(([t]) => g.measureText(t).width + 18);

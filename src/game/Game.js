@@ -46,23 +46,28 @@ const SONG_FOR = { 10: 'deep' };
 const LEVEL_UP_DELAY = 0.7;
 
 // How the 3D view is drawn, best first: how wide it renders (device pixels,
-// never past the screen's own) and how many samples smooth its edges. It
-// starts at the top; frames running long step it down a rung at a time
-// (_adaptQuality). The edges are always smoothed (4 samples, 2 on the last
-// rungs; FXAA where the machine can't multisample at all), and the view never
-// gets so small that its stretch to the screen shows as stair-steps: the
-// lower rungs give up the ground mist and some scenery instead.
+// never past the screen's own) and how many samples smooth its edges. The
+// edges are always smoothed: multisampling where the machine has the room
+// (it is costly on the high-precision target the world draws into, above
+// all on laptop graphics), otherwise FXAA in the final pass, which costs
+// next to nothing. It starts in the middle (START) and climbs while frames
+// have time to spare, or steps down while they run long (_adaptQuality);
+// the view never gets so small that its stretch to the screen shows as
+// stair-steps, and the lower rungs give up the ground mist and some
+// scenery instead.
 const QUALITY = [
   { width: 1920, samples: 4 },
-  { width: 1600, samples: 4 },
-  { width: 1440, samples: 4 },
-  { width: 1280, samples: 4 },
-  { width: 1152, samples: 4 },
-  { width: 1024, samples: 2 },
+  { width: 1600, samples: 2 },
+  { width: 1440, samples: 2 },
+  { width: 1440, samples: 0 },
+  { width: 1280, samples: 0 },
+  { width: 1152, samples: 0 },
+  { width: 1024, samples: 0 },
 ];
+const START = 3;
 // From this rung down there is no ground mist; further down, sparser scenery.
-const NO_MIST = 4;
-const SLOW = 5;
+const NO_MIST = 5;
+const SLOW = 6;
 const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
@@ -84,9 +89,9 @@ export class Game {
     this.uiRatio = Math.min(host.pixelRatio || 1, 2);
     r.setPixelRatio(this.uiRatio);
     this.maxSamples = msaaLimit(r);
-    this.qualityLevel = 0;
-    this.sceneScale = this._sceneScaleAt(0);
-    this.sceneTarget = this._sceneTargetWith(QUALITY[0].samples);
+    this.qualityLevel = START;
+    this.sceneScale = this._sceneScaleAt(START);
+    this.sceneTarget = this._sceneTargetWith(QUALITY[START].samples);
     this.blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.blitScene = new THREE.Scene();
     const blit = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blitMaterial(this.sceneTarget.texture));
@@ -188,8 +193,9 @@ export class Game {
     // multisampling, FXAA smooths the edges instead.
     const u = this.blit.material.uniforms;
     u.uTexel.value.set(1 / tw, 1 / th);
-    u.uSharp.value = this.sceneScale < 0.95 ? Math.min(0.25, (1 / this.sceneScale - 1) * 0.3) : 0;
-    u.uFxaa.value = this.sceneTarget.samples > 0 ? 0 : 1;
+    const fxaa = this.sceneTarget.samples === 0;
+    u.uSharp.value = this.sceneScale < 0.95 ? Math.min(fxaa ? 0.12 : 0.25, (1 / this.sceneScale - 1) * 0.3) : 0;
+    u.uFxaa.value = fxaa ? 1 : 0;
     const ph = h * k;
     this.fx.add.setViewport(ph, this.camera.fov);
     this.fx.alpha.setViewport(ph, this.camera.fov);
