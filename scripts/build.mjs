@@ -34,7 +34,10 @@ const EXPERIENCE = {
   description:
     'A first-person dark-fantasy roguelike of rhythm and steel. Step into the pit and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and two demon lords. Time your strikes into Perfect Chains, counter their wind-ups, break their guards, and hunt cursed relics. One life, no armour; your deepest floor goes on the weekly table.',
   maxPlayers: 8,
-  credits: [{ work: 'Game, code, sound and stand-in models', by: 'made for this lot; sounds synthesized in code' }],
+  credits: [
+    { work: 'Game, code, sound and stand-in models', by: 'made for this lot; sounds synthesized in code' },
+    { work: 'Music: "Infernal Crescendo" and "Blood in the Arena"', by: "provided by PureBullet, the lot's owner" },
+  ],
 };
 
 async function listModels() {
@@ -65,6 +68,9 @@ async function copyAssets(to) {
   await mkdir(join(to, 'assets/icons'), { recursive: true });
   await copyFile(join(root, 'assets/icons/atlas.webp'), join(to, 'assets/icons/atlas.webp'));
   const s = await makeSounds(join(to, 'assets/sounds'));
+  // The songs, as they came.
+  await mkdir(join(to, 'assets/music'), { recursive: true });
+  for (const f of await readdir(join(root, 'assets/music'))) if (f.endsWith('.mp3')) await copyFile(join(root, 'assets/music', f), join(to, 'assets/music', f));
   return { models: models.length, sounds: s.count };
 }
 
@@ -87,11 +93,10 @@ async function buildExperience() {
   if (models.length) credits.push({ work: '3D models', by: 'generated with Zoodle (zoodle3d.com); creatures rigged and animated in code' });
   await writeFile(join(out, 'experience.json'), `${JSON.stringify({ ...EXPERIENCE, credits }, null, 2)}\n`);
   const a = await copyAssets(out);
-  // Sound effects as MP3 (the looping drone and intro loop stay WAV), and the
-  // game told so.
+  // Sound effects as MP3 (the looping drone stays WAV), and the game told so.
   const sounds = join(out, 'assets/sounds');
   for (const f of await readdir(sounds)) {
-    if (!f.endsWith('.wav') || f === 'drone.wav' || f === 'intro_loop.wav') continue;
+    if (!f.endsWith('.wav') || f === 'drone.wav') continue;
     const mp3 = join(sounds, f.replace(/\.wav$/, '.mp3'));
     execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', join(sounds, f), '-ac', '1', '-b:a', '96k', mp3]);
     await rm(join(sounds, f));

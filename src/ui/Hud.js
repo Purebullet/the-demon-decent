@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SPELLS, SPELL_IDS } from '../entities/Spells.js';
 import { WEAPON_TYPES, RARITIES } from '../entities/Weapons.js';
+import { xpToNext, MAX_LEVEL, damageMul, swingSpeedMul } from '../game/Levels.js';
 import { makeCanvas } from '../world/Textures.js';
 import { IconAtlas } from './IconAtlas.js';
 import { RELICS, relicPassive } from '../combat/Relics.js';
@@ -493,6 +494,21 @@ export class Hud {
     this.dirty = true;
   }
 
+  // A level gained: { level, points, stats: [{ id, name, text, color, per,
+  // have, cap }] } (Game._levelUpInfo).
+  showLevelUp(info) {
+    this.levelInfo = info;
+    this.panel = 'levelup';
+    this.levelShownAt = this.time;
+    this.dirty = true;
+  }
+
+  hideLevelUp() {
+    this.levelInfo = null;
+    if (this.panel === 'levelup') this.panel = null;
+    this.dirty = true;
+  }
+
   // Fade to black (true) or back (false); resolves when done.
   fade(toBlack, ms = 450) {
     this.fadeTarget = toBlack ? 1 : 0;
@@ -515,7 +531,7 @@ export class Hud {
     c.on = on;
     c.x = x;
     c.y = y;
-    const code = on && (this.panel === 'choice' || this.panel === 'pause' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
+    const code = on && (this.panel === 'choice' || this.panel === 'levelup' || this.panel === 'pause' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
     if (code !== this.hoverCode) {
       this.hoverCode = code;
       this.dirty = true;
@@ -895,10 +911,14 @@ export class Hud {
       r.potionCap,
       r.weapon.name,
       r.weapon.rarity,
+      r.level,
+      r.points,
+      Math.floor((r.xp / xpToNext(r.level)) * 100),
       r.weapon.damage,
       p?.armed,
       r.dmgMul.toFixed(2),
       r.speedMul.toFixed(2),
+      JSON.stringify(r.stats),
       JSON.stringify(r.spells),
       JSON.stringify(r.relics),
       r.skills?.phantomStep,
@@ -1193,6 +1213,7 @@ export class Hud {
     if (this.panel === 'title') this._paintTitle(g);
     else if (this.panel === 'pause') this._paintPause(g);
     else if (this.panel === 'choice' && this.choice) this._paintChoice(g);
+    else if (this.panel === 'levelup' && this.levelInfo) this._paintLevelUp(g);
     else if (this.panel === 'death' || this.panel === 'victory') this._paintEnd(g);
   }
 
@@ -1438,6 +1459,38 @@ export class Hud {
     // The layer the numbers ride on: the skills and the vial, 4:1.
     const tw = Math.max(hw + 40, total + 40, (hy + 30 - (sy - 6)) * 4);
     L.top = { x: (w - tw) / 2, y: hy + 30 - tw / 4, w: tw, h: tw / 4 };
+    // Experience: a thin gold seam under the vial, the level on a plate to
+    // its right (lit while a point waits to be spent).
+    const maxed = r.level >= MAX_LEVEL;
+    const xf = maxed ? 1 : clamp01(r.xp / xpToNext(r.level));
+    g.fillStyle = 'rgba(20,8,4,0.85)';
+    g.fillRect(hx + 5, hy + 30, hw - 10, 5);
+    if (xf > 0) {
+      g.save();
+      const xg = g.createLinearGradient(hx, 0, hx + hw, 0);
+      xg.addColorStop(0, '#8a5a10');
+      xg.addColorStop(1, '#ffd36a');
+      g.fillStyle = xg;
+      g.shadowColor = 'rgba(255,190,80,0.8)';
+      g.shadowBlur = 6;
+      g.fillRect(hx + 5, hy + 30, (hw - 10) * xf, 5);
+      g.restore();
+    }
+    const lx = hx + hw + 30;
+    const ly = hy + 15;
+    g.save();
+    g.translate(lx, ly);
+    g.rotate(Math.PI / 4);
+    g.fillStyle = 'rgba(26,8,5,0.95)';
+    g.strokeStyle = r.points > 0 ? '#ffd36a' : '#8a5a2a';
+    g.lineWidth = 2;
+    g.shadowColor = r.points > 0 ? 'rgba(255,200,90,0.9)' : 'transparent';
+    g.shadowBlur = r.points > 0 ? 12 : 0;
+    g.fillRect(-15, -15, 30, 30);
+    g.strokeRect(-15, -15, 30, 30);
+    g.restore();
+    this._text(g, String(r.level), lx, ly + 1, { size: 15, weight: 'bold ', color: '#ffe3a0', align: 'center', base: 'middle', glow: 'rgba(120,60,0,0.9)' });
+    this._text(g, maxed ? 'MAX' : 'LV', lx, ly + 27, { size: 8, ls: 1.5, color: C.ash, align: 'center' });
     // Potions to the left of it, with the key.
     for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, hx - 30 - k * 26, hy - 4, k < r.potions);
     this._key(g, 'E', hx - 40 - r.potionCap * 26, hy + 13);
@@ -1464,8 +1517,9 @@ export class Hud {
     const wd = unarmed ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
     const def = WEAPON_TYPES[wd.type];
     const R = unarmed ? null : RARITIES[wd.rarity];
-    const dmg = Math.round(wd.damage * r.dmgMul);
-    const statLine = wd.damage ? `${R ? `${R.name} · ` : ''}${def.label} · ${def.style} · ${dmg} dmg${r.speedMul > 1.001 ? ` · +${Math.round((r.speedMul - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
+    const dmg = Math.round(wd.damage * damageMul(r));
+    const spd = swingSpeedMul(r);
+    const statLine = wd.damage ? `${R ? `${R.name} · ` : ''}${def.label} · ${def.style} · ${dmg} dmg${spd > 1.001 ? ` · +${Math.round((spd - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
     g.font = `18px ${SERIF}`;
     let need = g.measureText(wd.name).width;
     g.font = `10px ${SERIF}`;
@@ -1764,6 +1818,60 @@ export class Hud {
     g.fill();
     g.restore();
     this.buttons.push({ x: x * this.u, y: y * this.u, w: bw * this.u, h: bh * this.u, code, rect: true });
+  }
+
+  // A level gained: three forged cards, Attack, Defence and Agility, each
+  // with what a point buys, how much it has bought so far and ten pips.
+  _paintLevelUp(g) {
+    const { vw: w, vh: h } = this;
+    const L = this.levelInfo;
+    this._dim(g, 0.6);
+    const ty = h * 0.24;
+    this._text(g, `LEVEL ${L.level}`, w / 2, ty, { size: Math.min(46, w * 0.07), ls: 6, color: '#ffe3a0', align: 'center', glow: 'rgba(220,120,0,0.9)' });
+    this._divider(g, w / 2, ty + 14, Math.min(420, w * 0.6));
+    this._label(g, L.points > 1 ? `Choose where your strength grows · ${L.points} points to spend` : 'Choose where your strength grows', w / 2, ty + 40, { size: 12, align: 'center', color: C.bone });
+    const n = L.stats.length;
+    const gap = 20;
+    const cw = Math.min(230, (w - 40 - gap * (n - 1)) / n);
+    const ch = 196;
+    let x = (w - (cw * n + gap * (n - 1))) / 2;
+    const y = ty + 66;
+    L.stats.forEach((S, k) => {
+      const code = `Digit${k + 1}`;
+      const full = S.have >= S.cap;
+      const hot = !full && this.hoverCode === code;
+      g.save();
+      if (full) g.globalAlpha = 0.45;
+      this._box(g, x, y, cw, ch, hot ? 'rgba(70,20,8,0.96)' : C.panel, hot ? S.color : C.edge);
+      // A coloured seam and glow along the top, the stat's own.
+      g.fillStyle = S.color;
+      g.shadowColor = S.color;
+      g.shadowBlur = hot ? 16 : 8;
+      g.fillRect(x + 12, y + 5, cw - 24, 2);
+      g.shadowBlur = 0;
+      this._text(g, String(k + 1), x + 18, y + 32, { size: 22, weight: 'bold ', color: C.ember, align: 'center', base: 'middle', glow: 'rgba(140,20,0,0.9)' });
+      this._text(g, S.name.toUpperCase(), x + cw / 2, y + 40, { size: 21, ls: 3, color: S.color, align: 'center', glow: 'rgba(0,0,0,1)' });
+      this._text(g, S.text, x + cw / 2, y + 72, { size: 15, color: C.light, align: 'center' });
+      const sign = S.id === 'defence' ? '-' : '+';
+      const now = Math.round(S.per * S.have * 1000) / 10;
+      this._label(g, S.have ? `Now ${sign}${now}%` : 'Untrained', x + cw / 2, y + 100, { size: 11, align: 'center', color: C.bone });
+      // Ten pips: what has been put in.
+      const pw = Math.min(14, (cw - 40) / S.cap - 4);
+      let px = x + (cw - (S.cap * (pw + 4) - 4)) / 2;
+      for (let i = 0; i < S.cap; i++) {
+        g.fillStyle = i < S.have ? S.color : 'rgba(80,24,14,0.7)';
+        g.shadowColor = i < S.have ? S.color : 'transparent';
+        g.shadowBlur = i < S.have ? 6 : 0;
+        g.fillRect(px, y + 122, pw, pw);
+        px += pw + 4;
+      }
+      g.shadowBlur = 0;
+      this._label(g, full ? 'Mastered' : `${S.have} / ${S.cap}`, x + cw / 2, y + 160, { size: 11, align: 'center', color: full ? S.color : C.ash });
+      g.restore();
+      if (!full) this.buttons.push({ x: (x + cw / 2) * this.u, y: (y + ch / 2) * this.u, w: cw * this.u, h: ch * this.u, code, rect: true });
+      x += cw + gap;
+    });
+    this._label(g, this.touch ? 'Tap one' : 'Click one, or press 1, 2 or 3', w / 2, y + ch + 30, { size: 11, align: 'center' });
   }
 
   _wrap(g, text, x, y, maxW, size, color) {

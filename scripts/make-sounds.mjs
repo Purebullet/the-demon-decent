@@ -7,7 +7,6 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { song } from './make-music.mjs';
 
 const RATE = 22050;
 
@@ -243,6 +242,15 @@ const SOUNDS = {
     [196, 247, 294, 392].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: 0.9, gain: 0.12, delay: i * 0.07 }));
     noise(o, { freq: 5000, freqEnd: 7000, q: 2, attack: 0.2, decay: 0.6, gain: 0.08 });
     tone(o, { freq: 98, decay: 1, gain: 0.2 });
+  },
+  // A level gained: a war drum's thud under a minor chord rising, the last
+  // note held and shimmering.
+  levelup: (o) => {
+    tone(o, { freq: 82, freqEnd: 55, decay: 0.7, gain: 0.45 });
+    noise(o, { type: 'lowpass', freq: 900, freqEnd: 200, decay: 0.35, gain: 0.25 });
+    [220, 262, 330, 440, 523].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: i === 4 ? 1.6 : 0.7, gain: 0.11, delay: 0.05 + i * 0.075 }));
+    tone(o, { type: 'sine', freq: 1046, decay: 1.4, gain: 0.04, delay: 0.38 });
+    noise(o, { freq: 6000, freqEnd: 8000, q: 3, attack: 0.25, decay: 1.0, gain: 0.06, delay: 0.3 });
   },
   swing_heavy_1: (o) => heavySwing(o, 0),
   swing_heavy_2: (o) => heavySwing(o, 1),
@@ -542,17 +550,7 @@ export async function makeSounds(outDir) {
   const d = wav(normalize(drone(), 0.6));
   bytes += d.length;
   await writeFile(join(outDir, 'drone.wav'), d);
-  const { intro, loop } = song();
-  // Both at the same level, so the build runs straight into the loop.
-  let peak = 0;
-  for (const a of [intro, loop]) for (const v of a) peak = Math.max(peak, Math.abs(v));
-  for (const [name, a] of [['intro', intro], ['intro_loop', loop]]) {
-    for (let i = 0; i < a.length; i++) a[i] *= 0.85 / peak;
-    const w = wav(a);
-    bytes += w.length;
-    await writeFile(join(outDir, `${name}.wav`), w);
-  }
-  return { count: Object.keys(SOUNDS).length + 3, bytes };
+  return { count: Object.keys(SOUNDS).length + 1, bytes };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

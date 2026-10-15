@@ -20,6 +20,7 @@ import { rollWeapon, makeWeapon } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
+import { xpForKill, gainXp, spendPoint, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL } from './Levels.js';
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
 import { Hud } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
@@ -34,6 +35,11 @@ const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019
 // sandbox or a plain web page (src/platform).
 
 const PLAYING = new Set(['surface', 'floor', 'sanctum']);
+// Floors that play "Blood in the Arena": the boss floors, and floor 5 (where
+// the first flame-horned brute waits).
+const BOSS_MUSIC = new Set([5]);
+// How long after the blow that levels you up before the choice opens.
+const LEVEL_UP_DELAY = 0.7;
 
 // How the 3D view is drawn, best first: how wide it renders (device pixels,
 // never past the screen's own) and how many samples smooth its edges. It
@@ -523,8 +529,8 @@ export class Game {
   // ---------------------------------------------------------------- floor ---
 
   _enterFloor({ floor, arrival = false }) {
-    this.audio.music('drone');
     const def = FLOORS[floor - 1];
+    this.audio.music(def.boss || BOSS_MUSIC.has(floor) ? 'boss' : 'drone');
     const run = this.run;
     run.floor = floor;
     run.deepest = Math.max(run.deepest, floor);
@@ -549,6 +555,8 @@ export class Game {
     this.boss = null;
     this.bossAnnounced = false;
     this.deadT = 0;
+    this.levelUp = null;
+    this.levelUpT = 0;
 
     this.ctx = this._baseCtx({
       world: level.world,
@@ -613,6 +621,8 @@ export class Game {
     }
     this._addEnemy(e);
     if (emerge) {
+      // (A boss's summons: worth half the experience.)
+      e.summoned = true;
       e.emerge(this.ctx);
       e.becomeAlert?.(this.ctx, false);
     }
@@ -692,6 +702,12 @@ export class Game {
   _onEnemyKilled(e) {
     const run = this.run;
     run.kills++;
+    // Experience; a level made opens the choice a moment later (_updateLevelUp).
+    if (gainXp(run, xpForKill(e, run.floor)) > 0) {
+      this.levelUpT = LEVEL_UP_DELAY;
+      this.audio.levelUp?.();
+      this.hud.callout(`LEVEL ${run.level}`, { color: '#ffe08a', size: 1.25 });
+    }
     const luck = this.level.def.loot;
     const loot = e.type.loot;
     const x = e.position.x;
@@ -709,6 +725,8 @@ export class Game {
   }
 
   _updateFloor(dt) {
+    // Choosing what a level brings: the floor holds still meanwhile.
+    if (this._updateLevelUp(dt)) return;
     const ctx = this.ctx;
     ctx.time = this.time;
     ctx.tells = relicPassive(this.run, 'tells') ?? 1;
@@ -795,6 +813,51 @@ export class Game {
       prompt,
       compass: this._compass(alive),
     });
+  }
+
+  // A level gained: a moment after the blow that made it, everything stops
+  // and a box asks where the point goes (1, 2, 3 or a click), one box per
+  // point. Returns true while it is open.
+  _updateLevelUp(dt) {
+    const run = this.run;
+    const p = this.player;
+    if (!this.levelUp) {
+      this.levelUpT = Math.max(0, this.levelUpT - dt);
+      if (!run?.points || this.levelUpT > 0 || this.busy || this.intro || p.dead || this.hud.panel) return false;
+      this.levelUp = true;
+      p.swing = null;
+      p.charge = null;
+      p.press = null;
+      p.blocking = false;
+      this.hud.showLevelUp(this._levelUpInfo());
+      // Let the mouse go so the choices can be clicked.
+      this.uiMouse = true;
+      this.input.host.unlockPointer?.();
+      this.audio.choose?.();
+      return true;
+    }
+    this.input.consumeMouse();
+    for (let i = 0; i < STAT_IDS.length; i++) {
+      if (!this.input.wasPressed(`Digit${i + 1}`) || !spendPoint(run, STAT_IDS[i])) continue;
+      const S = LEVEL_STATS[STAT_IDS[i]];
+      this.audio.choose();
+      this.hud.toast(`${S.name} ${run.stats[STAT_IDS[i]]}/${STAT_CAP}: ${S.text}`);
+      if (run.points > 0) {
+        this.hud.showLevelUp(this._levelUpInfo());
+        return true;
+      }
+      this.levelUp = null;
+      this.hud.hideLevelUp();
+      this.uiMouse = false;
+      this.input.requestLock();
+      return true;
+    }
+    return true;
+  }
+
+  _levelUpInfo() {
+    const run = this.run;
+    return { level: run.level, points: run.points, max: run.level >= MAX_LEVEL, stats: STAT_IDS.map((id) => ({ id, ...LEVEL_STATS[id], have: run.stats[id], cap: STAT_CAP })) };
   }
 
   // Arriving at the bottom of the pit (floor 1 after the fall): you come to

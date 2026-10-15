@@ -3,14 +3,15 @@
 // distance from the listener. Rapid repeats of the same sound are thinned so
 // a swarm does not turn into noise.
 //
-// Music: on the title and the surface the intro song (a groaning earth, then
-// a war drum beating quicker and quicker, then its driving loop); in the pit
-// the ambient drone.
+// Music: on the title and the surface "Infernal Crescendo"; in the pit the
+// ambient drone, and "Blood in the Arena" on the boss floors. Each loops.
 
-import { SOUND_EXT, INTRO_SECONDS } from './soundFormat.js';
+import { SOUND_EXT } from './soundFormat.js';
 
 const DIR = 'assets/sounds/';
-const MUSIC = { intro: 0.6, drone: 0.35 };
+const SONGS = { intro: 'assets/music/infernal-crescendo.mp3', boss: 'assets/music/blood-in-the-arena.mp3', drone: `${DIR}drone.wav` };
+// (The songs are mastered a few dB quieter than the drone is played.)
+const MUSIC = { intro: 0.8, boss: 0.85, drone: 0.35 };
 
 export class Audio {
   constructor(host) {
@@ -22,7 +23,6 @@ export class Audio {
     this.heartT = 0;
     this.mode = 'intro';
     this.playing = null;
-    this.songT = 0;
     this.fade = null;
   }
 
@@ -41,7 +41,7 @@ export class Audio {
     } else this._startMusic();
   }
 
-  // 'intro' or 'drone'. Asking for what is already playing leaves it be.
+  // 'intro', 'boss' or 'drone'. Asking for what is already playing leaves it be.
   music(mode) {
     if (mode === this.mode && (this.playing || !this.started)) return;
     this.mode = mode;
@@ -56,34 +56,21 @@ export class Audio {
   _startMusic() {
     this.fade = null;
     if (!this.started || this.muted) return;
-    const intro = this.mode === 'intro';
-    const file = intro ? `intro.${SOUND_EXT}` : 'drone.wav';
-    this.host.music.play(this.host.asset(DIR + file), { volume: MUSIC[this.mode], loop: !intro });
-    this.playing = intro ? 'intro' : 'drone';
-    this.songT = 0;
+    this.host.music.play(this.host.asset(SONGS[this.mode]), { volume: MUSIC[this.mode], loop: true });
+    this.playing = this.mode;
   }
 
-  // Once a frame: the intro's build hands over to its loop, fades run.
+  // Once a frame: a fade, while one runs.
   update(dt) {
-    if (this.fade) {
-      const f = this.fade;
-      f.t += dt;
-      const k = Math.max(0, 1 - f.t / f.secs);
-      this.host.music.volume?.(MUSIC[this.mode] * k * k);
-      if (k <= 0) {
-        this.fade = null;
-        this.host.music.stop();
-        this.playing = null;
-      }
-      return;
-    }
-    if (this.playing !== 'intro') return;
-    this.songT += dt;
-    // Where the song is as heard (it may take a moment to start streaming).
-    const t = this.host.music.time;
-    if ((typeof t === 'number' && t > 0 ? t : this.songT) >= INTRO_SECONDS || this.songT > INTRO_SECONDS + 8) {
-      this.host.music.play(this.host.asset(`${DIR}intro_loop.wav`), { volume: MUSIC.intro, loop: true });
-      this.playing = 'intro_loop';
+    const f = this.fade;
+    if (!f) return;
+    f.t += dt;
+    const k = Math.max(0, 1 - f.t / f.secs);
+    this.host.music.volume?.(MUSIC[this.mode] * k * k);
+    if (k <= 0) {
+      this.fade = null;
+      this.host.music.stop();
+      this.playing = null;
     }
   }
 
@@ -153,6 +140,9 @@ export class Audio {
   }
   shatter(pos) {
     this.play('shatter', { pos, volume: 0.9, gap: 0.1 });
+  }
+  levelUp() {
+    this.play('levelup', { volume: 0.9, gap: 0.3 });
   }
   relic() {
     this.play('relic', { volume: 0.9, gap: 0.5 });

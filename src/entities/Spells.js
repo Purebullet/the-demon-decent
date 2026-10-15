@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { C, burst, ring } from '../world/Particles.js';
+import { damageMul } from '../game/Levels.js';
 
 // Demon Spells: rare utility powers. Found as sigil drops or taken at the
 // Magic Circle; each can be raised to level 3.
@@ -59,7 +60,7 @@ export function castSpell(id, player, ctx) {
     ctx.flash?.(0xff5a1e, 14, 0.4);
     ctx.shake?.(0.35);
     ctx.audio?.nova();
-    const dmg = L.dmg * player.run.dmgMul;
+    const dmg = L.dmg * damageMul(player.run);
     for (const e of ctx.enemies) {
       if (!e.alive || e.state === 'burrowed') continue;
       const dx = e.position.x - p.x;

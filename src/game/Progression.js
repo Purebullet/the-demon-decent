@@ -1,5 +1,6 @@
 import { makeWeapon } from '../entities/Weapons.js';
 import { SPELLS, SPELL_IDS, MAX_SPELL_LEVEL } from '../entities/Spells.js';
+import { newLevels } from './Levels.js';
 
 // Everything a run owns. Death throws this object away: permadeath means
 // weapons, spells and every upgrade are gone, and you climb out at the
@@ -22,6 +23,9 @@ export function newRun() {
     skills: {},
     relics: {},
     kills: 0,
+    // Level, experience toward the next, unspent points and where they went
+    // (game/Levels.js).
+    ...newLevels(),
     best: { chain: 0, counters: 0, procs: 0 },
     startTime: performance.now(),
     dev: false,

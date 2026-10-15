@@ -11,6 +11,7 @@ import { classifyPress, lightTiming, chainBonus, CHAIN_MAX, EXPOSED_DAMAGE } fro
 import { MOMENTUM_MAX, MOMENTUM_DECAY_AFTER, momentumSpeed, STUMBLE, guardOutcome } from '../combat/Styles.js';
 import { relicPassive } from '../combat/Relics.js';
 import { ProcEngine } from '../combat/Procs.js';
+import { damageMul, swingSpeedMul, takenMul } from '../game/Levels.js';
 import { SwingTrail, trailStyle } from '../combat/SwingTrail.js';
 
 // First-person demon hunter. WASD + mouse look.
@@ -485,7 +486,7 @@ export class Player {
       if (e.position.distanceTo(this.position) < e.radius + 1.2) {
         this.dash.hit.add(e);
         _v.subVectors(e.position, this.position).setY(0).normalize();
-        const dealt = e.takeHit(this.dash.dmg * this.run.dmgMul, _v, 4, 40, ctx);
+        const dealt = e.takeHit(this.dash.dmg * damageMul(this.run), _v, 4, 40, ctx);
         ctx.onDamage?.(e, dealt, false, e.position);
       }
     }
@@ -672,7 +673,7 @@ export class Player {
 
   _swingSpeed() {
     const m = this.weaponDef === WEAPON_TYPES.sword ? momentumSpeed(this.momentum) : 1;
-    return this.run.speedMul * m;
+    return swingSpeedMul(this.run) * m;
   }
 
   _currentPose() {
@@ -1158,7 +1159,7 @@ export class Player {
       const counter = !guard && (e.isWindingUp?.() || this.wrathT > 0);
       if (this.wrathT > 0 && counter) this.wrathT = 0;
       const crit = h.part.multiplier > 1.2;
-      let amount = w.damage * run.dmgMul * h.part.multiplier * (0.93 + Math.random() * 0.14);
+      let amount = w.damage * damageMul(run) * h.part.multiplier * (0.93 + Math.random() * 0.14);
       if (heavy) amount *= 1.6 + 0.8 * s.power;
       if (s.perfect) amount *= bonus.damage * (1 + (relicPassive(run, 'perfectDamage') ?? 0));
       if (s.sluggish) amount *= 0.85;
@@ -1192,7 +1193,7 @@ export class Player {
       burst(ctx.fx.add, h.point, { count: counter ? 22 : 8, speed: counter ? 7 : 5, size: 0.06, life: 0.25 });
       // A burning blade sets them alight.
       if (this.flameT > 0 && e.alive) {
-        e.addStatus?.('burn', { dps: w.damage * run.dmgMul * 0.18, dur: 3 });
+        e.addStatus?.('burn', { dps: w.damage * damageMul(run) * 0.18, dur: 3 });
         burst(ctx.fx.add, h.point, { count: 18, speed: 3, color: C.fireCore, colorEnd: C.fireEdge, size: 0.14, life: 0.45, up: 1.5 });
       }
 
@@ -1206,7 +1207,7 @@ export class Player {
         triggers.add('kill');
         if (heavy) triggers.add('heavyKill');
       }
-      this.procs.fire(ctx, run, { triggers, enemy: e, point: h.point.clone(), dir, chain: s.chain, chainMul: bonus.proc, counter, damage: dealt, weaponDamage: w.damage * run.dmgMul, heavy });
+      this.procs.fire(ctx, run, { triggers, enemy: e, point: h.point.clone(), dir, chain: s.chain, chainMul: bonus.proc, counter, damage: dealt, weaponDamage: w.damage * damageMul(run), heavy });
 
       if (counter) {
         anyCounter = true;
@@ -1411,7 +1412,8 @@ export class Player {
     }
     const armor = relicPassive(this.run, 'armor') ?? 0;
     const poise = relicPassive(this.run, 'poise') ?? 0;
-    amount *= 1 - armor;
+    // Relic armour, and the points put into Defence.
+    amount *= (1 - armor) * takenMul(this.run);
     const fx = this.position.x - from.x;
     const fz = this.position.z - from.z;
     const fd = Math.hypot(fx, fz);
