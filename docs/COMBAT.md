@@ -53,7 +53,7 @@ fills as the arc nears completion and burns gold inside the window; pips count t
 - **Demon blows stagger you** (0.28–0.75 s by damage, shortened by the Ironbark Gorget): a light
   swing or a drawn-back heavy is knocked away, and you cannot strike, block or dodge until you
   recover. A blocked blow costs 20% and a short 0.12 s jolt; a crushing one (brute slam, boss)
-  breaks the block for 0.4 s. Demons hit ×1.8 harder and have ×1.3 the health they used to.
+  breaks the block for 0.4 s. Demons hit ×1.62 harder (×1.8, less 10%) and have ×1.3 the health they used to.
 
 ## 3. Weapon personalities (`src/combat/Styles.js`)
 

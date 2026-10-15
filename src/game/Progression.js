@@ -6,6 +6,10 @@ import { newLevels } from './Levels.js';
 // weapons, spells and every upgrade are gone, and you climb out at the
 // surface with a rusted sword.
 
+// Flasks a run can carry: three to start, four with the Blood Well's gift.
+export const POTION_CAP = 3;
+export const MAX_POTION_CAP = 4;
+
 export function newRun() {
   return {
     floor: 0,
@@ -13,7 +17,7 @@ export function newRun() {
     maxHealth: 100,
     health: 100,
     potions: 1,
-    potionCap: 2,
+    potionCap: POTION_CAP,
     dmgMul: 1,
     speedMul: 1,
     weapon: makeWeapon('sword'),
@@ -36,9 +40,11 @@ export function newRun() {
 export const NODES = {
   well: {
     title: 'The Blood Well',
-    options: () => [
+    options: (run) => [
       { label: '+25 Max Health', apply: (r) => ((r.maxHealth += 25), (r.health += 25)) },
-      { label: '+1 Potion Capacity (and a full flask)', apply: (r) => (r.potionCap++, (r.potions = Math.min(r.potionCap, r.potions + 1))) },
+      run.potionCap < MAX_POTION_CAP
+        ? { label: '+1 Potion Capacity (and a full flask)', apply: (r) => ((r.potionCap = Math.min(MAX_POTION_CAP, r.potionCap + 1)), (r.potions = Math.min(r.potionCap, r.potions + 1))) }
+        : { label: 'Fill every flask', apply: (r) => (r.potions = r.potionCap) },
     ],
   },
   circle: {

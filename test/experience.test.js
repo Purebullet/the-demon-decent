@@ -53,3 +53,19 @@ test('a full descent reaches level 30, and not before the deep floors', () => {
   assert.ok(byFloor10 > 10 && byFloor10 < 25, `level ${byFloor10} at floor 10`);
   assert.equal(xpToNext(0), 30);
 });
+
+test('a run carries 3 potions, and the Blood Well raises that to 4 at most', async () => {
+  const { newRun, NODES, POTION_CAP, MAX_POTION_CAP } = await import('../src/game/Progression.js');
+  const run = newRun();
+  assert.equal(run.potionCap, 3);
+  assert.equal(POTION_CAP, 3);
+  assert.equal(MAX_POTION_CAP, 4);
+  const gift = () => NODES.well.options(run)[1];
+  gift().apply(run);
+  assert.equal(run.potionCap, 4);
+  run.potions = 1;
+  assert.equal(gift().label, 'Fill every flask');
+  gift().apply(run);
+  assert.equal(run.potionCap, 4);
+  assert.equal(run.potions, 4);
+});

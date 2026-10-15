@@ -24,7 +24,8 @@ const DORMANT = new Set(['dormant', 'burrowed', 'emerging', 'dying']);
 // in the windup, a block, a dodge), not trading hits.
 const HP_SCALE = 1.3;
 const BOSS_HP_SCALE = 1.15;
-const DAMAGE_SCALE = 1.8;
+// Every creature's blows, spells and fire come from its damage: 1.8, less 10%.
+const DAMAGE_SCALE = 1.8 * 0.9;
 const WINDUP_SCALE = 1.35;
 // A punish (a quick attack into a sluggish swing) winds up this much faster.
 const PUNISH = 0.55;
