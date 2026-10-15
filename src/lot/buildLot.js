@@ -312,14 +312,6 @@ function placements(dims, height, groundAt, rnd) {
     const lean = rnd() * 0.2;
     out.push({ kind: 'crag', pos: [x, y - h * 0.08, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h, h, h], order: 'ZXY' });
   }
-  // Broken rocks round the opening in the lake, half sunk in the melt.
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * TAU + (rnd() - 0.5) * 0.7;
-    const r = Math.min(holeEdge(dims, a) * (1.35 + rnd() * 0.4), dims.pool - 1.5);
-    const h = 1.1 + rnd() * 0.7;
-    const lean = 0.2 + rnd() * 0.3;
-    out.push({ kind: 'crag', pos: [Math.cos(a) * r, LAVA_Y - h * 0.55, Math.sin(a) * r], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h * 1.6, h, h * 1.6], order: 'ZXY' });
-  }
   // Broken pillars on the sides, between the towers.
   const kinds = ['pillar-a', 'pillar-c', 'pillar-b'];
   const spots = long ? [0, Math.PI, Math.PI * 0.5 + 0.35, Math.PI * 1.5 - 0.35] : [Math.PI * 0.5, Math.PI * 1.5, 0.35, Math.PI - 0.35];
@@ -619,6 +611,43 @@ function throat(dims, segs, rnd = mulberry32(269)) {
   floor.computeVertexNormals();
   return [wall, faceUp(floor)];
 }
+// Lumpy boulders standing in the lake round the opening, half sunk in the
+// melt: balls pushed in and out by noise, faceted like broken rock.
+function boulders(dims, detail, rnd = mulberry32(270)) {
+  const list = [];
+  const v = new THREE.Vector3();
+  // Uneven round the hole: a cluster on one side, strays on the other.
+  const at = [0.2, 0.75, 1.05, 2.4, 3.3, 4.6];
+  for (const base of at) {
+    const a = base + (rnd() - 0.5) * 0.4;
+    const r = Math.min(holeEdge(dims, a) * (1.3 + rnd() * 0.6), dims.pool - 1.3);
+    const size = 0.3 + rnd() * 0.6;
+    const seed = rnd() * 50;
+    const g = new THREE.IcosahedronGeometry(1, detail);
+    const p = g.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      v.fromBufferAttribute(p, k);
+      const n = fbm2(v.x * 2.3 + seed, v.z * 2.3 + v.y * 1.7 - seed, 3, 31);
+      // Broken flat on a face or two, lumpy elsewhere.
+      v.multiplyScalar(0.55 + n * 0.95);
+      if (v.y > 0.45) v.y = 0.45 + (v.y - 0.45) * 0.3;
+      p.setXYZ(k, v.x, v.y, v.z);
+    }
+    const rock = placed(g, {
+      pos: [Math.cos(a) * r, LAVA_Y - size * 0.3, Math.sin(a) * r],
+      rot: [(rnd() - 0.5) * 0.9, rnd() * TAU, (rnd() - 0.5) * 0.9],
+      scale: [size * (1.2 + rnd() * 0.6), size * (0.6 + rnd() * 0.3), size * (0.9 + rnd() * 0.5)],
+    });
+    const q = rock.attributes.position;
+    const uv = [];
+    for (let k = 0; k < q.count; k++) uv.push(q.getX(k) / 3.3 + q.getY(k) * 0.2, q.getZ(k) / 3.3 + q.getY(k) / 3.3);
+    rock.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    rock.deleteAttribute('normal');
+    rock.computeVertexNormals();
+    list.push(rock);
+  }
+  return list;
+}
 function pitFloor(dims, segs) {
   const g = new THREE.CircleGeometry(lavaRadius(dims), segs, 0, TAU);
   g.rotateX(-Math.PI / 2);
@@ -668,7 +697,7 @@ export async function buildLod0(width, depth, height, models) {
   const groundGeo = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
   const ground = groundSampler(groundGeo);
   const list = placements(dims, height, ground, mulberry32(266));
-  root.add(mesh('Ground', prep(groundGeo), M.rock));
+  root.add(mesh('Ground', merge([groundGeo, ...boulders(dims, 1)]), M.rock));
   const props = piecesGeometry(list, K.pieces, 'high', dims);
   let propsMesh = null;
   if (props) root.add((propsMesh = mesh('Pieces', props, M.rock)));
@@ -706,7 +735,7 @@ export async function buildLod1(width, depth, height, models) {
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
   const pieces = piecesGeometry(list, K.pieces, 'low', dims);
   const hole = throat(dims, 32).map(prep);
-  root.add(mesh('Ground', mergeGeometries([ground, ...(pieces ? [pieces] : []), ...hole]), M.rock));
+  root.add(mesh('Ground', mergeGeometries([ground, ...(pieces ? [pieces] : []), ...hole, ...boulders(dims, 1).map(prep)]), M.rock));
   root.add(mesh('Glow', prep(lakeRing(dims, 32)), M.glow));
   return { root, dims };
 }
