@@ -313,12 +313,12 @@ function placements(dims, height, groundAt, rnd) {
     out.push({ kind: 'crag', pos: [x, y - h * 0.08, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h, h, h], order: 'ZXY' });
   }
   // Broken rocks round the opening in the lake, half sunk in the melt.
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * TAU + (rnd() - 0.5) * 0.6;
-    const r = Math.min(holeEdge(dims, a) * (1.3 + rnd() * 0.45), dims.pool - 0.9);
-    const h = 0.8 + rnd() * 0.8;
-    const lean = 0.15 + rnd() * 0.25;
-    out.push({ kind: 'crag', pos: [Math.cos(a) * r, LAVA_Y - h * 0.5, Math.sin(a) * r], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h * 1.25, h, h * 1.25], order: 'ZXY' });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU + (rnd() - 0.5) * 0.7;
+    const r = Math.min(holeEdge(dims, a) * (1.35 + rnd() * 0.4), dims.pool - 1.5);
+    const h = 1.1 + rnd() * 0.7;
+    const lean = 0.2 + rnd() * 0.3;
+    out.push({ kind: 'crag', pos: [Math.cos(a) * r, LAVA_Y - h * 0.55, Math.sin(a) * r], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h * 1.6, h, h * 1.6], order: 'ZXY' });
   }
   // Broken pillars on the sides, between the towers.
   const kinds = ['pillar-a', 'pillar-c', 'pillar-b'];

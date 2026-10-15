@@ -85,7 +85,7 @@ await writeFile(
       materials: {
         Glow: { surface: 'glow.glsl', glow: 2 },
         Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
-        Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2), lake: +lavaY.toFixed(2) } },
+        Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2), lake: +lavaY.toFixed(2), pool: +pool.toFixed(2) } },
         Lava: {
           vertex: 'lava-vertex.glsl',
           surface: 'lava.glsl',
@@ -221,12 +221,15 @@ void p0Surface(inout P0Surface s) {
   // Inside the crater: streams of molten rock pouring down its walls into
   // the lake, each a ribbon that wanders and throbs as it runs.
   float a = atan(s.position.z, s.position.x);
-  float inside = (1.0 - smoothstep(lip * 0.95, lip * 1.05, r)) * step(lake - 0.1, y) * (1.0 - smoothstep(mound * 0.9, mound * 1.15, y));
+  float inside = (1.0 - smoothstep(lip * 0.95, lip * 1.05, r)) * step(lake - 0.1, y) * (1.0 - smoothstep(mound * 0.9, mound * 1.15, y)) * smoothstep(pool - 0.6, pool - 0.35, r);
   float lane = rockNoise(vec3(a * 4.0, 0.0, 3.1));
   float stream = smoothstep(0.58, 0.72, lane) * inside;
   float run = rockNoise(vec3(a * 9.0, y * 1.6 + p0Time * 1.3, 0.7));
   float hot = smoothstep(0.35, 0.75, run);
   s.emissive += mix(vec3(0.9, 0.12, 0.01), vec3(1.0, 0.55, 0.12), hot) * stream * (0.6 + 1.6 * hot);
+  // The rocks standing in the lake: dark, glowing where the melt laps them.
+  float sunk = 1.0 - smoothstep(pool - 0.6, pool - 0.35, r);
+  s.emissive += vec3(1.0, 0.22, 0.02) * sunk * (1.0 - smoothstep(lake - 0.05, lake + 0.3, y)) * (0.8 + 0.3 * sin(p0Time * 2.0 + a * 3.0));
   // The lake's light on the crater wall just above it.
   s.emissive += vec3(1.0, 0.25, 0.03) * inside * (1.0 - smoothstep(lake, lake + 1.4, y)) * (0.5 + 0.2 * sin(p0Time * 1.3));
 }
