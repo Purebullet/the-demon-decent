@@ -27,6 +27,7 @@ import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
 import { disposeTree } from '../core/dispose.js';
+import { Wounds } from '../combat/Wounds.js';
 
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
@@ -567,6 +568,7 @@ export class Game {
     this.eliteCount = 0;
     this.effects = new Effects(s, this.fx);
     this.pickups = new Pickups(s);
+    this.wounds = new Wounds(s);
     this.director = new AIDirector(level.nav, def);
     this.pathService = new PathService(level.nav, 8);
     this.boss = null;
@@ -583,6 +585,7 @@ export class Game {
       pathService: this.pathService,
       enemies: this.enemies,
       effects: this.effects,
+      wounds: this.wounds,
       tuning: def,
       torchRange: def.light,
       onEnemyKilled: (e) => this._onEnemyKilled(e),
@@ -797,6 +800,7 @@ export class Game {
 
     level.update(dt, ctx);
     this.effects.update(dt, ctx);
+    this.wounds.update(dt);
     this.pickups.update(dt, ctx);
 
     const alive = this.enemies.filter((e) => e.alive);

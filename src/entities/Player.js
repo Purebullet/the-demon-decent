@@ -1131,6 +1131,8 @@ export class Player {
       if (this.flameT > 0) amount *= FLAME_DAMAGE;
       const force = (heavy ? 1 + s.power * 0.8 : 0.55) * (counter ? 1.5 : 1) * (w.type === 'mace' ? 1.3 : 1);
       const dealt = e.takeHit(amount, dir, def.knockback * (heavy ? 1.8 : 1) * (counter ? 1.4 : 1), def.stagger * (heavy ? 2.5 : 1), ctx, { heavy, contact: h.point, sweep: s.travel, force });
+      // The wound the weapon leaves: a cut, a hacked-out chunk, a dent.
+      if (dealt > 0) ctx.wounds?.hit(e, w.type, h.point, dir, s.travel, heavy);
       total += dealt;
       s.hits++;
       ctx.onDamage?.(e, dealt, crit || counter, h.point, counter ? 'counter' : s.perfect ? 'perfect' : null);

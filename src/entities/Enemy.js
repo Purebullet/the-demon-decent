@@ -279,6 +279,16 @@ export class Enemy {
         }
         break;
       case 'stagger':
+        // Reeling: a few unsteady steps back from the blow, slowing.
+        if (this.stumbling && this.lastHit) {
+          const s = Math.min(1, this.stateT / this.stateDur);
+          const hx = this.lastHit.x;
+          const hz = this.lastHit.z;
+          const hl = Math.hypot(hx, hz) || 1;
+          const sp = (2.6 * (1 - s) * (1 - s)) / Math.sqrt(this.type.mass || 1);
+          const wob = Math.sin(this.stateT * 11 + this.seed * 7) * 0.5;
+          ctx.world.move(this.position, this.radius, ((hx + hz * wob) / hl) * sp * dt, ((hz - hx * wob) / hl) * sp * dt);
+        }
         if (this.stateT >= this.stateDur) {
           this.stumbling = false;
           this.setState('chase');
@@ -883,8 +893,10 @@ export class Enemy {
       return amount;
     }
     if (this.poise >= threshold && this.state !== 'stagger' && this.state !== 'emerging' && this.state !== 'frozen') {
+      // Poise broken: it stumbles back, plainly off its feet for a moment.
       this.poise = 0;
-      this.interrupt(ctx, 0.7);
+      this.interrupt(ctx, 0.85);
+      this.stumbling = !this.isBoss;
       return amount;
     }
     if (opts.proc) return amount;

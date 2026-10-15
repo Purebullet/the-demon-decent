@@ -34,8 +34,8 @@ fills as the arc nears completion and burns gold inside the window; pips count t
 
 ## 2. Weight, commitment, vulnerability
 
-- **Light swings** let you keep walking (72% speed, 50% when sluggish). A block or a Phantom Step
-  dodge can cut a light swing short only in its recovery, never in its windup or arc.
+- **Light swings** let you keep walking (72% speed, 50% when sluggish). A block or a Shade Step
+  (Space) can cut a light swing short only in its recovery, never in its windup or arc.
 - **Heavy swings** (hold to draw back, release to strike; power = held time / 0.75 s, up to 1)
   root you and cannot be cancelled: no block, no dodge, no potion. Damage × (1.6 + 0.8·power).
   A heavy already in its arc carries through a blow you take.
@@ -146,3 +146,12 @@ a blow you can counter in its windup; **gold** is an **armoured** blow that a li
 Common to all: demons waiting for an opening **circle** you instead of queueing; strings keep
 their attack token; a string's next blow has a shorter windup (`combo.windup`); blinks and hops
 can't be hit while hidden; parrying breaks a string.
+
+## Stumbles and wounds
+
+- A demon whose poise breaks (a counter-hit, a heavy blow, a mace) **stumbles**: a few unsteady
+  steps back along the blow, its legs staggering backwards, reeling side to side and sagging at
+  the knees for 0.85 s (bosses only flinch).
+- Every melee blow that lands leaves a **wound** on the skin where it met it (a decal cut from the
+  posed body, riding the nearest bone): a sword a gash along its stroke, an axe a deep wound and
+  chunks of the demon thrown off it, a mace a dark dent. Four per demon, 24 in all.

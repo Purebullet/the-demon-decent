@@ -92,8 +92,11 @@ export function buildGltfCharacter(id, rootScale = 1) {
   root.updateMatrixWorld(true);
 
   const bones = [];
+  // The skin itself, for laying wounds on it (combat/Wounds.js).
+  const meshes = [];
   inst.model.traverse((o) => {
     if (o.isBone) bones.push(o);
+    if (o.isMesh) meshes.push(o);
   });
   const find = (pattern) => {
     const re = pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i');
@@ -252,7 +255,11 @@ export function buildGltfCharacter(id, rootScale = 1) {
       set('death', e.stateT / 1.6) || set('hit', 1);
     } else if (e.state === 'stagger') {
       rate = 16;
-      set('hit', k);
+      // Stumbling: the legs stagger backwards under the hit pose.
+      if (e.stumbling && clips.walk) {
+        set('hit', k, 0.55);
+        set('walk', frac(1 - e.stateT * 1.9 + e.seed), 0.45 * (1 - k * 0.6));
+      } else set('hit', k);
     } else if (attacking && e.attack && (clips[e.attack.clip || e.attack.name] || clips.attack)) {
       rate = 14;
       const name = e.attack.clip || e.attack.name;
@@ -389,6 +396,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
       return;
     }
     pose.rotation.set(0, 0, 0);
+    if (rigged) pose.position.y = 0;
     const sdt = Math.min(dt, 1 / 30);
     spring.vx += (-SPRING_K * spring.x - SPRING_C * spring.vx) * sdt;
     spring.vy += (-SPRING_K * spring.y - SPRING_C * spring.vy) * sdt;
@@ -422,6 +430,16 @@ export function buildGltfCharacter(id, rootScale = 1) {
       for (const b of bentAnchors) bendPoint(b.rest, b.anchor.position);
     }
 
+    // A stumble reels: the body rocks from side to side, losing its footing,
+    // and sags at the knees, settling as it finds its balance again.
+    if (e.state === 'stagger' && e.stumbling) {
+      const s = Math.min(1, e.stateT / Math.max(1e-3, e.stateDur));
+      const wob = (1 - s) * (1 - s);
+      pose.rotation.z += Math.sin(e.stateT * 11 + e.seed * 7) * 0.2 * wob;
+      pose.rotation.x -= 0.12 * Math.sin(s * Math.PI);
+      if (rigged) pose.position.y = -0.06 * H * Math.sin(s * Math.PI);
+    }
+
     // The hit spring: a little on the whole body, the rest through the chest
     // and head of a rig.
     pose.rotation.x += spring.x * (mixer ? 0.35 : 1);
@@ -451,6 +469,8 @@ export function buildGltfCharacter(id, rootScale = 1) {
     fire,
     animate,
     react,
+    bones,
+    meshes,
     height: H,
     // Long beasts reach further from their centre than they are tall.
     hitRadius: Math.max(H * 0.6, reach),
