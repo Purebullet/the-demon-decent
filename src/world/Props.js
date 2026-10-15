@@ -24,6 +24,7 @@ import { mulberry32 } from '../core/rng.js';
 
 const CHEST_MAX = 3;
 const CHEST_REACH = 1.8;
+const CHEST_FRONT = Math.PI / 2;
 const DIRS = [
   [1, 0],
   [-1, 0],
@@ -95,7 +96,9 @@ export class Props {
   _addChest(x, z, yaw) {
     const root = new THREE.Group();
     root.position.set(x, 0, z);
-    root.rotation.y = yaw;
+    // The model's lock faces its -X: turned so it faces `yaw`, the way out
+    // of the nook (where you come from).
+    root.rotation.y = yaw + CHEST_FRONT;
     const mesh = Assets.instanceProp('chest', { own: true });
     root.add(mesh);
     // A faint golden glow so a chest reads in the dark.

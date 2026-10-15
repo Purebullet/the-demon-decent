@@ -130,7 +130,6 @@ export class Dressing {
     this._throne();
     this._decor();
     this._glowSprites();
-    this._backing();
     this._mist();
   }
 
@@ -598,31 +597,6 @@ export class Dressing {
       sp.scale.setScalar(g.size * 1.5);
       this._chunk(g.x, g.z).add(sp);
     }
-  }
-
-  // Solid black rock one tile behind the boulder walls, floor to vault, so
-  // no gap between the boulders ever shows the void beyond the map.
-  _backing() {
-    const geo = new THREE.BoxGeometry(TILE, this.ceiling + 0.2, TILE);
-    geo.translate(0, (this.ceiling + 0.2) / 2 - 0.1, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const m = new THREE.Matrix4();
-    const d = this.d;
-    const edge = new Set(this.wallTiles.map((t) => t.r * d.cols + t.c));
-    const behind = new Set();
-    for (const t of this.wallTiles) {
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) {
-          const c = t.c + dc;
-          const r = t.r + dr;
-          if (c < 0 || r < 0 || c >= d.cols || r >= d.rows) continue;
-          const k = r * d.cols + c;
-          if (!edge.has(k) && !d.nav.isWalkable(c, r)) behind.add(k);
-        }
-      }
-    }
-    const list = [...behind].map((k) => m.makeTranslation(((k % d.cols) + 0.5) * TILE, 0, (Math.floor(k / d.cols) + 0.5) * TILE).clone());
-    this._instances(geo, mat, list);
   }
 
   // Ground mist: three drifting sheets of noise at knee, waist and chest

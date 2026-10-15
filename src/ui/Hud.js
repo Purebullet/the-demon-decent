@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SPELLS, SPELL_IDS } from '../entities/Spells.js';
+import { SPELLS, SPELL_IDS, spellUsesLeft } from '../entities/Spells.js';
 import { WEAPON_TYPES, RARITIES } from '../entities/Weapons.js';
 import { xpToNext, MAX_LEVEL, damageMul, swingSpeedMul } from '../game/Levels.js';
 import { makeCanvas } from '../world/Textures.js';
@@ -920,6 +920,7 @@ export class Hud {
       r.speedMul.toFixed(2),
       JSON.stringify(r.stats),
       JSON.stringify(r.spells),
+      JSON.stringify(r.spellUses || {}),
       JSON.stringify(r.relics),
       cds,
       i.floorLabel,
@@ -1427,15 +1428,25 @@ export class Hud {
         words.forEach((wd2, k) => this._text(g, wd2, sx + sz / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: 8, ls: 1, align: 'center', base: 'middle' }));
       }
       g.globalAlpha = 1;
-      if (!lvl) {
-        // Not yet learned: a dark seal over it.
-        g.fillStyle = 'rgba(6,2,2,0.45)';
+      const left = lvl ? spellUsesLeft(r, slot.id) : 0;
+      if (!lvl || left <= 0) {
+        // Not yet learned, or spent for this floor: a dark seal over it.
+        g.fillStyle = lvl ? 'rgba(6,2,2,0.62)' : 'rgba(6,2,2,0.45)';
         g.fillRect(sx + 3, sy + 3, sz - 6, sz - 6);
       }
       g.restore();
       // Key, level and name.
       this._text(g, SPELLS[slot.id].label, sx + 7, sy + 15, { size: 13, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ' });
       if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
+      // Uses left on this floor, one pip each.
+      if (lvl && Number.isFinite(left)) {
+        for (let u = 0; u < lvl; u++) {
+          g.fillStyle = u < left ? C.ember : 'rgba(60,20,14,0.9)';
+          g.beginPath();
+          g.arc(sx + 10 + u * 9, sy + sz - 9, 3, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
       const name = SPELLS[slot.id].name;
       this._text(g, name.toUpperCase(), sx + sz / 2, sy + sz + 13, { size: 8, ls: 0.5, color: lvl ? C.bone : C.ash, align: 'center' });
       L.slots.push({ x: sx + 3, y: sy + 3, w: sz - 6, h: sz - 6 });

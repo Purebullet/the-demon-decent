@@ -5,7 +5,9 @@ import { damageMul } from '../game/Levels.js';
 // Demon Spells: rare utility powers. Found as sigil drops or taken at the
 // Magic Circle; each can be raised to level 3. Shade Step is everyone's
 // dodge (Space, the way you are moving), known from the start; Hellfire Nova
-// (Q) and Blood Siphon (R) have to be found.
+// (Q) and Blood Siphon (R) have to be found, and can be called on as many
+// times a floor as their level (once at level 1, twice at 2, three times at
+// 3), each time after its cooldown.
 
 export const SPELLS = {
   nova: {
@@ -48,9 +50,16 @@ export const MAX_SPELL_LEVEL = 3;
 
 const tmp = new THREE.Vector3();
 
+// Uses of a spell left on this floor (Shade Step has no limit).
+export function spellUsesLeft(run, id) {
+  if (id === 'step') return Infinity;
+  return Math.max(0, (run.spells[id] || 0) - (run.spellUses?.[id] || 0));
+}
+
 export function castSpell(id, player, ctx) {
   const level = player.run.spells[id];
-  if (!level || player.spellCd[id] > 0 || player.dead) return false;
+  if (!level || player.spellCd[id] > 0 || player.dead || spellUsesLeft(player.run, id) <= 0) return false;
+  if (id !== 'step') (player.run.spellUses ||= {})[id] = (player.run.spellUses[id] || 0) + 1;
   const L = SPELLS[id].levels[level - 1];
   player.spellCd[id] = L.cd;
   const p = player.position;

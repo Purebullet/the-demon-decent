@@ -78,3 +78,25 @@ test('a fallen run leaves the next half its level, where its points went', async
   // Unspent points come through as points.
   assert.deepEqual(legacyOf({ level: 6, stats: { attack: 0, defence: 0, agility: 0 } }), { level: 3, xp: 0, points: 3, stats: { attack: 0, defence: 0, agility: 0 } });
 });
+
+test('spells: Q and R as many times a floor as their level; Shade Step without limit', async () => {
+  const { spellUsesLeft } = await import('../src/entities/Spells.js');
+  const run = { spells: { nova: 2, step: 1, siphon: 1 }, spellUses: { nova: 1, siphon: 1 } };
+  assert.equal(spellUsesLeft(run, 'nova'), 1);
+  assert.equal(spellUsesLeft(run, 'siphon'), 0);
+  assert.equal(spellUsesLeft(run, 'step'), Infinity);
+});
+
+test('the Blood Well fills two flasks; the Sigil blesses each way once', async () => {
+  const { newRun, NODES } = await import('../src/game/Progression.js');
+  const run = newRun();
+  run.potions = 0;
+  NODES.well.options(run)[1].apply(run);
+  assert.equal(run.potions, 2);
+  const first = NODES.sigil.options(run);
+  assert.equal(first.length, 2);
+  first[0].apply(run);
+  assert.equal(NODES.sigil.options(run).length, 1);
+  NODES.sigil.options(run)[0].apply(run);
+  assert.equal(NODES.sigil.options(run).length, 0);
+});

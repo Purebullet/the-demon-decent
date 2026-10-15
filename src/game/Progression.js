@@ -44,12 +44,13 @@ export const NODES = {
     options: (run) => [
       { label: '+25 Max Health', apply: (r) => ((r.maxHealth += 25), (r.health += 25)) },
       run.potionCap < MAX_POTION_CAP
-        ? { label: '+1 Potion Capacity (and a full flask)', apply: (r) => ((r.potionCap = Math.min(MAX_POTION_CAP, r.potionCap + 1)), (r.potions = Math.min(r.potionCap, r.potions + 1))) }
+        ? { label: '+1 Potion Capacity (and two flasks filled)', apply: (r) => ((r.potionCap = Math.min(MAX_POTION_CAP, r.potionCap + 1)), (r.potions = Math.min(r.potionCap, r.potions + 2))) }
         : { label: 'Fill every flask', apply: (r) => (r.potions = r.potionCap) },
     ],
   },
   circle: {
     title: 'The Magic Circle',
+    spent: 'The circle is silent: your spells are complete.',
     options: (run) => {
       const opts = [];
       for (const id of SPELL_IDS) {
@@ -58,7 +59,7 @@ export const NODES = {
         const S = SPELLS[id];
         opts.push({
           label: lvl === 0 ? `Learn ${S.name} [${S.label}]` : `${S.name} to level ${lvl + 1}`,
-          detail: S.describe(S.levels[lvl]),
+          detail: S.describe(S.levels[lvl]) + (id === 'step' ? '' : ` Usable ${lvl + 1} time${lvl ? 's' : ''} a floor.`),
           apply: (r) => r.spells[id]++,
         });
       }
@@ -70,12 +71,15 @@ export const NODES = {
       return opts.slice(0, 2);
     },
   },
+  // Each of its blessings can be taken once in a run.
   sigil: {
     title: 'The Burning Sigil',
-    options: () => [
-      { label: '+10% Weapon Damage', apply: (r) => (r.dmgMul *= 1.1) },
-      { label: '+12% Attack Speed', apply: (r) => (r.speedMul *= 1.12) },
-    ],
+    spent: 'The sigil is cold: both its blessings are already yours.',
+    options: (run) =>
+      [
+        !run.sigil?.damage && { label: '+10% Weapon Damage', apply: (r) => ((r.dmgMul *= 1.1), ((r.sigil ||= {}).damage = true)) },
+        !run.sigil?.speed && { label: '+12% Attack Speed', apply: (r) => ((r.speedMul *= 1.12), ((r.sigil ||= {}).speed = true)) },
+      ].filter(Boolean),
   },
 };
 

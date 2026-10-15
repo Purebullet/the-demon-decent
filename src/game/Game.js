@@ -40,6 +40,8 @@ const PLAYING = new Set(['surface', 'floor', 'sanctum']);
 // Floors that play "Blood in the Arena": the boss floors, and floor 5 (where
 // the first flame-horned brute waits).
 const BOSS_MUSIC = new Set([5]);
+// Gorvath (floor 10) is fought to the Deep's own music.
+const SONG_FOR = { 10: 'deep' };
 // How long after the blow that levels you up before the choice opens.
 const LEVEL_UP_DELAY = 0.7;
 
@@ -545,8 +547,10 @@ export class Game {
   _enterFloor({ floor, arrival = false }) {
     const def = floorDef(floor);
     const inDeep = floor >= DEEP_FROM;
-    this.audio.music(def.boss || BOSS_MUSIC.has(floor) ? 'boss' : inDeep ? 'deep' : 'drone');
+    this.audio.music(SONG_FOR[floor] || (def.boss || BOSS_MUSIC.has(floor) ? 'boss' : inDeep ? 'deep' : 'drone'));
     const run = this.run;
+    // Each floor gives the spells their uses again.
+    run.spellUses = {};
     run.floor = floor;
     run.deepest = Math.max(run.deepest, floor);
     if (!run.dev && floor > this.best) {
@@ -628,6 +632,34 @@ export class Game {
         if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Demons here have 50% more health, and move and strike 5% faster');
       }, arrival ? 9000 : 3200);
     }
+  }
+
+  // Overlapping demons are pushed apart, the lighter one further, and kept
+  // out of the rock.
+  _separate(level) {
+    const list = this.enemies.filter((e) => e.alive && e.state !== 'burrowed' && !e.hidden && e.root.position.y < 1);
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j];
+        const dx = b.position.x - a.position.x;
+        const dz = b.position.z - a.position.z;
+        const min = (a.radius + b.radius) * 0.95;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= min * min) continue;
+        const d = Math.sqrt(d2) || 1e-3;
+        const nx = d2 > 1e-8 ? dx / d : Math.cos(i + j);
+        const nz = d2 > 1e-8 ? dz / d : Math.sin(i + j);
+        const ma = a.type.mass || 1;
+        const mb = b.type.mass || 1;
+        const over = min - d;
+        a.position.x -= nx * over * (mb / (ma + mb));
+        a.position.z -= nz * over * (mb / (ma + mb));
+        b.position.x += nx * over * (ma / (ma + mb));
+        b.position.z += nz * over * (ma / (ma + mb));
+      }
+    }
+    for (const e of list) level.world.resolve(e.position, e.radius);
   }
 
   _addEnemy(e) {
@@ -771,6 +803,9 @@ export class Game {
         }
       }
     }
+
+    // Demons never stand inside one another.
+    this._separate(level);
 
     // Bodies push the player out (except when passing through as a shade).
     if (!p.dash && !p.dead) {
@@ -1062,7 +1097,7 @@ export class Game {
     sc.update(dt, this.ctx, focused);
     if (!this.choice && focused && this.input.wasPressed('KeyF')) {
       const options = NODES[focused.key].options(this.run);
-      if (!options.length) this.hud.toast('The circle is silent: your spells are complete.');
+      if (!options.length) this.hud.toast(NODES[focused.key].spent || 'Nothing stirs here.');
       else {
         this.choice = { node: focused, options };
         this.hud.showChoice(NODES[focused.key].title, options);

@@ -840,6 +840,7 @@ export class Player {
     // The slime itself: the blade goes green while it is coated.
     this._coat = (this._coat ?? 0) + ((slime ? 1 : 0) - (this._coat ?? 0)) * Math.min(1, dt * 8);
     this._glow = (this._glow ?? 0) + (want - (this._glow ?? 0)) * Math.min(1, dt * 6);
+    if (this._coat > 0.01) for (const w of this.weaponMats) w.u.uSlimeT.value += dt;
     const key = `${col.getHex()}|${this._glow.toFixed(2)}|${this._coat.toFixed(2)}`;
     if (key === this._glowKey) return;
     this._glowKey = key;
@@ -858,16 +859,15 @@ export class Player {
     // Fire the length of the blade, tallest at its root, shedding embers.
     const fires = [0, 1, 2, 3, 4, 5].map((k) => new TorchFire({ height: 0.32 - k * 0.025, width: 0.12 - k * 0.008, seed: 3.1 + k * 1.7, embers: 12, intensity: 1.6 }));
     for (const f of fires) f.setIntensity(0);
-    const N = 18;
-    const geo = new THREE.BufferGeometry();
-    const pos = new Float32Array(N * 3);
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const drips = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.014, color: 0x7cf03a, transparent: true, opacity: 0.9, depthWrite: false }));
+    // Slime drops: little glossy beads (lit, one draw for all) that swell on
+    // the blade's edge, stretch as they hang and fall away.
+    const N = 14;
+    const drips = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshStandardMaterial({ color: 0x5ed82c, emissive: 0x0f3a06, roughness: 0.12, metalness: 0, transparent: true, opacity: 0.92 }), N);
     drips.frustumCulled = false;
     drips.renderOrder = 7;
     drips.visible = false;
     this.viewRoot.add(drips);
-    return { fires, drips, pos, drops: Array.from({ length: N }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0 })), heat: 0 };
+    return { fires, drips, drops: Array.from({ length: N }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0, age: 0, hang: 0, size: 0 })), heat: 0 };
   }
 
   // A smashed urn's slime: coats the blade (or feeds a fire already lit).
@@ -927,27 +927,45 @@ export class Player {
     this.viewRoot.updateMatrixWorld(true);
     _q2.copy(this.viewRoot.quaternion).invert();
     const down = _v2.set(0, -1, 0).applyQuaternion(_q2);
+    _q3.setFromUnitVectors(_UP, down);
     fx.drops.forEach((d, i) => {
       d.life -= dt;
+      d.age += dt;
       if (d.life <= 0) {
-        if (!coated || Math.random() > dt * 9) {
-          fx.pos[i * 3 + 1] = -99;
+        if (!coated || Math.random() > dt * 7) {
+          fx.drips.setMatrixAt(i, _ZERO);
           return;
         }
-        d.life = 0.5 + Math.random() * 0.5;
-        _v.set((Math.random() - 0.5) * 0.03, b0 + (b1 - b0) * Math.random(), 0);
+        d.life = 0.9 + Math.random() * 0.5;
+        d.age = 0;
+        d.hang = 0.25 + Math.random() * 0.3;
+        d.size = 0.005 + Math.random() * 0.004;
+        d.spot = new THREE.Vector3((Math.random() - 0.5) * 0.025, b0 + (b1 - b0) * (0.15 + Math.random() * 0.85), 0);
+        d.v.set(0, 0, 0);
+      }
+      let s = d.size;
+      let stretch = 1;
+      if (d.age < d.hang) {
+        // Swelling on the blade, held by it (it moves with the swing).
+        _v.copy(d.spot);
         this.weaponPivot.localToWorld(_v);
         this.viewRoot.worldToLocal(_v);
         d.p.copy(_v);
-        d.v.set(0, 0, 0);
+        const k = d.age / d.hang;
+        s *= 0.4 + 0.6 * k;
+        stretch = 1 + k * 0.8;
+        d.p.addScaledVector(down, s * stretch * 0.6);
+      } else {
+        // Let go: falling, drawn out along the fall.
+        d.v.addScaledVector(down, dt * 4);
+        d.p.addScaledVector(d.v, dt);
+        stretch = 1.4 + Math.min(1.2, d.v.length() * 0.6);
+        s *= 0.9;
       }
-      d.v.addScaledVector(down, dt * 4);
-      d.p.addScaledVector(d.v, dt);
-      fx.pos[i * 3] = d.p.x;
-      fx.pos[i * 3 + 1] = d.p.y;
-      fx.pos[i * 3 + 2] = d.p.z;
+      _m4.compose(d.p, _q3, _v3.set(s, s * stretch, s));
+      fx.drips.setMatrixAt(i, _m4);
     });
-    fx.drips.geometry.attributes.position.needsUpdate = true;
+    fx.drips.instanceMatrix.needsUpdate = true;
   }
 
   // Sweep the blade from arc fraction k0 to k1, sub-stepping both the arc
@@ -1443,6 +1461,11 @@ export class Player {
 const _heatCol = new THREE.Color(1, 0.45, 0.1);
 const _flameCol = new THREE.Color(1, 0.3, 0.05);
 const _slimeCol = new THREE.Color(0.35, 1, 0.15);
+const _UP = new THREE.Vector3(0, 1, 0);
+const _ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+const _q3 = new THREE.Quaternion();
+const _m4 = new THREE.Matrix4();
+const _v3 = new THREE.Vector3();
 const _slimeBody = new THREE.Color(0.32, 0.75, 0.16);
 const _q2 = new THREE.Quaternion();
 const _torchCol = new THREE.Color(0xffb070);
@@ -1457,16 +1480,32 @@ const smooth = (k) => k * k * (3 - 2 * k);
 // weapon (in the pivot's space, where `from` is where the blade starts) each
 // point lies.
 function bladeMask(m, toPivot, from) {
-  const u = { uToPivot: { value: toPivot }, uBladeFrom: { value: from }, uSlime: { value: 0 }, uSlimeCol: { value: _slimeBody } };
+  const u = { uToPivot: { value: toPivot }, uBladeFrom: { value: from }, uSlime: { value: 0 }, uSlimeCol: { value: _slimeBody }, uSlimeT: { value: 0 } };
+  // Slime is wet and alive: streaks of thicker, brighter ooze sliding down
+  // the blade over a darker film, glossy where it lies, faintly glowing.
+  const slime = `
+    float slimeK = uSlime * vBlade;
+    vec3 slimeQ = vSlimeP * vec3(55.0, 22.0, 55.0) + vec3(0.0, uSlimeT * 1.1, 0.0);
+    float slimeFlow = slimeNoise(slimeQ) * 0.65 + slimeNoise(slimeQ * 2.3 + 7.1) * 0.35;
+    float slimeBlob = smoothstep(0.5, 0.78, slimeFlow);`;
+  const noise = `
+    float slimeHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+    float slimeNoise(vec3 p) {
+      vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(slimeHash(i), slimeHash(i + vec3(1.0, 0.0, 0.0)), f.x), mix(slimeHash(i + vec3(0.0, 1.0, 0.0)), slimeHash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+                 mix(mix(slimeHash(i + vec3(0.0, 0.0, 1.0)), slimeHash(i + vec3(1.0, 0.0, 1.0)), f.x), mix(slimeHash(i + vec3(0.0, 1.0, 1.0)), slimeHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+    }`;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform mat4 uToPivot;\nuniform float uBladeFrom;\nvarying float vBlade;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBlade = smoothstep(uBladeFrom - 0.03, uBladeFrom + 0.1, (uToPivot * vec4(position, 1.0)).y);');
+      .replace('#include <common>', '#include <common>\nuniform mat4 uToPivot;\nuniform float uBladeFrom;\nvarying float vBlade;\nvarying vec3 vSlimeP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlimeP = (uToPivot * vec4(position, 1.0)).xyz;\nvBlade = smoothstep(uBladeFrom - 0.03, uBladeFrom + 0.1, vSlimeP.y);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uSlime;\nuniform vec3 uSlimeCol;\nvarying float vBlade;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, uSlimeCol, uSlime * vBlade);')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vBlade;');
+      .replace('#include <common>', `#include <common>\nuniform float uSlime;\nuniform vec3 uSlimeCol;\nuniform float uSlimeT;\nvarying float vBlade;\nvarying vec3 vSlimeP;${noise}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>${slime}\ndiffuseColor.rgb = mix(diffuseColor.rgb, mix(uSlimeCol * 0.32, uSlimeCol * 0.95, slimeBlob), slimeK);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.12, slimeK);')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.0, slimeK);')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vBlade;\ntotalEmissiveRadiance += uSlimeCol * (0.03 + 0.1 * slimeBlob) * slimeK;');
   };
   m.customProgramCacheKey = () => 'bladeMask';
   m.needsUpdate = true;
