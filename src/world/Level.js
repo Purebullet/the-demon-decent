@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { TILE } from './LevelData.js';
-import { parseLevel, carveAlcoves } from './levelParser.js';
+import { parseLevel, carveAlcoves, exitFacing } from './levelParser.js';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { runeCircleTexture } from './Textures.js';
-import { lavaMaterial, portalMaterial, makeFlame } from './Shaders.js';
+import { lavaMaterial, portalMaterial, gateVeilMaterial, makeFlame } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
@@ -19,6 +19,9 @@ import { disposeTree } from '../core/dispose.js';
 
 const SPIKE_PERIOD = 2.6;
 const VENT_PERIOD = 4.2;
+// The exit's hell-gate is drawn a little smaller than the model's size (it
+// has to stand in a room).
+const GATE_SCALE = 0.85;
 
 export class Level {
   // `light`: fewer dynamic lights, for slow machines and software rendering.
@@ -242,55 +245,91 @@ export class Level {
     }
   }
 
+  // The way out: the hell-gate standing on the exit tile, facing the way you
+  // come, a veil of hellfire turning in its arch with embers drawn into it,
+  // chained shut until the floor is cleared; walk through it to descend.
+  // (Without the gate's model: the old vortex in the floor.)
   _buildExit() {
     const x = this.data.exit;
     const g = new THREE.Group();
     g.position.set(x.x, 0, x.z);
-    this.portalMat = portalMaterial();
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 72), this.portalMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = 0.05;
-    g.add(disc);
     const runeMat = new THREE.MeshBasicMaterial({ map: runeCircleTexture('#ff3a1a'), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
     const rune = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 3.6), runeMat);
     rune.rotation.x = -Math.PI / 2;
     rune.position.y = 0.07;
-    g.add(rune);
-    const rockMat = this.dressing.rockShape.material;
-    const r = mulberry32(99);
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 9) * Math.PI * 2;
-      const s = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.9 + r() * 0.9, 7), rockMat);
-      s.position.set(Math.cos(a) * 1.55, 0.35, Math.sin(a) * 1.55);
-      s.rotation.set(Math.sin(a) * 0.4, 0, -Math.cos(a) * 0.4);
-      g.add(s);
-    }
-    // Chains of the seal across the portal while the floor still lives.
+    this.exitRune = rune;
     const chainMat = new THREE.MeshStandardMaterial({ color: 0x3a1a14, metalness: 0.8, roughness: 0.4, emissive: 0x550800, emissiveIntensity: 1 });
-    this.seal = new THREE.Group();
-    for (const rot of [0.6, -0.6]) {
+    const chainLine = (from, to) => {
       const line = new THREE.Group();
-      line.rotation.y = rot;
-      for (let k = -6; k <= 6; k++) {
+      const d = to.clone().sub(from);
+      const n = Math.round(d.length() / 0.17);
+      for (let k = 0; k <= n; k++) {
         const link = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 8, 16), chainMat);
-        link.position.set(k * 0.17, 0.15, 0);
-        link.rotation.set(0, Math.PI / 2, (k % 2) * (Math.PI / 2));
+        link.position.copy(from).addScaledVector(d, k / n);
+        link.lookAt(link.position.clone().add(d));
+        link.rotateZ((k % 2) * (Math.PI / 2));
         line.add(link);
       }
-      this.seal.add(line);
+      return line;
+    };
+    this.seal = new THREE.Group();
+    if (Assets.hasProp('gate')) {
+      const [fx, fz] = exitFacing(this.data);
+      // The model's front (its skulls) is its -X; the arch spans its Z.
+      g.rotation.y = Math.atan2(fz, -fx);
+      const gate = Assets.instanceProp('gate');
+      const mat = this.dressing.mat('gate');
+      gate.traverse((o) => {
+        if (o.isMesh) o.material = mat;
+      });
+      gate.scale.multiplyScalar(GATE_SCALE);
+      g.add(gate);
+      const H = Assets.props.get('gate').entry.size * GATE_SCALE;
+      const W = H * 0.42;
+      const A = H * 0.58;
+      // The veil, shaped to the arch, across the opening.
+      const shape = new THREE.Shape();
+      shape.moveTo(-W / 2, 0);
+      shape.lineTo(W / 2, 0);
+      shape.lineTo(W / 2, A - W / 2);
+      shape.absarc(0, A - W / 2, W / 2, 0, Math.PI, false);
+      shape.lineTo(-W / 2, 0);
+      const geo = new THREE.ShapeGeometry(shape, 24);
+      const p = geo.attributes.position;
+      const uv = [];
+      for (let i = 0; i < p.count; i++) uv.push(p.getX(i) / W + 0.5, p.getY(i) / A);
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.rotateY(Math.PI / 2);
+      this.portalMat = gateVeilMaterial(W, A);
+      const veil = new THREE.Mesh(geo, this.portalMat);
+      veil.renderOrder = 3;
+      g.add(veil);
+      // Chains across the arch while the floor still lives.
+      this.seal.add(chainLine(new THREE.Vector3(-0.25, 0.3, -W / 2), new THREE.Vector3(-0.25, A * 0.85, W / 2)));
+      this.seal.add(chainLine(new THREE.Vector3(-0.25, 0.3, W / 2), new THREE.Vector3(-0.25, A * 0.85, -W / 2)));
+      // The rune circle on the floor before it.
+      rune.position.x = -2.2;
+      g.add(rune);
+      g.updateMatrixWorld(true);
+      // Its two piers are solid.
+      const side = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion);
+      for (const k of [-1, 1]) this.world.addStatic({ x: x.x + side.x * k * (W / 2 + 0.75), z: x.z + side.z * k * (W / 2 + 0.75), r: 0.75 });
+      this.gateFx = { o: new THREE.Vector3(x.x, 0, x.z), side, fwd: new THREE.Vector3(fx, 0, fz), w: W, h: A };
+      this.exitSpot = { color: new THREE.Color(0xff3010), base: 4, distance: 10, decay: 1.6, pos: new THREE.Vector3(x.x + fx * 0.6, A * 0.5, x.z + fz * 0.6), seed: 0 };
+    } else {
+      this.portalMat = portalMaterial();
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(1.25, 72), this.portalMat);
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.y = 0.05;
+      g.add(disc, rune);
+      for (const rot of [0.6, -0.6]) {
+        const line = chainLine(new THREE.Vector3(-1.05, 0.15, 0), new THREE.Vector3(1.05, 0.15, 0));
+        line.rotation.y = rot;
+        this.seal.add(line);
+      }
+      this.exitSpot = { color: new THREE.Color(0xff3010), base: 4, distance: 9, decay: 1.6, pos: new THREE.Vector3(x.x, 1.2, x.z), seed: 0 };
     }
     g.add(this.seal);
-    // The portal is a light source like the others (see the pool).
-    this.exitSpot = { color: new THREE.Color(0xff3010), base: 4, distance: 9, decay: 1.6, pos: new THREE.Vector3(x.x, 1.2, x.z), seed: 0 };
-    this.exitRune = rune;
-    // Once the seal breaks, a pillar of hellfire light stands over the
-    // portal, seen through the dark from across the cavern.
-    const beamMat = new THREE.MeshBasicMaterial({ color: 0xff5a1a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
-    const beamGeo = new THREE.CylinderGeometry(0.7, 1.2, 30, 40, 1, true);
-    beamGeo.translate(0, 15, 0);
-    this.beam = new THREE.Mesh(beamGeo, beamMat);
-    this.beam.visible = false;
-    g.add(this.beam);
     this.group.add(g);
     this.exitGroup = g;
   }
@@ -313,10 +352,6 @@ export class Level {
     this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.sight);
     this.dressing.tick(t);
     this.props.update(dt, ctx);
-    if (this.beam) {
-      this.beam.visible = this.exitOpen;
-      this.beam.material.opacity = this.portalT * (0.55 + Math.sin(t * 2.2) * 0.12);
-    }
     if (this.lavaMat) this.lavaMat.uniforms.uTime.value = t;
     this.portalMat.uniforms.uTime.value = t;
     this.portalT = Math.min(1, this.portalT + (this.exitOpen ? dt * 0.8 : 0));
@@ -329,7 +364,44 @@ export class Level {
       b.flame.userData.tick(t);
       if (Math.random() < dt * 8) ps.emit({ x: b.pos.x + (Math.random() - 0.5) * 0.4, y: b.pos.y + 0.5, z: b.pos.z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.6, vy: 1.8 + Math.random() * 1.8, vz: (Math.random() - 0.5) * 0.6, life: 1.2 + Math.random(), size: 0.05, sizeEnd: 0.01, color: C.emberHot, colorEnd: C.emberRed, drag: 0.4, turbulence: 2.5 });
     }
-    if (this.exitOpen && Math.random() < dt * 25) {
+    const G = this.gateFx;
+    if (G) {
+      // Embers drawn round and into the veil's eye (a few while it is sealed,
+      // a storm once it opens), drifting out toward you; flames lick up from
+      // the threshold once it is open.
+      const near = (ctx.player.position.x - G.o.x) ** 2 + (ctx.player.position.z - G.o.z) ** 2 < 900;
+      let n = near ? (this.exitOpen ? 55 : 10) * dt : 0;
+      while (n > 0 && (n >= 1 || Math.random() < n)) {
+        n--;
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.35 + Math.random() * 0.65;
+        const lx = Math.cos(a) * r * G.w * 0.5;
+        const ly = G.h * 0.48 + Math.sin(a) * r * G.w * 0.55;
+        if (ly < 0.1 || ly > G.h) continue;
+        const sp = (this.exitOpen ? 1.8 : 0.6) * (0.6 + Math.random() * 0.6);
+        const tx = -Math.sin(a) * sp - Math.cos(a) * sp * 0.4;
+        const ty = Math.cos(a) * sp - Math.sin(a) * sp * 0.4;
+        const out = (Math.random() - 0.3) * 0.5;
+        ps.emit({
+          x: G.o.x + G.side.x * lx + G.fwd.x * 0.1,
+          y: ly,
+          z: G.o.z + G.side.z * lx + G.fwd.z * 0.1,
+          vx: G.side.x * tx + G.fwd.x * out,
+          vy: ty,
+          vz: G.side.z * tx + G.fwd.z * out,
+          life: 0.7 + Math.random() * 0.6,
+          size: this.exitOpen ? 0.07 : 0.05,
+          sizeEnd: 0.01,
+          color: C.emberHot,
+          colorEnd: C.emberRed,
+          drag: 1.2,
+        });
+      }
+      if (this.exitOpen && near && Math.random() < dt * 10) {
+        const k = (Math.random() - 0.5) * G.w * 0.8;
+        spawnFlame(ps, { x: G.o.x + G.side.x * k, y: 0.05, z: G.o.z + G.side.z * k }, { size: 0.28, rise: 2.2, life: 0.9 });
+      }
+    } else if (this.exitOpen && Math.random() < dt * 25) {
       const x = this.data.exit;
       const a = Math.random() * 6.28;
       spawnFlame(ps, { x: x.x + Math.cos(a) * Math.random() * 1.1, y: 0.1, z: x.z + Math.sin(a) * Math.random() * 1.1 }, { size: 0.3, rise: 2.5, life: 1 });

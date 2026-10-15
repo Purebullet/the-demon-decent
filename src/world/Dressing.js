@@ -3,6 +3,7 @@ import { TILE } from './LevelData.js';
 import { Assets } from '../assets/AssetLibrary.js';
 import { rockTextures, emberVeinTexture, softDotTexture } from './Textures.js';
 import { mulberry32 } from '../core/rng.js';
+import { exitFacing } from './levelParser.js';
 
 // Dresses a cavern floor in its look (themes.js): the rock shell (floor,
 // ceiling, walls of generated boulders), stalactites and rubble, set pieces on
@@ -550,21 +551,14 @@ export class Dressing {
     for (const [id, list] of buckets) this._instances(Assets.propGeometry(id).geometry, this.mat(id), list);
   }
 
-  // The hell-gate stands behind the exit portal, facing the way in.
+  // The exit's hell-gate (Level.js) stands on the exit tile: nothing else
+  // goes where it stands.
   _exitGate() {
     const x = this.d.exit;
-    if (!x || !Assets.hasProp('gate')) return;
-    const nav = this.d.nav;
-    let best = null;
-    let openBest = Infinity;
-    for (const [dc, dr] of DIRS) {
-      let open = 0;
-      for (let step = 1; step <= 4; step++) if (nav.isWalkable(x.c + dc * step, x.r + dr * step)) open++;
-      if (open < openBest) [best, openBest] = [[dc, dr], open];
-    }
-    const [dx, dz] = best;
-    this.claim(x.x + dx * 1.7, x.z + dz * 1.7, 2.4);
-    this.gate = this._place('gate', x.x + dx * 1.7, x.z + dz * 1.7, { yaw: Math.atan2(-dx, -dz), scale: Math.min(1, (this.ceiling - 0.4) / Assets.props.get('gate').entry.size) });
+    if (!x) return;
+    const [fx, fz] = exitFacing(this.d);
+    this.claim(x.x, x.z, 2.8);
+    this.claim(x.x + fx * 2.2, x.z + fz * 2.2, 1.6);
   }
 
   // Azrakel's throne, against the wall behind where he waits.

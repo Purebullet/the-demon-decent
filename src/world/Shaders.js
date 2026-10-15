@@ -83,6 +83,47 @@ export function portalMaterial() {
   );
 }
 
+// The veil inside the hell-gate's arch (UV across the opening, the arch's
+// width and height in metres in uSize): a vortex of hellfire turning about
+// a dark eye, dim and slow while the floor is sealed, roaring once it opens,
+// fading into the stone at the arch's edge. Drawn additively.
+export function gateVeilMaterial(width, height) {
+  return make(
+    /* glsl */ `
+    #include <fog_pars_fragment>
+    uniform float uTime;
+    uniform float uOpen;
+    uniform vec2 uSize;
+    varying vec2 vUv;
+    ${NOISE}
+    void main() {
+      vec2 p = vec2((vUv.x - 0.5) * uSize.x, vUv.y * uSize.y);
+      float rr = uSize.x * 0.5;
+      float yc = uSize.y - rr;
+      float inside = p.y < yc ? rr - abs(p.x) : rr - length(p - vec2(0.0, yc));
+      inside = min(inside, p.y + 0.4);
+      float edge = smoothstep(0.0, 0.45, inside);
+      vec2 c = (p - vec2(0.0, uSize.y * 0.48)) / (rr * 1.15);
+      float r = length(c);
+      float a = atan(c.y, c.x);
+      float spin = uTime * (0.5 + uOpen * 2.2);
+      float swirl = a + r * 5.0 - spin;
+      float n = fbm(vec2(cos(swirl), sin(swirl)) * 1.6 + r * 2.5 - uTime * 0.35);
+      float streak = smoothstep(0.35, 0.9, n);
+      vec3 sealed = vec3(0.35, 0.03, 0.01) * (0.25 + streak * 0.6);
+      vec3 hot = mix(vec3(1.0, 0.25, 0.03), vec3(1.0, 0.75, 0.35), streak * smoothstep(1.1, 0.2, r));
+      vec3 open = hot * (0.35 + streak * 1.4) * (0.6 + 0.4 * smoothstep(0.0, 0.5, r));
+      // The eye: a dark well at the heart of it.
+      open *= 0.15 + 0.85 * smoothstep(0.08, 0.4, r);
+      vec3 col = mix(sealed, open, uOpen) * edge;
+      gl_FragColor = vec4(col, 1.0);
+      #include <fog_fragment>
+    }`,
+    { uOpen: { value: 0 }, uSize: { value: new THREE.Vector2(width, height) } },
+    { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide },
+  );
+}
+
 export function bloodMaterial() {
   return make(/* glsl */ `
     #include <fog_pars_fragment>

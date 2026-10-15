@@ -182,3 +182,17 @@ export function carveAlcoves(level, want, rand) {
   }
   return made.length;
 }
+
+// Which way the exit faces: toward the most open ground beside it (where
+// you come from), as [dc, dr].
+export function exitFacing(level) {
+  const x = level.exit;
+  let face = [-1, 0];
+  let most = -1;
+  for (const [dc, dr] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    let open = 0;
+    for (let s = 1; s <= 4; s++) if (level.nav.isWalkable(x.c + dc * s, x.r + dr * s)) open++;
+    if (open > most) [face, most] = [[dc, dr], open];
+  }
+  return face;
+}
