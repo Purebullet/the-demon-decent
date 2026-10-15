@@ -70,7 +70,12 @@ for (const [name, l] of Object.entries(lods)) {
 // Live build: the pit pulses with hellfire, cracks glow near the lip, fog
 // billows up out of the hole and lava spits out of it onto the slopes, all
 // on the world clock so every viewer sees the same.
-const { rc, rb, hm, pool, lavaY } = lods.lod0.dims;
+const { rc, rb, hm, pool, hole, lavaY } = lods.lod0.dims;
+// A gob's splash: it opens as it lands, glows and crusts over, then sinks away.
+const SPLAT = 0.15;
+const REST = 3;
+const FADE = 0.9;
+const REACH = 1.7;
 const landing = lods.lod0.landing;
 const edge = Math.min(width, depth) / 2 - 0.5;
 await writeFile(
@@ -81,7 +86,13 @@ await writeFile(
         Glow: { surface: 'glow.glsl', glow: 2 },
         Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2), lake: +lavaY.toFixed(2) } },
-        Lava: { surface: 'lava.glsl', glow: 1.6, uniforms: { pool: +pool.toFixed(2) } },
+        Lava: {
+          vertex: 'lava-vertex.glsl',
+          surface: 'lava.glsl',
+          include: ['lava-common.glsl'],
+          glow: 1.6,
+          uniforms: { pool: +pool.toFixed(2), ...Object.fromEntries([0, 1, 2, 3, 4, 5].map((i) => [`splash${i}`, [0, 0, 0, -1]])) },
+        },
       },
       script: 'build.js',
     },
@@ -211,13 +222,18 @@ void p0Surface(inout P0Surface s) {
 `,
 );
 await writeFile(
-  join(out, 'lava.glsl'),
-  `// The lake of fire in the crater: a black crust broken into plates that
-// drift in a slow whirl down toward the hole at its middle, molten rock
-// blazing through every seam, rings of heat rippling outward, bubbles welling
-// up and bursting, and the melt white-hot where it pours away. The flow is
-// two layers sliding along the whirl a little way and fading over each other
-// in turn, so it moves for ever without winding itself up.
+  join(out, 'lava-common.glsl'),
+  `// Shared by the lava's two stages: noise, the palette, and the splashes.
+// The Lava mesh is the lake (a ring at LAKE_Y round the opening), the throat
+// under the opening, and a splash laid on the rock round every landing spot.
+// The script names the splashes showing now, one per gob in the air:
+// splashN = (x, y, z, seconds since it landed), or w < 0 for none.
+const float LAKE_Y = ${lavaY.toFixed(2)};
+const float HOLE_R = ${hole.toFixed(3)};
+const float SPLAT = ${SPLAT.toFixed(2)};
+const float REST = ${REST.toFixed(2)};
+const float FADE = ${FADE.toFixed(2)};
+const float REACH = ${REACH.toFixed(2)};
 float lavaHash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -232,56 +248,157 @@ float lavaNoise(vec2 p) {
 float lavaFbm(vec2 p) {
   return lavaNoise(p) * 0.55 + lavaNoise(p * 2.07 + 3.7) * 0.3 + lavaNoise(p * 4.3 - 1.3) * 0.15;
 }
+// Molten rock by heat: dull red, orange, then yellow-white.
+vec3 lavaHot(float heat) {
+  vec3 hot = mix(vec3(0.55, 0.03, 0.005), vec3(1.0, 0.28, 0.03), smoothstep(0.2, 0.8, heat));
+  return mix(hot, vec3(1.0, 0.75, 0.35), smoothstep(1.05, 1.6, heat));
+}
+// The showing splash nearest q (no two spots' splashes reach each other).
+void lavaNearest(vec4 c, vec2 q, inout vec4 best, inout float bd) {
+  if (c.w < 0.0) return;
+  float d = distance(q, c.xz);
+  if (d < bd) {
+    bd = d;
+    best = c;
+  }
+}
+vec4 lavaSplash(vec2 q) {
+  vec4 best = vec4(0.0, 0.0, 0.0, -1.0);
+  float bd = REACH;
+  lavaNearest(splash0, q, best, bd);
+  lavaNearest(splash1, q, best, bd);
+  lavaNearest(splash2, q, best, bd);
+  lavaNearest(splash3, q, best, bd);
+  lavaNearest(splash4, q, best, bd);
+  lavaNearest(splash5, q, best, bd);
+  return best;
+}
+`,
+);
+await writeFile(
+  join(out, 'lava-vertex.glsl'),
+  `// A splash stays folded to a point (nothing drawn) until its gob lands:
+// then it bursts open over the rock, and at the end sinks into it.
+vec3 p0Vertex(vec3 position, vec3 normal, vec2 uv) {
+  if (length(position.xz) < pool + 0.3) return position;
+  vec4 sp = lavaSplash(position.xz);
+  if (sp.w < 0.0) return vec3(0.0, -1.0, 0.0);
+  float open = 1.0 - pow(1.0 - clamp(sp.w / SPLAT, 0.0, 1.0), 3.0);
+  float fade = clamp((sp.w - SPLAT - REST) / FADE, 0.0, 1.0);
+  vec3 p = mix(sp.xyz, position, (0.15 + 0.85 * open) * (1.0 - 0.2 * fade));
+  p.y -= fade * 0.12;
+  return p;
+}
+`,
+);
+await writeFile(
+  join(out, 'lava.glsl'),
+  `// The lake of fire in the crater: a black crust broken into plates that
+// drift in a slow whirl in toward the opening at its middle, molten rock
+// blazing through every seam, rings of heat rippling outward, bubbles welling
+// up and bursting, and the melt pouring over the opening's lip in falls that
+// dim as they drop down the throat into the dark. The flow is two layers
+// sliding along the whirl a little way and fading over each other in turn,
+// so it moves for ever without winding itself up. Out on the slopes, the
+// splashes of the gobs it spits glow, crust over from the edge and go out.
+
 // The crust's pattern at q, carried a distance d along the flow.
 float lavaLayer(vec2 q, vec2 flow, float d, float seed) {
   vec2 p = (q - flow * d) * 0.85 + seed;
   vec2 warp = vec2(lavaFbm(p * 0.7 + 1.3), lavaFbm(p * 0.7 + 7.9)) - 0.5;
   return lavaFbm(p + warp * 1.8);
 }
-void p0Surface(inout P0Surface s) {
+// Noise round the opening, seamless all the way round.
+float lavaAround(float a, float v, float freq) {
+  float w = (a + 3.14159265) / 6.2831853;
+  return mix(lavaNoise(vec2(a * freq, v)), lavaNoise(vec2((a - 6.2831853) * freq, v)), w);
+}
+void lavaLake(inout P0Surface s) {
   vec2 q = s.position.xz;
   float r = max(length(q), 0.001);
   float k = clamp(r / pool, 0.0, 1.0);
+  float hk = HOLE_R / pool;
   float t = p0Time;
-  // Round the hole and in toward it, faster nearer it (and still at the
-  // very middle, where it pours away).
-  vec2 flow = (vec2(-q.y, q.x) / r * 0.8 - q / r * 0.45) * (0.5 + 0.9 * (1.0 - k)) * smoothstep(0.0, 0.3, k);
+  // Round the opening and in toward it, faster nearer it.
+  vec2 flow = (vec2(-q.y, q.x) / r * 0.8 - q / r * 0.45) * (0.5 + 0.9 * (1.0 - k));
   float ph = fract(t * 0.06);
   float ph2 = fract(t * 0.06 + 0.5);
   float n = mix(lavaLayer(q, flow, ph * 3.0, 0.0), lavaLayer(q, flow, ph2 * 3.0, 11.7), abs(1.0 - 2.0 * ph));
-  // Seams where the crust breaks, wider toward the hole.
+  // Seams where the crust breaks, wider toward the opening.
   float seam = 1.0 - smoothstep(0.0, 0.045 + 0.09 * (1.0 - k), abs(n - 0.5));
   float ripple = 0.5 + 0.5 * sin(r * 3.4 - t * 2.2 + n * 4.0);
-  float hole = smoothstep(0.24, 0.02, k);
-  float heat = seam * (0.65 + 0.5 * ripple) + hole * 1.5;
+  // The lip, where the crust tears apart and the melt runs over in streaks.
+  float lip = smoothstep(hk + 0.16, hk, k);
+  float pour = lavaAround(atan(q.y, q.x), t * 0.9 + r * 2.0, 1.6);
+  float heat = seam * (0.65 + 0.5 * ripple) + lip * (0.35 + 0.75 * smoothstep(0.35, 0.8, pour));
   // Bubbles: a few spots swell bright and burst.
   float b = lavaNoise(q * 1.6 + vec2(t * 0.25, -t * 0.18));
   heat += smoothstep(0.88, 0.97, b) * (0.5 + 0.5 * sin(t * 5.0 + b * 30.0)) * 0.9;
-  heat = clamp(heat, 0.0, 1.8);
-  vec3 hot = mix(vec3(0.55, 0.03, 0.005), vec3(1.0, 0.28, 0.03), smoothstep(0.2, 0.8, heat));
-  hot = mix(hot, vec3(1.0, 0.75, 0.35), smoothstep(1.05, 1.6, heat));
+  heat = clamp(heat, 0.0, 1.6);
   // The crust: near black, a dull red warmth rippling across it.
   s.color = vec3(0.03, 0.008, 0.005) * (0.7 + 0.6 * n);
   s.roughness = 0.85;
-  s.emissive = hot * heat * (1.3 + 0.25 * p0Near) + vec3(0.22, 0.025, 0.0) * ripple * (1.0 - seam) * (0.4 + 0.6 * (1.0 - k));
+  s.emissive = lavaHot(heat) * heat * (1.3 + 0.25 * p0Near) + vec3(0.22, 0.025, 0.0) * ripple * (1.0 - seam) * (0.4 + 0.6 * (1.0 - k));
+}
+// Down the opening: falls of melt over the lip, dimming as they drop, and
+// below them only the dark, with the faintest throb of fire far down.
+void lavaThroat(inout P0Surface s) {
+  vec2 q = s.position.xz;
+  float y = s.position.y;
+  float t = p0Time;
+  float depth = clamp(1.0 - y / LAKE_Y, 0.0, 1.0);
+  float lane = lavaAround(atan(q.y, q.x), (y + t * 1.5) * 1.2, 1.4);
+  float fall = smoothstep(0.5, 0.8, lane) * exp(-depth * 3.2);
+  float heat = fall * 1.4 + exp(-depth * 7.0) * 0.6;
+  s.color = vec3(0.012, 0.004, 0.003) * (1.0 - depth);
+  s.roughness = 0.95;
+  s.emissive = lavaHot(heat) * heat * 1.2;
+  float far = 1.0 - clamp(length(q) / (HOLE_R * 1.2), 0.0, 1.0);
+  s.emissive += vec3(0.3, 0.025, 0.0) * far * far * step(y, 0.05) * (0.4 + 0.2 * sin(t * 0.9));
+}
+// A gob's splash on the rock: molten as it lands, a crust closing in from
+// its edge as it cools, the cracks in it the last to go dark.
+void lavaSplashSurface(inout P0Surface s) {
+  vec4 sp = lavaSplash(s.position.xz);
+  float g = max(sp.w, 0.0);
+  float d = clamp(distance(s.position.xz, sp.xz) / REACH, 0.0, 1.0);
+  float rest = clamp((g - SPLAT) / REST, 0.0, 1.0);
+  float fade = clamp((g - SPLAT - REST) / FADE, 0.0, 1.0);
+  float n = lavaFbm(s.position.xz * 2.6 + sp.xz * 1.7 + vec2(0.0, g * 0.12));
+  float seam = 1.0 - smoothstep(0.0, 0.07, abs(n - 0.5));
+  float cool = clamp(rest * 1.25 + d * 0.9 - 0.35 + (n - 0.5) * 0.5, 0.0, 1.0);
+  float heat = (1.0 - cool) * 1.1 + seam * (1.0 - smoothstep(0.55, 1.0, rest)) * 0.9 + (1.0 - smoothstep(0.0, 0.3, g)) * 0.5;
+  heat = clamp(heat * (1.0 - fade), 0.0, 1.7);
+  s.color = vec3(0.035, 0.012, 0.008) * (0.7 + 0.6 * n);
+  s.roughness = mix(0.35, 0.9, cool);
+  s.emissive = lavaHot(heat) * heat * (1.25 + 0.25 * p0Near);
+}
+void p0Surface(inout P0Surface s) {
+  if (length(s.position.xz) > pool + 0.3) lavaSplashSurface(s);
+  else if (s.position.y < LAKE_Y - 0.03) lavaThroat(s);
+  else lavaLake(s);
 }
 `,
 );
 await writeFile(
   join(out, 'build.js'),
-  `// Now and then the pit spits a gob of lava: it arcs out of the hole and
-// lands on the slope around it (on one of the measured spots below, so it
-// sits exactly on the rock), splats, smoulders there for a few seconds and
-// shrinks away. Throws come from the world clock and a hash of the throw
-// number, so every viewer sees the same ones.
+  `// Now and then the pit spits a gob of lava: it arcs up out of the opening
+// and lands on the slope round it (on one of the measured spots below, which
+// every throw reaches without passing through the horns, towers or pillars),
+// bursts flat and is gone, and the splash it leaves (laid on the rock there
+// when the lot was built) opens, glows, crusts over and sinks away: this
+// script tells the Lava shader which splash shows and how old it is. Throws
+// come from the world clock and a hash of the throw number, so every viewer
+// sees the same ones.
 const LAVA = 6
 const PERIOD = 2.2
 const FLIGHT = 1.6
-const SPLAT = 0.15
-const REST = 2.6
-const FADE = 0.7
+const BURST = 0.1
+const SPLAT = ${SPLAT}
+const REST = ${REST}
+const FADE = ${FADE}
 const PIT = ${rb.toFixed(2)}
-// Landing spots on the slopes, [x, y, z], measured when the lot was built.
+// Landing spots, [x, y, z], measured when the lot was built.
 const SPOTS = [
 ${landing.map((s) => '  ' + JSON.stringify(s) + ',').join('\n')}
 ]
@@ -290,6 +407,8 @@ const hash = (n) => {
   return x - Math.floor(x)
 }
 const LIFE = FLIGHT + SPLAT + REST + FADE
+const GONE = [0.001, 0.001, 0.001]
+const NONE = [0, 0, 0, -1]
 export default function build(b) {
   b.loop((dt, t) => {
     for (let i = 0; i < LAVA; i++) {
@@ -298,7 +417,8 @@ export default function build(b) {
       const n = slot * LAVA + i
       const age = t - n * PERIOD
       if (hash(n * 3.1) < 0.3 || age < 0 || age > LIFE || !SPOTS.length) {
-        b.node('Lava' + i, { scale: [0.001, 0.001, 0.001] })
+        b.node('Lava' + i, { scale: GONE })
+        b.uniform('splash' + i, NONE)
         continue
       }
       const to = SPOTS[Math.floor(hash(n) * SPOTS.length)]
@@ -310,27 +430,18 @@ export default function build(b) {
         const y = from[1] + (to[1] - from[1]) * k + 4 * (peak - Math.max(from[1], to[1])) * k * (1 - k)
         const s = 1 + 0.25 * Math.sin(age * 18)
         b.node('Lava' + i, { position: [from[0] + (to[0] - from[0]) * k, y, from[2] + (to[2] - from[2]) * k], scale: [s, s * 1.3, s] })
+        b.uniform('splash' + i, NONE)
         continue
       }
-      // On the ground: a quick splat, a puddle that smoulders and slowly
-      // shrinks, then goes out.
+      // Landed: the gob bursts flat into its splash.
       const g = age - FLIGHT
-      let w
-      let hgt
-      if (g < SPLAT) {
-        const k = g / SPLAT
-        w = 1 + k * 1.6
-        hgt = 1 - k * 0.75
-      } else if (g < SPLAT + REST) {
-        const k = (g - SPLAT) / REST
-        w = 2.6 - k * 0.5 + Math.sin(g * 6) * 0.04
-        hgt = 0.25 - k * 0.07
+      if (g < BURST) {
+        const k = g / BURST
+        b.node('Lava' + i, { position: [to[0], to[1] + 0.12 * (1 - k), to[2]], scale: [1 + k * 1.4, 1 - k * 0.9, 1 + k * 1.4] })
       } else {
-        const k = (g - SPLAT - REST) / FADE
-        w = 2.1 * (1 - k)
-        hgt = 0.18 * (1 - k)
+        b.node('Lava' + i, { scale: GONE })
       }
-      b.node('Lava' + i, { position: [to[0], to[1] + 0.02, to[2]], scale: [Math.max(0.001, w), Math.max(0.001, hgt), Math.max(0.001, w)] })
+      b.uniform('splash' + i, [to[0], to[1], to[2], g])
     }
   })
 }

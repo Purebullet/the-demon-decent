@@ -63,6 +63,7 @@ function shape(width, depth, height) {
   const hm = Math.min(0.2 * height, 0.3 * S, 6); // mound height at the lip
   const dims = { S, hx, hz, rc, rb, hm, lavaY: LAVA_Y };
   dims.pool = lavaRadius(dims);
+  dims.hole = dims.pool * HOLE;
   return dims;
 }
 
@@ -129,7 +130,7 @@ function fogPuffs(dims, count, rnd) {
   const quad = new THREE.PlaneGeometry(PUFF, PUFF);
   for (let i = 0; i < count; i++) {
     const a = rnd() * TAU;
-    const r0 = dims.rb * Math.sqrt(rnd()) * 0.85;
+    const r0 = dims.pool * HOLE * Math.sqrt(rnd()) * 0.8;
     const cx = Math.cos(a) * r0;
     const cz = Math.sin(a) * r0;
     const cy = PUFF * 0.5 + 0.3 + rnd() * 0.5;
@@ -355,27 +356,159 @@ function groundSampler(geo) {
   };
 }
 
-// Where the pit's lava may land: points on the open slope round the lip
-// (not on top of a spire or pillar), with their exact height.
-function landingSpots(dims, ground, propsMesh, rnd) {
+// What a down ray from (x, top, z) first meets among meshes (front faces
+// only, so a ray starting inside a pillar passes out through its floor):
+// { y, n } with the face's normal, or null.
+function drapeOnto(meshes) {
   const ray = new THREE.Raycaster();
   const down = new THREE.Vector3(0, -1, 0);
+  const from = new THREE.Vector3();
+  return (x, z, top) => {
+    ray.set(from.set(x, top, z), down);
+    const hit = ray.intersectObjects(meshes, false)[0];
+    return hit ? { y: hit.point.y, n: hit.face.normal.clone() } : null;
+  };
+}
+
+// Whether a gob thrown from the hole to `to` (on any of the script's arcs,
+// build.js) clears the horns, towers and pillars, and the mound until it
+// comes down.
+function arcClear(dims, to, ground, props) {
+  const ray = new THREE.Raycaster();
+  const a = Math.atan2(to[2], to[0]);
+  const from = [Math.cos(a) * dims.rb * 0.4, 0.4, Math.sin(a) * dims.rb * 0.4];
+  const at = (k, peak) => new THREE.Vector3(
+    from[0] + (to[0] - from[0]) * k,
+    from[1] + (to[1] - from[1]) * k + 4 * (peak - Math.max(from[1], to[1])) * k * (1 - k),
+    from[2] + (to[2] - from[2]) * k,
+  );
+  const N = 28;
+  for (const lift of [5, 8, 11]) {
+    const peak = Math.max(to[1], 0) + lift;
+    for (let i = 0; i < N; i++) {
+      const p = at(i / N, peak);
+      const q = at((i + 1) / N, peak);
+      const d = q.clone().sub(p);
+      ray.set(p, d.clone().normalize());
+      ray.far = d.length();
+      if (props && ray.intersectObject(props, false).length) return false;
+      if (i < N - 2 && ray.intersectObject(ground, false).length) return false;
+    }
+  }
+  return true;
+}
+
+// Where the pit's lava may land: points on the slope round the lip (or on a
+// crag there) that a throw reaches without passing through anything, far
+// enough apart that their splashes never overlap (the Lava shader tells one
+// splash from another by where it is), with the exact height of what is there.
+export const SPLASH_REACH = 1.6;
+function landingSpots(dims, drape, ground, props, rnd) {
+  const onGround = drapeOnto([ground]);
   const spots = [];
-  for (let i = 0; i < 160 && spots.length < 72; i++) {
+  for (let i = 0; i < 1200 && spots.length < 40; i++) {
     const a = rnd() * TAU;
-    const r = dims.rc * (1.08 + rnd() * 0.75);
+    const r = dims.rc * (1.08 + rnd() * 0.8);
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    if (Math.abs(x) > dims.hx - 1 || Math.abs(z) > dims.hz - 1) continue;
-    const y = ground(x, z);
-    if (propsMesh) {
-      ray.set(new THREE.Vector3(x, 100, z), down);
-      const hit = ray.intersectObject(propsMesh, false)[0];
-      if (hit && hit.point.y > y + 0.2) continue;
+    if (Math.abs(x) > dims.hx - SPLASH_REACH - 0.2 || Math.abs(z) > dims.hz - SPLASH_REACH - 0.2) continue;
+    if (spots.some((s) => Math.hypot(s[0] - x, s[2] - z) < SPLASH_REACH * 2 + 0.3)) continue;
+    const g = onGround(x, z, 100);
+    const hit = g && drape(x, z, g.y + 1.4);
+    if (!hit || hit.n.y < 0.5) continue;
+    // Not where the rock is too broken to lie on (a splash would hang
+    // down the face of a crag like a curtain).
+    let rough = false;
+    for (let j = 0; j < 12 && !rough; j++) {
+      const b = (j / 12) * TAU;
+      const h = drape(x + Math.cos(b) * 1.1, z + Math.sin(b) * 1.1, hit.y + 1.6);
+      rough = !h || Math.abs(h.y - hit.y) > 0.9;
     }
-    spots.push([+x.toFixed(2), +y.toFixed(2), +z.toFixed(2)]);
+    if (rough) continue;
+    const to = [+x.toFixed(2), +hit.y.toFixed(2), +z.toFixed(2)];
+    if (!arcClear(dims, to, ground, props)) continue;
+    spots.push(to);
   }
   return spots;
+}
+
+// The splash a gob makes where it lands, laid onto whatever is there: the
+// slope, a crag, the foot of a pillar. A blot with a ragged edge, a few
+// fingers flung out, a tongue running on downhill and droplets round it,
+// every point dropped onto the rock below it and lifted just off it (thicker
+// in the middle). It stays folded away until the Lava shader opens it.
+function splash(spot, drape, rnd) {
+  const [cx, cy, cz] = spot;
+  const top = cy + 1.6;
+  const h = (x, z) => drape(x, z, top)?.y ?? cy;
+  const e = 0.35;
+  const gx = (h(cx + e, cz) - h(cx - e, cz)) / (2 * e);
+  const gz = (h(cx, cz + e) - h(cx, cz - e)) / (2 * e);
+  const downhill = Math.atan2(-gz, -gx);
+  const tongue = Math.min(1.1, Math.hypot(gx, gz) * 1.4);
+  const base = 0.5 + rnd() * 0.22;
+  const ph = rnd() * TAU;
+  const fingers = Array.from({ length: 2 + Math.floor(rnd() * 3) }, () => [rnd() * TAU, 0.35 + rnd() * 0.55]);
+  const turn = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const edge = (a) => {
+    let r = base * (0.88 + 0.16 * Math.sin(3 * a + ph) + 0.09 * Math.sin(7 * a + 2 * ph));
+    r *= 1 + tongue * Math.pow(Math.max(0, Math.cos(a - downhill)), 4);
+    for (const [fa, fl] of fingers) r += base * fl * Math.exp(-Math.pow(turn(a - fa) / 0.17, 2));
+    return Math.min(r, SPLASH_REACH - 0.05);
+  };
+  const pos = [];
+  const idx = [];
+  const put = (x, z, thick) => {
+    const hit = drape(x, z, top);
+    const y = hit ? hit.y : cy;
+    const n = hit && hit.n.y > 0.05 ? hit.n : new THREE.Vector3(0, 1, 0);
+    const lift = 0.03 + thick;
+    pos.push(x + n.x * lift, y + n.y * lift, z + n.z * lift);
+    return pos.length / 3 - 1;
+  };
+  const SEGS = 20;
+  const RINGS = 4;
+  const c0 = put(cx, cz, 0.06);
+  const rings = [];
+  for (let i = 1; i <= RINGS; i++) {
+    const f = i / RINGS;
+    rings.push(Array.from({ length: SEGS }, (_, j) => {
+      const a = (j / SEGS) * TAU;
+      const r = edge(a) * f;
+      return put(cx + Math.cos(a) * r, cz + Math.sin(a) * r, 0.06 * (1 - f * f));
+    }));
+  }
+  for (let j = 0; j < SEGS; j++) {
+    const k = (j + 1) % SEGS;
+    idx.push(c0, rings[0][k], rings[0][j]);
+    for (let i = 0; i < RINGS - 1; i++) idx.push(rings[i][j], rings[i][k], rings[i + 1][k], rings[i][j], rings[i + 1][k], rings[i + 1][j]);
+  }
+  // Droplets flung past the edge.
+  const drops = 3 + Math.floor(rnd() * 3);
+  for (let d = 0; d < drops; d++) {
+    const a = rnd() * TAU;
+    const r = Math.min(edge(a) * (1.15 + rnd() * 0.5), SPLASH_REACH - 0.2);
+    const x = cx + Math.cos(a) * r;
+    const z = cz + Math.sin(a) * r;
+    const size = 0.05 + rnd() * 0.1;
+    const m = put(x, z, 0.015);
+    const ring = Array.from({ length: 7 }, (_, j) => put(x + Math.cos((j / 7) * TAU) * size, z + Math.sin((j / 7) * TAU) * size, 0));
+    for (let j = 0; j < 7; j++) idx.push(m, ring[(j + 1) % 7], ring[j]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return faceUp(g);
+}
+
+// Flip a geometry's winding if its first normal points down.
+function faceUp(g) {
+  if (g.attributes.normal.getY(0) >= 0) return g;
+  const ix = g.index.array;
+  for (let i = 0; i < ix.length; i += 3) [ix[i + 1], ix[i + 2]] = [ix[i + 2], ix[i + 1]];
+  g.computeVertexNormals();
+  return g;
 }
 
 // The lake of fire filling the bottom of the crater: up the funnel to
@@ -384,6 +517,49 @@ export const LAVA_Y = 1.3;
 export function lavaRadius(dims) {
   const k = (LAVA_Y - 0.25) / (dims.hm - 0.25);
   return dims.rb + (dims.rc - dims.rb) * Math.pow(k, 0.7) + 0.35;
+}
+// The lake is a ring round the opening at its middle, where the melt pours
+// over a rounded lip and down a throat that widens below it into the dark.
+export const HOLE = 0.31;
+function lakeRing(dims, segs) {
+  const g = new THREE.RingGeometry(dims.hole, lavaRadius(dims), segs, 3);
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, LAVA_Y, 0);
+  return g;
+}
+function throat(dims, segs) {
+  const h = dims.hole;
+  // The lip rolls over and the wall falls away, widening under the lake.
+  const profile = [[h, LAVA_Y], [h - 0.05, LAVA_Y - 0.08], [h - 0.06, LAVA_Y - 0.25], [h * 1.02, LAVA_Y * 0.62], [h * 1.12, LAVA_Y * 0.32], [h * 1.22, 0.02]];
+  const pos = [];
+  const idx = [];
+  for (let j = 0; j <= segs; j++) {
+    const a = (j / segs) * TAU;
+    for (const [r, y] of profile) pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
+  }
+  const P = profile.length;
+  for (let j = 0; j < segs; j++) {
+    for (let i = 0; i < P - 1; i++) {
+      const a = j * P + i;
+      const b = (j + 1) * P + i;
+      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+  }
+  const wall = new THREE.BufferGeometry();
+  wall.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  wall.setIndex(idx);
+  wall.computeVertexNormals();
+  // The wall faces in, toward the axis.
+  const n = wall.attributes.normal;
+  if (n.getX(2) > 0) {
+    const ix = wall.index.array;
+    for (let i = 0; i < ix.length; i += 3) [ix[i + 1], ix[i + 2]] = [ix[i + 2], ix[i + 1]];
+    wall.computeVertexNormals();
+  }
+  const floor = new THREE.CircleGeometry(h * 1.22, segs);
+  floor.rotateX(-Math.PI / 2);
+  floor.translate(0, 0.02, 0);
+  return [wall, floor];
 }
 function pitFloor(dims, segs) {
   const g = new THREE.CircleGeometry(lavaRadius(dims), segs, 0, TAU);
@@ -438,7 +614,17 @@ export async function buildLod0(width, depth, height, models) {
   const props = piecesGeometry(list, K.pieces, 'high', dims);
   let propsMesh = null;
   if (props) root.add((propsMesh = mesh('Pieces', props, M.rock)));
-  root.add(mesh('Pit', prep(pitFloor(dims, 72)), M.lava));
+  // Where the lava lands, and the splash it leaves there, laid on the mound
+  // and the pieces.
+  const groundMesh = new THREE.Mesh(groundGeo, new THREE.MeshBasicMaterial());
+  groundMesh.updateMatrixWorld(true);
+  propsMesh?.updateMatrixWorld(true);
+  const surfaces = propsMesh ? [groundMesh, propsMesh] : [groundMesh];
+  const drape = drapeOnto(surfaces);
+  const landing = landingSpots(dims, drape, groundMesh, propsMesh, mulberry32(267));
+  const splashRnd = mulberry32(268);
+  const splashes = landing.map((spot) => splash(spot, drape, splashRnd));
+  root.add(mesh('Pit', merge([lakeRing(dims, 72), ...throat(dims, 48), ...splashes]), M.lava));
   root.add(mesh('Fog', merge(fogPuffs(dims, 34, rnd)), M.smoke));
   for (let i = 0; i < LAVA_COUNT; i++) {
     // Each gob sits at the lot's origin; the script moves the node.
@@ -447,8 +633,6 @@ export async function buildLod0(width, depth, height, models) {
     m.scale.setScalar(0.001);
     root.add(m);
   }
-  propsMesh?.updateMatrixWorld(true);
-  const landing = landingSpots(dims, ground, propsMesh, mulberry32(267));
   return { root, dims, landing };
 }
 
@@ -463,8 +647,9 @@ export async function buildLod1(width, depth, height, models) {
   const list = placements(dims, height, groundSampler(groundHigh), mulberry32(266));
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
   const pieces = piecesGeometry(list, K.pieces, 'low', dims);
-  root.add(mesh('Ground', pieces ? mergeGeometries([ground, pieces]) : ground, M.rock));
-  root.add(mesh('Glow', prep(pitFloor(dims, 20)), M.glow));
+  const hole = throat(dims, 16).map(prep);
+  root.add(mesh('Ground', mergeGeometries([ground, ...(pieces ? [pieces] : []), ...hole]), M.rock));
+  root.add(mesh('Glow', prep(lakeRing(dims, 24)), M.glow));
   return { root, dims };
 }
 
@@ -539,7 +724,7 @@ export async function buildLot({ width, depth, height }, models = globalThis.lot
     let s = '';
     const b = new Uint8Array(buf);
     for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
-    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, lavaY: dims.lavaY }, landing };
+    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, hole: dims.hole, lavaY: dims.lavaY }, landing };
   }
   return out;
 }
