@@ -86,8 +86,14 @@ function mound(dims, { segs, rings, lift }) {
     const ca = Math.cos(a);
     const sa = Math.sin(a);
     const push = (r, y) => {
-      pos.push(ca * r, y, sa * r);
-      uv.push((ca * r) / 3, (sa * r) / 3 + y / 3);
+      const x = ca * r;
+      const z = sa * r;
+      pos.push(x, y, z);
+      // The texture's coordinates drift and swirl across the mound, so its
+      // tile never lines up into a visible grid.
+      const wx = (fbm2(x * 0.11 + 3.1, z * 0.11 - 1.7, 3, 21) - 0.5) * 4.5;
+      const wz = (fbm2(x * 0.11 - 5.3, z * 0.11 + 2.9, 3, 22) - 0.5) * 4.5;
+      uv.push((x + wx) / 3.3, (z + wz + y) / 3.3);
     };
     for (let i = 0; i < funnelRings; i++) {
       const k = i / (funnelRings - 1);
@@ -306,6 +312,14 @@ function placements(dims, height, groundAt, rnd) {
     const lean = rnd() * 0.2;
     out.push({ kind: 'crag', pos: [x, y - h * 0.08, z], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h, h, h], order: 'ZXY' });
   }
+  // Broken rocks round the opening in the lake, half sunk in the melt.
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * TAU + (rnd() - 0.5) * 0.6;
+    const r = Math.min(holeEdge(dims, a) * (1.3 + rnd() * 0.45), dims.pool - 0.9);
+    const h = 0.8 + rnd() * 0.8;
+    const lean = 0.15 + rnd() * 0.25;
+    out.push({ kind: 'crag', pos: [Math.cos(a) * r, LAVA_Y - h * 0.5, Math.sin(a) * r], rot: [-Math.sin(a) * lean, rnd() * TAU, Math.cos(a) * lean], scale: [h * 1.25, h, h * 1.25], order: 'ZXY' });
+  }
   // Broken pillars on the sides, between the towers.
   const kinds = ['pillar-a', 'pillar-c', 'pillar-b'];
   const spots = long ? [0, Math.PI, Math.PI * 0.5 + 0.35, Math.PI * 1.5 - 0.35] : [Math.PI * 0.5, Math.PI * 1.5, 0.35, Math.PI - 0.35];
@@ -519,25 +533,61 @@ export function lavaRadius(dims) {
   return dims.rb + (dims.rc - dims.rb) * Math.pow(k, 0.7) + 0.35;
 }
 // The lake is a ring round the opening at its middle, where the melt pours
-// over a rounded lip and down a throat that widens below it into the dark.
+// over a broken lip and down a rough throat that widens below it into the
+// dark. The opening's edge wanders in and out (a few waves round it, the
+// same in the Lava shader, so the lip's glow follows the real edge).
 export const HOLE = 0.31;
-function lakeRing(dims, segs) {
-  const g = new THREE.RingGeometry(dims.hole, lavaRadius(dims), segs, 3);
-  g.rotateX(-Math.PI / 2);
-  g.translate(0, LAVA_Y, 0);
-  return g;
+export const HOLE_WAVES = [[2, 0.11, 0.7], [3, 0.12, 2.6], [5, 0.08, 4.4], [8, 0.05, 1.3], [13, 0.03, 5.2]];
+export function holeEdge(dims, a) {
+  let k = 1;
+  for (const [f, amp, ph] of HOLE_WAVES) k += amp * Math.sin(f * a + ph);
+  return dims.hole * k;
 }
-function throat(dims, segs) {
-  const h = dims.hole;
-  // The lip rolls over and the wall falls away, widening under the lake.
-  const profile = [[h, LAVA_Y], [h - 0.05, LAVA_Y - 0.08], [h - 0.06, LAVA_Y - 0.25], [h * 1.02, LAVA_Y * 0.62], [h * 1.12, LAVA_Y * 0.32], [h * 1.22, 0.02]];
+// A ring of rows from the opening's edge out to the lake's rim.
+function lakeRing(dims, segs) {
+  const pool = lavaRadius(dims);
+  const ROWS = 5;
   const pos = [];
   const idx = [];
   for (let j = 0; j <= segs; j++) {
     const a = (j / segs) * TAU;
-    for (const [r, y] of profile) pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
+    const r0 = holeEdge(dims, a);
+    for (let i = 0; i < ROWS; i++) {
+      const r = r0 + (pool - r0) * Math.pow(i / (ROWS - 1), 1.3);
+      pos.push(Math.cos(a) * r, LAVA_Y, Math.sin(a) * r);
+    }
   }
+  for (let j = 0; j < segs; j++) {
+    for (let i = 0; i < ROWS - 1; i++) {
+      const p = j * ROWS + i;
+      const q = (j + 1) * ROWS + i;
+      idx.push(p, q, p + 1, q, q + 1, p + 1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return faceUp(g);
+}
+function throat(dims, segs, rnd = mulberry32(269)) {
+  const h = dims.hole;
+  // The lip rolls over and the wall falls away, widening under the lake;
+  // every row but the lip's is pushed in and out a little, so the wall is
+  // rough rock, not a turned bowl.
+  const profile = [[1, LAVA_Y], [0.95, LAVA_Y - 0.08], [0.93, LAVA_Y - 0.25], [1.02, LAVA_Y * 0.62], [1.12, LAVA_Y * 0.32], [1.22, 0.02]];
   const P = profile.length;
+  const pos = [];
+  const idx = [];
+  const rough = Array.from({ length: segs }, () => profile.map((_, i) => (i < 2 ? 0 : (rnd() - 0.5) * 0.22)));
+  for (let j = 0; j <= segs; j++) {
+    const a = (j / segs) * TAU;
+    const edge = holeEdge(dims, a);
+    profile.forEach(([k, y], i) => {
+      const r = edge * k + rough[j % segs][i] * h;
+      pos.push(Math.cos(a) * r, y + (i > 1 && i < P - 1 ? rough[j % segs][i] * 0.6 : 0), Math.sin(a) * r);
+    });
+  }
   for (let j = 0; j < segs; j++) {
     for (let i = 0; i < P - 1; i++) {
       const a = j * P + i;
@@ -550,16 +600,24 @@ function throat(dims, segs) {
   wall.setIndex(idx);
   wall.computeVertexNormals();
   // The wall faces in, toward the axis.
-  const n = wall.attributes.normal;
-  if (n.getX(2) > 0) {
+  if (wall.attributes.normal.getX(2) > 0) {
     const ix = wall.index.array;
     for (let i = 0; i < ix.length; i += 3) [ix[i + 1], ix[i + 2]] = [ix[i + 2], ix[i + 1]];
     wall.computeVertexNormals();
   }
-  const floor = new THREE.CircleGeometry(h * 1.22, segs);
-  floor.rotateX(-Math.PI / 2);
-  floor.translate(0, 0.02, 0);
-  return [wall, floor];
+  // The floor far below, filling the wall's last row.
+  const fpos = [0, 0.02, 0];
+  const fidx = [];
+  for (let j = 0; j < segs; j++) {
+    const v = (j * P + P - 1) * 3;
+    fpos.push(pos[v], 0.02, pos[v + 2]);
+  }
+  for (let j = 0; j < segs; j++) fidx.push(0, 1 + ((j + 1) % segs), 1 + j);
+  const floor = new THREE.BufferGeometry();
+  floor.setAttribute('position', new THREE.Float32BufferAttribute(fpos, 3));
+  floor.setIndex(fidx);
+  floor.computeVertexNormals();
+  return [wall, faceUp(floor)];
 }
 function pitFloor(dims, segs) {
   const g = new THREE.CircleGeometry(lavaRadius(dims), segs, 0, TAU);
@@ -624,7 +682,7 @@ export async function buildLod0(width, depth, height, models) {
   const landing = landingSpots(dims, drape, groundMesh, propsMesh, mulberry32(267));
   const splashRnd = mulberry32(268);
   const splashes = landing.map((spot) => splash(spot, drape, splashRnd));
-  root.add(mesh('Pit', merge([lakeRing(dims, 72), ...throat(dims, 48), ...splashes]), M.lava));
+  root.add(mesh('Pit', merge([lakeRing(dims, 96), ...throat(dims, 96), ...splashes]), M.lava));
   root.add(mesh('Fog', merge(fogPuffs(dims, 34, rnd)), M.smoke));
   for (let i = 0; i < LAVA_COUNT; i++) {
     // Each gob sits at the lot's origin; the script moves the node.
@@ -647,9 +705,9 @@ export async function buildLod1(width, depth, height, models) {
   const list = placements(dims, height, groundSampler(groundHigh), mulberry32(266));
   const ground = prep(mound(dims, { segs: 56, rings: 7, lift: 0.35 }));
   const pieces = piecesGeometry(list, K.pieces, 'low', dims);
-  const hole = throat(dims, 16).map(prep);
+  const hole = throat(dims, 32).map(prep);
   root.add(mesh('Ground', mergeGeometries([ground, ...(pieces ? [pieces] : []), ...hole]), M.rock));
-  root.add(mesh('Glow', prep(lakeRing(dims, 24)), M.glow));
+  root.add(mesh('Glow', prep(lakeRing(dims, 32)), M.glow));
   return { root, dims };
 }
 
@@ -711,6 +769,11 @@ export function stats(root) {
 }
 
 export async function exportGlb(root) {
+  // Welded: the meshes are built unindexed (to merge freely), and sharing
+  // the corners triangles have in common keeps the file well under budget.
+  root.traverse((o) => {
+    if (o.isMesh && !o.geometry.index) o.geometry = mergeVertices(o.geometry, 1e-5);
+  });
   const exporter = new GLTFExporter();
   return exporter.parseAsync(root, { binary: true, onlyVisible: true, includeCustomExtensions: false });
 }
@@ -724,7 +787,7 @@ export async function buildLot({ width, depth, height }, models = globalThis.lot
     let s = '';
     const b = new Uint8Array(buf);
     for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
-    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, hole: dims.hole, lavaY: dims.lavaY }, landing };
+    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, hole: dims.hole, waves: HOLE_WAVES, lavaY: dims.lavaY }, landing };
   }
   return out;
 }

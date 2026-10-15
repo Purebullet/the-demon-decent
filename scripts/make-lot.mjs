@@ -70,7 +70,7 @@ for (const [name, l] of Object.entries(lods)) {
 // Live build: the pit pulses with hellfire, cracks glow near the lip, fog
 // billows up out of the hole and lava spits out of it onto the slopes, all
 // on the world clock so every viewer sees the same.
-const { rc, rb, hm, pool, hole, lavaY } = lods.lod0.dims;
+const { rc, rb, hm, pool, hole, waves, lavaY } = lods.lod0.dims;
 // A gob's splash: it opens as it lands, glows and crusts over, then sinks away.
 const SPLAT = 0.15;
 const REST = 3;
@@ -200,6 +200,17 @@ float rockNoise(vec3 p) {
 void p0Surface(inout P0Surface s) {
   float r = length(s.position.xz);
   float y = s.position.y;
+  // Big patches the texture's tile can't repeat under: cold dark basalt,
+  // warm rust-brown scoria, grit; layered bands across the slopes, and pale
+  // ash settled on the flats.
+  float m1 = rockNoise(s.position * 0.13 + 4.0);
+  float m2 = rockNoise(s.position * 0.42 + 9.0);
+  float m3 = rockNoise(s.position * 1.9 + 2.0);
+  vec3 tint = mix(vec3(0.6, 0.6, 0.66), vec3(1.3, 0.95, 0.78), smoothstep(0.3, 0.72, m1 * 0.7 + m2 * 0.3));
+  s.color *= tint * (0.72 + 0.45 * m2) * (0.85 + 0.3 * m3);
+  s.color *= 1.0 + 0.14 * sin(y * 2.4 + m1 * 9.0);
+  float flat = smoothstep(0.8, 0.97, s.normal.y) * smoothstep(0.45, 0.7, m2);
+  s.color = mix(s.color, vec3(0.2, 0.18, 0.17), flat * 0.45);
   s.color *= 1.0 - 0.3 * smoothstep(mound * 1.2, mound * 2.6, y);
   float n = rockNoise(s.position * 1.3) * 0.6 + rockNoise(s.position * 3.7) * 0.4;
   float crack = smoothstep(0.05, 0.0, abs(n - 0.5));
@@ -247,6 +258,10 @@ float lavaNoise(vec2 p) {
 }
 float lavaFbm(vec2 p) {
   return lavaNoise(p) * 0.55 + lavaNoise(p * 2.07 + 3.7) * 0.3 + lavaNoise(p * 4.3 - 1.3) * 0.15;
+}
+// How far the opening reaches at angle a: its edge wanders in and out.
+float holeEdge(float a) {
+  return HOLE_R * (1.0${waves.map(([f, amp, ph]) => ` + ${amp.toFixed(3)} * sin(${f.toFixed(1)} * a + ${ph.toFixed(3)})`).join('')});
 }
 // Molten rock by heat: dull red, orange, then yellow-white.
 vec3 lavaHot(float heat) {
@@ -317,7 +332,6 @@ void lavaLake(inout P0Surface s) {
   vec2 q = s.position.xz;
   float r = max(length(q), 0.001);
   float k = clamp(r / pool, 0.0, 1.0);
-  float hk = HOLE_R / pool;
   float t = p0Time;
   // Round the opening and in toward it, faster nearer it.
   vec2 flow = (vec2(-q.y, q.x) / r * 0.8 - q / r * 0.45) * (0.5 + 0.9 * (1.0 - k));
@@ -328,8 +342,9 @@ void lavaLake(inout P0Surface s) {
   float seam = 1.0 - smoothstep(0.0, 0.045 + 0.09 * (1.0 - k), abs(n - 0.5));
   float ripple = 0.5 + 0.5 * sin(r * 3.4 - t * 2.2 + n * 4.0);
   // The lip, where the crust tears apart and the melt runs over in streaks.
-  float lip = smoothstep(hk + 0.16, hk, k);
-  float pour = lavaAround(atan(q.y, q.x), t * 0.9 + r * 2.0, 1.6);
+  float a = atan(q.y, q.x);
+  float lip = smoothstep(0.75, 0.0, r - holeEdge(a));
+  float pour = lavaAround(a, t * 0.9 + r * 2.0, 1.6);
   float heat = seam * (0.65 + 0.5 * ripple) + lip * (0.35 + 0.75 * smoothstep(0.35, 0.8, pour));
   // Bubbles: a few spots swell bright and burst.
   float b = lavaNoise(q * 1.6 + vec2(t * 0.25, -t * 0.18));
@@ -353,7 +368,7 @@ void lavaThroat(inout P0Surface s) {
   s.color = vec3(0.012, 0.004, 0.003) * (1.0 - depth);
   s.roughness = 0.95;
   s.emissive = lavaHot(heat) * heat * 1.2;
-  float far = 1.0 - clamp(length(q) / (HOLE_R * 1.2), 0.0, 1.0);
+  float far = 1.0 - clamp(length(q) / (holeEdge(atan(q.y, q.x)) * 1.2), 0.0, 1.0);
   s.emissive += vec3(0.3, 0.025, 0.0) * far * far * step(y, 0.05) * (0.4 + 0.2 * sin(t * 0.9));
 }
 // A gob's splash on the rock: molten as it lands, a crust closing in from
