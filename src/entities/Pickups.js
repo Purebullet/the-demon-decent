@@ -7,9 +7,9 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { RELICS, addRelic } from '../combat/Relics.js';
 import { IconAtlas } from '../ui/IconAtlas.js';
 
-// Loot on the cavern floor. Potions, spell sigils, relics and the Phantom
-// Step tome are taken by walking over them; weapons need F so a good blade
-// is never swapped by accident.
+// Loot on the cavern floor. Potions, spell sigils and relics are taken by
+// walking over them; weapons need F so a good blade is never swapped by
+// accident.
 
 const flaskBody = new THREE.SphereGeometry(0.16, 24, 16);
 const flaskNeck = new THREE.CylinderGeometry(0.05, 0.06, 0.14, 16);
@@ -119,22 +119,6 @@ export class Pickups {
     return this._add('relic', x, z, g, { relic: id, color: col, noSpin: true });
   }
 
-  // The Phantom Step tome: learn to dodge.
-  addTome(x, z) {
-    const g = new THREE.Group();
-    const col = new THREE.Color(0.75, 0.6, 1);
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color: col, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    halo.scale.set(1.5, 1.5, 1);
-    g.add(halo);
-    const tex = IconAtlas.texture('dodge');
-    if (tex) {
-      const icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
-      icon.scale.set(0.85, 0.85, 1);
-      g.add(icon);
-    }
-    return this._add('tome', x, z, g, { color: col, noSpin: true });
-  }
-
   addSpell(x, z) {
     const g = new THREE.Group();
     const m = new THREE.MeshBasicMaterial({ map: runeCircleTexture('#c060ff'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
@@ -171,7 +155,7 @@ export class Pickups {
         const r = 0.2 + Math.random() * 0.4;
         ctx.fx.add.emit({ x: it.x + Math.cos(a) * r, y: 0.15 + Math.random() * 0.4, z: it.z + Math.sin(a) * r, vx: 0, vy: 0.9 + Math.random() * 0.6, vz: 0, life: 1.1, size: 0.09, sizeEnd: 0.01, color: it.glow, colorEnd: it.glow, drag: 0.4 });
       }
-      if ((it.kind === 'relic' || it.kind === 'tome') && Math.random() < dt * 12) {
+      if (it.kind === 'relic' && Math.random() < dt * 12) {
         ctx.fx.add.emit({ x: it.x + (Math.random() - 0.5) * 0.5, y: 0.4 + Math.random() * 0.6, z: it.z + (Math.random() - 0.5) * 0.5, vx: 0, vy: 0.7, vz: 0, life: 0.9, size: 0.12, sizeEnd: 0.02, color: it.color, colorEnd: C.violetDark, drag: 0.5 });
       }
       if (it.kind === 'potion' && Math.random() < dt * 4) {
@@ -198,10 +182,6 @@ export class Pickups {
         const n = addRelic(run, it.relic);
         this._take(i, ctx, n > 1 ? `${R.name} deepens (x${n})` : `Relic: ${R.name}`);
         ctx.onRelic?.(it.relic, n);
-      } else if (it.kind === 'tome' && d < 1.2) {
-        if (run.skills) run.skills.phantomStep = true;
-        this._take(i, ctx, 'Skill learned: Phantom Step');
-        ctx.onSkill?.('phantomStep');
       } else if (it.kind === 'weapon' && d < nearestW) {
         nearestW = d;
         this.nearWeapon = it;

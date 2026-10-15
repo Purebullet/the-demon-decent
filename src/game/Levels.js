@@ -64,3 +64,24 @@ export function spendPoint(run, id) {
 export const damageMul = (run) => run.dmgMul * (1 + LEVEL_STATS.attack.per * (run.stats?.attack || 0));
 export const swingSpeedMul = (run) => run.speedMul * (1 + LEVEL_STATS.agility.per * (run.stats?.agility || 0));
 export const takenMul = (run) => 1 - LEVEL_STATS.defence.per * (run.stats?.defence || 0);
+
+// What a fallen run leaves the next: half its level (rounded down), kept
+// where its points had gone as nearly as halving allows (each stat halved,
+// the odd points to the stats that lost a half). Experience starts over.
+export function legacyOf(run) {
+  const keep = Math.floor((run.level || 0) / 2);
+  const stats = { attack: 0, defence: 0, agility: 0 };
+  const halves = STAT_IDS.map((id) => ({ id, half: (run.stats?.[id] || 0) / 2 }));
+  let left = keep;
+  for (const h of halves) {
+    stats[h.id] = Math.min(Math.floor(h.half), left);
+    left -= stats[h.id];
+  }
+  for (const h of halves) {
+    if (left > 0 && h.half % 1 > 0 && stats[h.id] < STAT_CAP) {
+      stats[h.id]++;
+      left--;
+    }
+  }
+  return { level: keep, xp: 0, points: left, stats };
+}

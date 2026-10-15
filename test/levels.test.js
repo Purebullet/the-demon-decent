@@ -58,7 +58,7 @@ test('every floor has a look, and every look dresses with props that exist', asy
   for (const [name, look] of Object.entries(LOOKS)) {
     for (const [id, , where] of look.decor) {
       assert.ok(PROPS[id], `${name}: no prop "${id}"`);
-      assert.ok(['edge', 'open', 'wall', 'hang'].includes(where), `${name}: ${id} has unknown placement "${where}"`);
+      assert.ok(['edge', 'wall', 'hang'].includes(where), `${name}: ${id} has unknown placement "${where}"`);
     }
     for (const id of [...look.pillars, ...Object.keys(look.walls)]) assert.ok(PROPS[id], `${name}: no prop "${id}"`);
     // Hanging props must leave room to walk under them.
@@ -76,5 +76,26 @@ test('every floor has at least two dead ends for chests, and alcoves keep it pla
     assert.ok(ends.length >= 2, `floor ${i + 1} has ${ends.length} dead ends`);
     // The outer border stays sealed.
     for (let c = 0; c < d.cols; c++) assert.ok(!d.nav.isWalkable(c, 0) && !d.nav.isWalkable(c, d.rows - 1));
+  });
+});
+
+test('the Deep (floor 6 on) is tougher, and dressed in its own rock and props', async () => {
+  const { floorDef, DEEP_FROM } = await import('../src/world/LevelData.js');
+  const { DEEP } = await import('../src/world/themes.js');
+  const { PROPS } = await import('../src/assets/manifest.js');
+  assert.equal(DEEP_FROM, 6);
+  assert.equal(floorDef(5), FLOORS[4]);
+  const f6 = floorDef(6);
+  assert.equal(f6.hp, FLOORS[5].hp * 1.5);
+  assert.ok(Math.abs(f6.speed / FLOORS[5].speed - 1.05) < 1e-9);
+  assert.ok(f6.cooldown < FLOORS[5].cooldown && f6.windup < FLOORS[5].windup);
+  for (const id of [...Object.keys(DEEP.walls), ...DEEP.pillars, ...DEEP.decor.map(([id]) => id)]) assert.ok(PROPS[id], `no prop "${id}"`);
+});
+
+test('every non-boss floor runs one way, from spawn to exit', () => {
+  FLOORS.forEach((f, i) => {
+    if (f.boss) return;
+    const d = parseLevel(f);
+    assert.ok(d.exit.c - d.spawn.c > d.cols * 0.6, `floor ${i + 1}: the exit is not far along from the spawn`);
   });
 });

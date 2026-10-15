@@ -21,7 +21,8 @@ export function newRun() {
     dmgMul: 1,
     speedMul: 1,
     weapon: makeWeapon('sword'),
-    spells: { nova: 0, step: 0, siphon: 0 },
+    // Shade Step (Space) is everyone's from the start.
+    spells: { nova: 0, step: 1, siphon: 0 },
     // Learned skills (Phantom Step: dodge on a double tap) and carried relics
     // (id -> how many: combat/Relics.js).
     skills: {},
@@ -61,21 +62,10 @@ export const NODES = {
           apply: (r) => r.spells[id]++,
         });
       }
-      // Offer two at random; until it is learned, one of them is always
-      // Phantom Step.
+      // Offer two at random.
       for (let i = opts.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [opts[i], opts[j]] = [opts[j], opts[i]];
-      }
-      if (!run.skills.phantomStep) {
-        return [
-          {
-            label: 'Learn Phantom Step [double-tap A / D]',
-            detail: 'Dodge: double-tap A or D to sidestep, S to leap back (or Space), untouchable for an instant.',
-            apply: (r) => (r.skills.phantomStep = true),
-          },
-          ...opts.slice(0, 1),
-        ];
       }
       return opts.slice(0, 2);
     },
@@ -83,7 +73,7 @@ export const NODES = {
   sigil: {
     title: 'The Burning Sigil',
     options: () => [
-      { label: '+15% Weapon Damage', apply: (r) => (r.dmgMul *= 1.15) },
+      { label: '+10% Weapon Damage', apply: (r) => (r.dmgMul *= 1.1) },
       { label: '+12% Attack Speed', apply: (r) => (r.speedMul *= 1.12) },
     ],
   },

@@ -3,13 +3,15 @@ import { C, burst, ring } from '../world/Particles.js';
 import { damageMul } from '../game/Levels.js';
 
 // Demon Spells: rare utility powers. Found as sigil drops or taken at the
-// Magic Circle; each can be raised to level 3.
+// Magic Circle; each can be raised to level 3. Shade Step is everyone's
+// dodge (Space, the way you are moving), known from the start; Hellfire Nova
+// (Q) and Blood Siphon (R) have to be found.
 
 export const SPELLS = {
   nova: {
     name: 'Hellfire Nova',
-    key: 'Digit1',
-    label: '1',
+    key: 'KeyQ',
+    label: 'Q',
     levels: [
       { cd: 12, dmg: 45, radius: 5 },
       { cd: 10, dmg: 70, radius: 6 },
@@ -19,19 +21,19 @@ export const SPELLS = {
   },
   step: {
     name: 'Shade Step',
-    key: 'Digit2',
-    label: '2',
+    key: 'Space',
+    label: 'SPACE',
     levels: [
-      { cd: 7, dist: 7, invuln: 0.6 },
-      { cd: 5.5, dist: 8.5, invuln: 0.8 },
-      { cd: 4, dist: 10, invuln: 1.0, dmg: 35 },
+      { cd: 1.4, dist: 4.5, invuln: 0.4 },
+      { cd: 1.15, dist: 5.5, invuln: 0.5 },
+      { cd: 0.9, dist: 6.5, invuln: 0.6, dmg: 35 },
     ],
-    describe: (l) => `Become shadow and dash ${l.dist} m through enemies, invulnerable for ${l.invuln}s${l.dmg ? `, cutting all you pass for ${l.dmg}` : ''}. ${l.cd}s cooldown.`,
+    describe: (l) => `Space: become shadow and dash ${l.dist} m the way you are moving (back if you stand still), through enemies, untouchable for ${l.invuln}s${l.dmg ? `, cutting all you pass for ${l.dmg}` : ''}. ${l.cd}s cooldown.`,
   },
   siphon: {
     name: 'Blood Siphon',
-    key: 'Digit3',
-    label: '3',
+    key: 'KeyR',
+    label: 'R',
     levels: [
       { cd: 22, dur: 7, leech: 0.25 },
       { cd: 18, dur: 9, leech: 0.35 },

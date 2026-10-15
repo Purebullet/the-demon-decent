@@ -1,4 +1,5 @@
 import { Color } from 'three';
+import { DEEP_FROM } from './LevelData.js';
 
 // How each floor looks. A floor names its look in LevelData.js (`look`);
 // a look sets the cavern's palette and light and which generated props dress
@@ -18,9 +19,10 @@ import { Color } from 'three';
 //   walls     weights of the wall rock shapes
 //   hang      stalactites per floor tile
 //   rubble    loose stones per floor tile
-//   decor     [prop, weight, where, scale]: `edge` against the walls, `open`
-//             anywhere on the floor, `hang` from the ceiling, `wall` big
-//             pieces backed into the rock and facing the room
+//   decor     [prop, weight, where, scale]: `edge` against the walls, `hang`
+//             from the ceiling, `wall` big pieces backed into the rock and
+//             facing the room (nothing stands in the open: it would block
+//             the way, as everything standing on the floor is solid)
 //   density   decor pieces per wall-side tile
 //   pillars   props that stand on the map's pillar tiles (`o`)
 
@@ -95,7 +97,7 @@ export const LOOKS = {
     density: 0.42,
     decor: [
       ['skulls', 5, 'edge', [0.8, 1.6]],
-      ['skulls', 1.5, 'open', [0.6, 1]],
+      ['skulls', 1.5, 'edge', [0.6, 1]],
       ['remains', 1.5, 'wall', [0.9, 1.15]],
       ['ribcage', 1, 'wall', [0.8, 1.1]],
       ['altar', 0.6, 'wall', [0.9, 1.1]],
@@ -415,6 +417,26 @@ export const LOOKS = {
 
 // The look of one floor, varied by the floor's own seed: a few percent of
 // hue and light, so two floors of the same look are never quite alike.
+// The Deep (floors 6 on) is a different place from the caves above: black
+// basalt and volcanic glass instead of cave stone, spires of iron and bone
+// for columns, forges, idols, spiked barricades and ember pyres along the
+// walls, molten veins underfoot. Each floor's own look still sets its
+// colours and adds its own pieces. (The boss arenas keep their set dressing
+// and take only the rock.)
+export const DEEP = {
+  walls: { basalt: 3, obsidian: 2 },
+  pillars: ['ironSpire', 'basalt'],
+  decor: [
+    ['spikewall', 1.4, 'edge', [0.8, 1.1]],
+    ['pyre', 1.2, 'edge', [0.8, 1.2]],
+    ['anvil', 0.8, 'edge', [0.85, 1.05]],
+    ['obsidian', 1.2, 'edge', [0.35, 0.6]],
+    ['idol', 0.8, 'wall', [0.85, 1.1]],
+  ],
+  // The cave pieces left behind above.
+  above: new Set(['pillar', 'stalagmite', 'crystal', 'fungus', 'eggs']),
+};
+
 export function lookFor(def, floor, rand) {
   const base = LOOKS[def.look] || LOOKS.maw;
   const j = (v, k) => v * (1 + (rand() - 0.5) * k);
@@ -431,7 +453,15 @@ export function lookFor(def, floor, rand) {
   look.fog = new Color(base.fog).multiplyScalar(0.35).getHex();
   look.hang = j(base.hang, 0.3);
   look.density = j(base.density, 0.2);
-  // The deep (floors 11+) runs hotter: faint molten veins where none are set.
-  if (!look.veins && floor > 10) look.veins = [255, 70, 20, 0.35];
+  if (floor >= DEEP_FROM) {
+    look.walls = DEEP.walls;
+    look.veins ||= [255, 70, 20, 0.35];
+    look.hang *= 0.5;
+    if (!def.boss) {
+      look.pillars = [...DEEP.pillars, ...base.pillars.filter((id) => !DEEP.above.has(id))];
+      look.decor = [...DEEP.decor, ...base.decor.filter(([id]) => !DEEP.above.has(id))];
+    }
+    look.deep = true;
+  }
   return look;
 }

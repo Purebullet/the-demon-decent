@@ -9,8 +9,10 @@ import { mulberry32 } from '../core/rng.js';
 // the map's pillar tiles, and props along the walls, from the ceiling and
 // across the floor. Everything repeated is instanced, one draw per model per
 // 12 m chunk of the map, so the renderer can skip what is behind you, and
-// chunks lost in the fog are hidden altogether (`cull`). Scenery never
-// blocks: collision and navigation come from the tile grid.
+// chunks lost in the fog are hidden altogether (`cull`). Scenery stands
+// against the walls of the rooms, never in a passage or the open middle of
+// the floor, and what stands on the floor is solid (`solids`, circles in the
+// floor's collision world): you walk round it, not through it.
 
 const CHUNK = 6 * TILE;
 // Wall rock beyond this far (m) is drawn from a coarse copy of the model.
@@ -27,12 +29,12 @@ const DIRS = [
 const METAL = {};
 // Props whose bright parts glow in the floor's glow colour (a brazier's coals
 // in its flame colour), and how strongly.
-const GLOW = { crystal: 1.25, fungus: 1.2, eggs: 1.1, obelisk: 1.4, brazier: 1.2 };
+const GLOW = { crystal: 1.25, fungus: 1.2, eggs: 1.1, obelisk: 1.4, brazier: 1.2, obsidian: 1.1, idol: 1.3, pyre: 1.4 };
 // Footprint radius of each prop, as a fraction of its size: nothing is
 // placed inside another's footprint (see free/claim).
-const FOOT = { skulls: 0.7, ribcage: 0.42, remains: 0.5, stakes: 0.42, altar: 0.55, statue: 0.28, obelisk: 0.25, crystal: 0.42, fungus: 0.45, eggs: 0.5, stalagmite: 0.35, cage: 0.3, chains: 0.15 };
+const FOOT = { skulls: 0.7, ribcage: 0.42, remains: 0.5, stakes: 0.42, altar: 0.55, statue: 0.28, obelisk: 0.25, crystal: 0.42, fungus: 0.45, eggs: 0.5, stalagmite: 0.35, cage: 0.3, chains: 0.15, idol: 0.38, anvil: 0.45, spikewall: 0.45, pyre: 0.45, obsidian: 0.4, basalt: 0.35 };
 // Rock-like props take the full rock tint; the rest a softer one.
-const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar']);
+const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar', 'obsidian', 'basalt']);
 
 // A generated model's material made to sit in the cave: its painted colour
 // tinted, no metal/roughness texture (the models' are glossy for a lit studio,
@@ -117,6 +119,7 @@ export class Dressing {
     this.ceiling = look.ceiling;
     this.taken = [];
     this.hung = [];
+    this.solids = [];
     this._findEdges();
     for (const b of this.d.braziers) this.claim(b.x, b.z, 1.1);
     this._shell();
@@ -182,9 +185,17 @@ export class Dressing {
     this.clear = (x, z, rad = 2.6 * TILE) => keep.every((k) => Math.hypot(k.x - x, k.z - z) > rad);
     this.slots = [];
     this.openTiles = [];
+    // Room enough round a tile for something to stand by its wall: a passage
+    // (two wide or less) is left clear.
+    const roomy = (t) => {
+      let n = 0;
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) if (nav.isWalkable(t.c + dc, t.r + dr)) n++;
+      return n >= 13;
+    };
     for (const t of d.floorTiles) {
       if (hazard.has(t.r * d.cols + t.c)) continue;
       this.openTiles.push(t);
+      if (!roomy(t)) continue;
       for (const [dc, dr] of DIRS) {
         const ch = d.tiles[t.r + dr]?.[t.c + dc];
         if (ch === '#') this.slots.push({ t, dx: dc, dz: dr });
@@ -331,6 +342,13 @@ export class Dressing {
     return this.lodCache.get(geometry);
   }
 
+  // Every geometry the dressing made, drawn now or not (the far-view copies).
+  geometries() {
+    const out = [...(this.lodCache?.values() || [])];
+    for (const c of this.chunks.values()) for (const l of c.lods) out.push(l.hi, l.lo);
+    return out;
+  }
+
   // Hide the chunks the fog has swallowed (`range` metres from the viewer),
   // and draw the far ones' walls coarse.
   cull(x, z, range) {
@@ -434,14 +452,15 @@ export class Dressing {
       this.claim(pl.x, pl.z, 1.2);
       const id = ids.length ? ids[Math.floor(r() * ids.length)] : null;
       const yaw = r() * Math.PI * 2;
-      if (id === 'pillar') {
+      if (id === 'pillar' || id === 'ironSpire') {
         // Grown to reach the vault: partly wider, partly taller.
-        const size = Assets.props.get('pillar').entry.size;
+        const size = Assets.props.get(id).entry.size;
         const k = Math.pow(this.ceiling / size, 0.55);
-        this._place('pillar', pl.x, pl.z, { yaw, scale: k, stretchY: this.ceiling / (size * k) });
+        this._place(id, pl.x, pl.z, { yaw, scale: k, stretchY: this.ceiling / (size * k) });
       }
       else if (id === 'crystal') this._place('crystal', pl.x, pl.z, { yaw, scale: 1.5 + r() * 0.4 });
       else if (id === 'stalagmite') this._place('stalagmite', pl.x, pl.z, { yaw, scale: 1.5 + r() * 0.5 });
+      else if (id === 'basalt') this._place('basalt', pl.x, pl.z, { yaw, scale: 1.8 + r() * 0.4 });
       else if (id) this._place(id, pl.x, pl.z, { yaw, scale: 1 + r() * 0.15 });
       else {
         const g = new THREE.CylinderGeometry(0.85, 1.1, this.ceiling, 16, 8);
@@ -476,15 +495,6 @@ export class Dressing {
       const size = Assets.props.get(k.id).entry.size;
       const sc = k.scale[0] + r() * (k.scale[1] - k.scale[0]);
       const rad = this.foot(k.id, sc);
-      if (k.where === 'open') {
-        const t = this.openTiles[Math.floor(r() * this.openTiles.length)];
-        if (!this.clear(t.x, t.z, 2 * TILE)) continue;
-        p.set(t.x + (r() - 0.5) * 1.4, 0, t.z + (r() - 0.5) * 1.4);
-        if (!this.free(p.x, p.z, rad + 0.3)) continue;
-        this.claim(p.x, p.z, rad);
-        add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
-        continue;
-      }
       const slot = slots.splice(Math.floor(r() * slots.length), 1)[0];
       const { t, dx, dz } = slot;
       const key = `${t.c},${t.r}`;
@@ -523,6 +533,7 @@ export class Dressing {
         if (!this.free(p.x, p.z, rad + 0.2)) continue;
         used.add(key);
         this.claim(p.x, p.z, rad);
+        this.solids.push({ x: p.x, z: p.z, r: rad * 0.85 });
         q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (r() - 0.5) * 0.3);
         add(k.id, m.compose(p, q, s.setScalar(sc)).clone());
         if (GLOW[k.id]) this.glows.push({ x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc });
@@ -533,6 +544,7 @@ export class Dressing {
       p.set(t.x + dx * inset + dz * along, 0, t.z + dz * inset + dx * along);
       if (!this.free(p.x, p.z, rad + 0.15)) continue;
       this.claim(p.x, p.z, rad);
+      this.solids.push({ x: p.x, z: p.z, r: rad * 0.85 });
       add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
       if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
     }

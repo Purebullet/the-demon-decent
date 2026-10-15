@@ -309,6 +309,27 @@ export const Assets = {
     return g;
   },
 
+  // The geometry and textures the loaded models own, which every floor
+  // shares: a floor that is left frees what it made, never these
+  // (core/dispose.js).
+  shared() {
+    if (this._shared) return this._shared;
+    const keep = (this._shared = new WeakSet());
+    const hold = (root) =>
+      root?.traverse((o) => {
+        if (o.geometry) keep.add(o.geometry);
+        for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+          for (const k in m) if (m[k]?.isTexture) keep.add(m[k]);
+        }
+      });
+    for (const a of this.characters.values()) hold(a.scene);
+    for (const p of this.props.values()) {
+      hold(p.holder);
+      if (p.merged) keep.add(p.merged.geometry);
+    }
+    return keep;
+  },
+
   // One geometry + material for InstancedMesh use (cave rocks). Meshes are
   // baked into prop space and merged.
   propGeometry(id) {
@@ -332,6 +353,7 @@ export const Assets = {
     // for every instance drawn.
     const geometry = mergeVertices(geos.length === 1 ? geos[0] : mergeGeometries(geos) || geos[0], 1e-4);
     p.merged = { geometry, material };
+    this._shared?.add(geometry);
     return p.merged;
   },
 };

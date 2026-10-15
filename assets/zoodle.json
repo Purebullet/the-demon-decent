@@ -314,6 +314,51 @@
       "id": 277,
       "source": "objects",
       "status": "done"
+    },
+    "obsidian": {
+      "id": 278,
+      "source": "objects",
+      "status": "done"
+    },
+    "basalt": {
+      "id": 279,
+      "source": "objects",
+      "status": "done"
+    },
+    "ironSpire": {
+      "id": 280,
+      "source": "objects",
+      "status": "done"
+    },
+    "idol": {
+      "id": 281,
+      "source": "objects",
+      "status": "done"
+    },
+    "anvil": {
+      "id": 282,
+      "source": "objects",
+      "status": "done"
+    },
+    "spikewall": {
+      "id": 283,
+      "source": "objects",
+      "status": "done"
+    },
+    "pyre": {
+      "id": 284,
+      "source": "objects",
+      "status": "done"
+    },
+    "coffin": {
+      "id": 285,
+      "source": "objects",
+      "status": "done"
+    },
+    "crate": {
+      "id": 286,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

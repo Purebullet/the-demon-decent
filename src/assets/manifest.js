@@ -176,9 +176,19 @@ export const PROPS = {
   remains: { model: 'assets/models/chained-skeleton.glb', size: 1.1, maxTris: 2500, prompt: `Human skeleton sitting slumped with its arms chained up to an iron ring, tattered rags, ${LOOK}` },
   gate: { model: 'assets/models/hell-gate.glb', size: 5.2, maxTris: 4000, prompt: `Huge demonic stone archway made of two great curved horns meeting at the top, carved skulls along the arch, open gateway, ${LOOK}` },
   throne: { model: 'assets/models/throne.glb', size: 4.2, maxTris: 4000, prompt: `Massive demonic throne of black obsidian and bones with huge curved horns rising from the back, ${LOOK}` },
+  // ---- The deep (floors 6-20): a hotter, harder rock of their own.
+  obsidian: { model: 'assets/models/deep-obsidian.glb', size: 2.4, maxTris: 1000, instanced: true, glow: true, prompt: `Jagged cluster of glossy black volcanic obsidian shards with thin glowing orange lava cracks running through them, sharp glass-like facets, ${LOOK}` },
+  basalt: { model: 'assets/models/deep-basalt.glb', size: 3, maxTris: 1000, instanced: true, prompt: `Cluster of tall hexagonal black basalt columns of different heights standing together, cracked flat tops, ${LOOK}` },
+  ironSpire: { model: 'assets/models/deep-spire.glb', size: 6.4, maxTris: 2500, prompt: `Tall twisted spire of black iron and fused bones rising from floor to ceiling, hooked spikes along it, thick at the base, ${LOOK}` },
+  idol: { model: 'assets/models/deep-idol.glb', size: 1.8, maxTris: 2500, glow: true, prompt: `Squat horned demon idol of black stone sitting cross-legged, its gaping mouth full of glowing embers, ${LOOK}` },
+  anvil: { model: 'assets/models/deep-anvil.glb', size: 1.2, maxTris: 2000, prompt: `Infernal blacksmith anvil on a scorched stone block, iron tongs and a half-forged jagged blade lying on it, ${LOOK}` },
+  spikewall: { model: 'assets/models/deep-spikewall.glb', size: 2, maxTris: 2000, prompt: `Barricade of crossed rusted iron spikes and broken blades lashed to a charred wooden frame, ${LOOK}` },
+  pyre: { model: 'assets/models/deep-pyre.glb', size: 1.4, maxTris: 1500, glow: true, prompt: `Low pile of charred logs and burned bones with glowing orange embers among them, ${LOOK}` },
   // Treasure at the dead ends, and things to smash.
   chest: { model: 'assets/models/chest.glb', size: 0.95, maxTris: 2500, prompt: `Ornate demonic treasure chest of dark charred wood bound with black iron bands, a horned skull on the lock plate, closed lid, ${LOOK}` },
   urn: { model: 'assets/models/urn.glb', size: 1.0, maxTris: 1200, prompt: `Tall cracked clay burial urn with a narrow neck, carved skull and rune motifs, dark terracotta glaze, ${LOOK}` },
+  coffin: { model: 'assets/models/coffin.glb', size: 1.9, maxTris: 1500, prompt: `Old upright wooden coffin of dark rotten planks held with rusted iron nails, a cracked lid, ${LOOK}` },
+  crate: { model: 'assets/models/crate.glb', size: 1.0, maxTris: 1000, prompt: `Old wooden supply crate bound with rusted iron straps, a crude skull burned into the side, ${LOOK}` },
   barrel: { model: 'assets/models/barrel.glb', size: 1.1, maxTris: 1200, prompt: `Old rotten wooden barrel bound with rusted iron hoops, splintered planks, bones poking out of the open top, ${LOOK}` },
   // ---- Relics: cursed trinkets found in chests and on elites. Each floats
   // where it lies, and is drawn (tools/icons.html) into its HUD icon.

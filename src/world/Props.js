@@ -12,11 +12,12 @@ import { mulberry32 } from '../core/rng.js';
 //
 //   Chests sit at the ends of dead-end passages. F opens one: it jolts, a
 //   burst of light, and one thing spills out in front of it (a relic, a
-//   weapon, a potion, a demon sigil or a tome).
-//   Breakables (burial urns, rotten barrels) stand in groups along the walls
-//   of the larger rooms. A blow smashes one into flying pieces; some hold a
-//   potion. An urn holds slime that coats the blade (Player.coat): block
-//   while it is coated and the blade catches fire.
+//   weapon, a potion or a demon sigil).
+//   Breakables (burial urns, rotten barrels, crates, and in the Deep upright
+//   coffins) stand in groups along the walls of the rooms. A blow smashes
+//   one into flying pieces; some hold a potion. An urn holds slime that
+//   coats the blade (Player.coat): block while it is coated and the blade
+//   catches fire.
 //
 // Both block movement while whole (circles in the floor's collision world)
 // and never sit inside another prop's footprint (Dressing.free/claim).
@@ -111,7 +112,7 @@ export class Props {
   // Groups of one to three urns or barrels along the walls of rooms (never
   // in a one-tile passage, so nothing is ever blocked).
   _breakables() {
-    const kinds = ['urn', 'barrel'].filter((id) => Assets.hasProp(id));
+    const kinds = ['urn', 'barrel', 'crate', ...(this.level.look.deep ? ['coffin'] : [])].filter((id) => Assets.hasProp(id));
     if (!kinds.length) return;
     const d = this.level.data;
     const dressing = this.level.dressing;
@@ -122,7 +123,7 @@ export class Props {
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if ((dc || dr) && !this._solid(t.c + dc, t.r + dr)) open++;
       return open >= 5 && dressing.clear(t.x, t.z, 2 * TILE);
     });
-    const groups = Math.min(9, Math.round(slots.length * 0.07));
+    const groups = Math.min(14, Math.round(slots.length * 0.11));
     for (let g = 0; g < groups && slots.length; g++) {
       const { t, dx, dz } = slots.splice(Math.floor(r() * slots.length), 1)[0];
       const id = kinds[Math.floor(r() * kinds.length)];
@@ -131,7 +132,7 @@ export class Props {
         const along = (k - (n - 1) / 2) * 0.75 + (r() - 0.5) * 0.2;
         const x = t.x + dx * 0.55 + dz * along;
         const z = t.z + dz * 0.55 + dx * along;
-        const rad = 0.36;
+        const rad = id === 'coffin' ? 0.44 : 0.36;
         if (!dressing.free(x, z, rad + 0.05)) continue;
         dressing.claim(x, z, rad);
         this._addBreakable(id, x, z, 0.85 + r() * 0.3);
@@ -153,9 +154,10 @@ export class Props {
     this.group.add(root);
     root.updateMatrixWorld(true);
     const h = Assets.props.get(id).entry.size * scale;
-    const hb = new Hurtbox(root, new THREE.Vector3(0, h / 2, 0), new THREE.Vector3(0.38, h / 2, 0.38), { name: 'prop' });
+    const hw = id === 'coffin' ? 0.45 : 0.38;
+    const hb = new Hurtbox(root, new THREE.Vector3(0, h / 2, 0), new THREE.Vector3(hw, h / 2, hw), { name: 'prop' });
     hb.update();
-    const circle = { x, z, r: 0.34 };
+    const circle = { x, z, r: id === 'coffin' ? 0.42 : 0.34 };
     this.level.world.circles.push(circle);
     this.breakables.push({
       isProp: true,
@@ -200,7 +202,7 @@ export class Props {
       });
     }
     burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.6, p.z), { count: 26, speed: 2.2, color: C.smoke, colorEnd: C.smoke, size: 0.35, life: 0.9, gravity: 1 });
-    if (b.id === 'barrel') burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.7, p.z), { count: 10, speed: 3, color: C.bone ?? C.smoke, colorEnd: C.smoke, size: 0.12, life: 0.9 });
+    if (b.id !== 'urn') burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.7, p.z), { count: b.id === 'coffin' ? 18 : 10, speed: 3, color: C.bone ?? C.smoke, colorEnd: C.smoke, size: 0.12, life: 0.9 });
     ctx.audio?.smash?.(b.id);
     ctx.shake?.(0.08);
     // An urn holds slime: it splashes out and coats the blade that broke it.
@@ -231,7 +233,6 @@ export class Props {
       ['weapon', 0.25],
       ['potion', 0.25],
       ['spell', 0.12],
-      ['tome', !run.skills?.phantomStep && floor >= 2 ? 0.1 : 0],
     ];
     let pick = 'relic';
     if (Object.keys(run.relics || {}).length) {
@@ -250,11 +251,10 @@ export class Props {
       if (kind === 'potion') ctx.pickups?.addPotion(x, z);
       else if (kind === 'spell') ctx.pickups?.addSpell(x, z);
       else if (kind === 'relic') ctx.pickups?.addRelic(x, z, rollRelic(run));
-      else if (kind === 'tome') ctx.pickups?.addTome(x, z);
       else ctx.pickups?.addWeapon(x, z, rollWeapon(floor, 0.5));
     });
     burst(ctx.fx.add, new THREE.Vector3(c.x, 0.8, c.z), { count: 50, speed: 3.5, color: C.spark, colorEnd: C.fireEdge, size: 0.1, life: 1.1, gravity: -2 });
-    ctx.toast?.({ relic: 'The chest held a relic', weapon: 'The chest held a weapon', potion: 'The chest held a potion', spell: 'The chest held a spell', tome: 'The chest held a tome' }[pick]);
+    ctx.toast?.({ relic: 'The chest held a relic', weapon: 'The chest held a weapon', potion: 'The chest held a potion', spell: 'The chest held a spell' }[pick]);
   }
 
   // The prompt to show, if a closed chest is within reach.

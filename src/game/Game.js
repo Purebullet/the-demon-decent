@@ -9,7 +9,7 @@ import { ParticleSystem } from '../world/Particles.js';
 import { Surface, SHAFT_BOTTOM } from '../world/Surface.js';
 import { Sanctum } from '../world/Sanctum.js';
 import { Level } from '../world/Level.js';
-import { FLOORS, FLOOR_COUNT } from '../world/LevelData.js';
+import { FLOORS, FLOOR_COUNT, floorDef, DEEP_FROM } from '../world/LevelData.js';
 import { Effects } from '../world/Effects.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
@@ -20,12 +20,13 @@ import { rollWeapon, makeWeapon } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
-import { xpForKill, gainXp, spendPoint, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL } from './Levels.js';
+import { xpForKill, gainXp, spendPoint, legacyOf, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL } from './Levels.js';
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
 import { Hud } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
+import { disposeTree } from '../core/dispose.js';
 
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
@@ -44,20 +45,21 @@ const LEVEL_UP_DELAY = 0.7;
 // How the 3D view is drawn, best first: how wide it renders (device pixels,
 // never past the screen's own) and how many samples smooth its edges. It
 // starts at the top; frames running long step it down a rung at a time
-// (_adaptQuality), the edge smoothing going before the sharpness.
+// (_adaptQuality). The edges are always smoothed (4 samples, 2 on the last
+// rungs; FXAA where the machine can't multisample at all), and the view never
+// gets so small that its stretch to the screen shows as stair-steps: the
+// lower rungs give up the ground mist and some scenery instead.
 const QUALITY = [
+  { width: 1920, samples: 4 },
   { width: 1600, samples: 4 },
   { width: 1440, samples: 4 },
   { width: 1280, samples: 4 },
-  { width: 1280, samples: 2 },
-  { width: 1088, samples: 2 },
-  { width: 920, samples: 0 },
-  { width: 780, samples: 0 },
-  { width: 640, samples: 0 },
+  { width: 1152, samples: 4 },
+  { width: 1024, samples: 2 },
 ];
 // From this rung down there is no ground mist; further down, sparser scenery.
-const NO_MIST = 6;
-const SLOW = 6;
+const NO_MIST = 4;
+const SLOW = 5;
 const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
@@ -152,13 +154,17 @@ export class Game {
     host.on('resize', () => this._resize());
     this._resize();
     this.fsm.change('title');
+    // The music starts with the game: the host plays it as soon as the
+    // browser allows sound (on Project 0, the click that brought the player
+    // in already has; otherwise the first click or key).
+    this.audio.init();
     // Project 0's "How to play" box takes plain text: the keys are set in
     // Unicode bold so they stand out.
     host.hud(
       `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Quick left click')} light attack · ${bold('Hold left click')} heavy attack · ` +
-        `${bold('Multiple hits')} chain attack · ${bold('Hit a wind-up')} stagger · ${bold('Right click')} block · ${bold('Shift')} sprint · ${bold('E')} potion · ${bold('F')} take/use\n` +
-        `Once learned: ${bold('AA / DD')} dodge · ${bold('1 2 3')} demon spells\n` +
-        'One life: die and you start again. Click or press any key for sound.',
+        `${bold('Multiple hits')} chain attack · ${bold('Hit before it strikes')} stagger it · ${bold('Right click')} block · ${bold('Space')} shade step (the way you move) · ${bold('Shift')} sprint · ${bold('E')} potion · ${bold('F')} take/use\n` +
+        `Demon spells, once found: ${bold('Q')} Hellfire Nova · ${bold('R')} Blood Siphon\n` +
+        'One life: die and you start again.',
     );
     host.loop((dt) => this._frame(dt));
   }
@@ -174,10 +180,13 @@ export class Game {
     const tw = Math.max(1, Math.round(w * k));
     const th = Math.max(1, Math.round(h * k));
     this.sceneTarget.setSize(tw, th);
-    // Stretched up to the screen: sharpen back what the stretch blurs.
+    // Stretched up to the screen: sharpen back a little of what the stretch
+    // blurs (gently: sharpening brings back stair-steps too). Without
+    // multisampling, FXAA smooths the edges instead.
     const u = this.blit.material.uniforms;
     u.uTexel.value.set(1 / tw, 1 / th);
-    u.uSharp.value = this.sceneScale < 0.95 ? Math.min(0.6, (1 / this.sceneScale - 1) * 0.6) : 0;
+    u.uSharp.value = this.sceneScale < 0.95 ? Math.min(0.25, (1 / this.sceneScale - 1) * 0.3) : 0;
+    u.uFxaa.value = this.sceneTarget.samples > 0 ? 0 : 1;
     const ph = h * k;
     this.fx.add.setViewport(ph, this.camera.fov);
     this.fx.alpha.setViewport(ph, this.camera.fov);
@@ -358,7 +367,12 @@ export class Game {
   }
 
   _newScene({ fog = 0x0b0606, density = 0.04, background = 0x050202 } = {}) {
+    // The scene being left frees what it made (its GPU buffers and textures);
+    // without this every floor visited stayed in video memory.
+    disposeTree(this.scene);
     this.scene?.clear();
+    this.camera.far = 300;
+    this.camera.updateProjectionMatrix();
     const s = new THREE.Scene();
     s.background = new THREE.Color(background);
     s.fog = new THREE.FogExp2(fog, density);
@@ -406,10 +420,6 @@ export class Game {
         this.audio.relic();
         this.hud.announce(n > 1 ? `${R.name} ×${n}` : R.name, R.text);
         this.hud.flashRelic(id);
-      },
-      onSkill: () => {
-        this.audio.relic();
-        this.hud.announce('Phantom Step', 'Double-tap A or D to sidestep, S to leap back');
       },
       toast: (t) => this.hud.toast(t),
       announce: (t, sub) => this.hud.announce(t, sub),
@@ -463,8 +473,11 @@ export class Game {
 
   _enterSurface() {
     this._surfaceScene();
-    // Permadeath: a fresh run every time you stand on the surface.
+    // Permadeath: a fresh run every time you stand on the surface, keeping
+    // only half the level of the one that fell.
     this.run = newRun();
+    if (this.legacy) Object.assign(this.run, this.legacy);
+    this.legacy = null;
     this.bestAtStart = this.best;
     this.player.reset();
     this.player.attachRun(this.run);
@@ -529,8 +542,9 @@ export class Game {
   // ---------------------------------------------------------------- floor ---
 
   _enterFloor({ floor, arrival = false }) {
-    const def = FLOORS[floor - 1];
-    this.audio.music(def.boss || BOSS_MUSIC.has(floor) ? 'boss' : 'drone');
+    const def = floorDef(floor);
+    const inDeep = floor >= DEEP_FROM;
+    this.audio.music(def.boss || BOSS_MUSIC.has(floor) ? 'boss' : inDeep ? 'deep' : 'drone');
     const run = this.run;
     run.floor = floor;
     run.deepest = Math.max(run.deepest, floor);
@@ -545,6 +559,9 @@ export class Game {
     this.level = level;
     s.add(level.group);
     s.add(new THREE.HemisphereLight(look.sky, look.earth, look.hemi));
+    // Nothing past what the dark lets you see is drawn at all.
+    this.camera.far = level.sight + 16;
+    this.camera.updateProjectionMatrix();
 
     this.enemies = [];
     this.eliteCount = 0;
@@ -593,8 +610,7 @@ export class Game {
     this.player.spawnAt(sp.x, sp.z, level.spawnYaw());
     this.player.position.y = 0;
     this.player.dash = null;
-    const deep = floor > 10 && !def.boss;
-    this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${deep ? ' — the Deep' : ''}`];
+    this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${inDeep ? ' — the Deep' : ''}`];
     this.intro = null;
     this.renderer.toneMappingExposure = 1.2;
     if (arrival) this._beginArrival(level);
@@ -602,6 +618,12 @@ export class Game {
     if (this.newRecord) {
       this.newRecord = false;
       setTimeout(() => this.hud.toast('New deepest descent!'), 1500);
+    }
+    // The first step into the Deep: say what has changed.
+    if (floor === DEEP_FROM) {
+      setTimeout(() => {
+        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Demons here have 50% more health, and move and strike 5% faster');
+      }, arrival ? 9000 : 3200);
     }
   }
 
@@ -757,7 +779,7 @@ export class Game {
     }
 
     for (const e of this.enemies) {
-      const far = e.distToPlayer > 42 && !e.isBoss;
+      const far = e.distToPlayer > Math.min(42, level.sight + 6) && !e.isBoss;
       e.root.visible = !far && e.state !== 'burrowed' && !e.hidden;
       if (!far) e.postUpdate(dt, ctx, this.time);
     }
@@ -1090,11 +1112,14 @@ export class Game {
     this.hud.setPlaying(false);
     this.viewRoot.visible = false;
     const name = FLOORS[run.floor - 1]?.name || '';
+    // Half the fallen run's level carries into the next.
+    this.legacy = won ? null : legacyOf(run);
+    const kept = this.legacy?.level || 0;
     this.hud.setEnd({
       won,
       lines: won
         ? ['Azrakel has fallen.', 'You climb out of the pit with nothing but the memory of it.']
-        : [`Slain on floor ${run.floor} — ${name}`, 'Everything you carried is lost.'],
+        : [`Slain on floor ${run.floor} — ${name}`, kept ? `Everything you carried is lost, but half your strength stays: you rise again at level ${kept}.` : 'Everything you carried is lost.'],
       floor: run.floor,
       floors: FLOORS.length,
       deepest: Math.max(this.best, run.floor),
@@ -1172,28 +1197,50 @@ export class Game {
   }
 
   // Holds the frame rate up. The 3D view's resolution (only it: the
-  // interface stays sharp) steps down a little at a time while frames run
-  // long, and back up when there is time to spare. Slow machines also lose
-  // the ground mist, and get sparser scenery from the next floor (`slow`).
+  // interface stays sharp) steps down a rung while frames run long, and back
+  // up when there is time to spare. Each 1.5 s window is judged by its median
+  // frame, so a single hitch (a collection, a model's first draw) moves
+  // nothing, and against the screen's own frame interval (the quickest frames
+  // come at it: 16.7 ms at 60 Hz, 6.9 ms at 144 Hz), so a 60 Hz screen can
+  // climb back up too. A rung that had to be left waits longer each time
+  // before it is tried again. Slow machines also lose the ground mist, and
+  // get sparser scenery from the next floor (`slow`).
   _adaptQuality(rawDt) {
     // A hidden tab, or a floor being built: not a measure of anything.
     if (rawDt > 1 || this.busy || this.compiling) return;
-    const q = (this.quality ||= { avg: 1 / 60, t: 0, good: 0 });
-    q.avg += (Math.min(rawDt, 0.1) - q.avg) * 0.06;
+    const q = (this.quality ||= { frames: [], t: 0, refresh: 1 / 60, good: 0, bad: 0, wait: 0, hold: 8 });
+    q.frames.push(rawDt);
     q.t += rawDt;
+    q.wait -= rawDt;
     if (q.t < 1.5) return;
+    const f = q.frames.sort((a, b) => a - b);
+    const median = f[f.length >> 1];
+    const quick = f[Math.floor(f.length * 0.1)];
+    q.refresh = Math.min(1 / 30, Math.max(1 / 240, Math.min(q.refresh * 1.01, quick)));
+    q.frames.length = 0;
     q.t = 0;
     const level = this.qualityLevel;
-    if (q.avg > 1 / 45 && level < QUALITY.length - 1) {
+    if (median > Math.max(1 / 45, q.refresh * 1.45)) {
       q.good = 0;
-      q.avg = 1 / 60;
-      this._setQuality(level + 1);
-    } else if (q.avg < 1 / 80 && level > 0) {
-      if (++q.good >= 4) {
+      if (++q.bad >= 2 && level < QUALITY.length - 1) {
+        q.bad = 0;
+        // Pushed off a rung soon after climbing to it: wait longer before
+        // climbing again (8 s, doubling to 2 minutes).
+        q.hold = q.wait > 0 ? Math.min(120, q.hold * 2) : 8;
+        q.wait = q.hold;
+        this._setQuality(level + 1);
+      }
+    } else if (median < q.refresh * 1.15) {
+      q.bad = 0;
+      if (++q.good >= 3 && level > 0 && q.wait <= 0) {
         q.good = 0;
+        q.wait = 10;
         this._setQuality(level - 1);
       }
-    } else q.good = 0;
+    } else {
+      q.good = 0;
+      q.bad = 0;
+    }
     this.slow = this.qualityLevel >= SLOW ? 1 : 0;
     this.level?.dressing?.setMist?.(this.qualityLevel < NO_MIST);
   }
@@ -1304,15 +1351,36 @@ function msaaLimit(r) {
 // its neighbours' range so no edge gets a halo.
 function blitMaterial(map) {
   return new THREE.ShaderMaterial({
-    uniforms: { tScene: { value: map }, uTexel: { value: new THREE.Vector2(1, 1) }, uSharp: { value: 0 } },
+    uniforms: { tScene: { value: map }, uTexel: { value: new THREE.Vector2(1, 1) }, uSharp: { value: 0 }, uFxaa: { value: 0 } },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
     fragmentShader: /* glsl */ `
       uniform sampler2D tScene;
       uniform vec2 uTexel;
       uniform float uSharp;
+      uniform float uFxaa;
       varying vec2 vUv;
+      float luma(vec3 c) { return dot(c / (1.0 + c), vec3(0.299, 0.587, 0.114)); }
+      // FXAA (the console variant): blend across an edge along its direction.
+      vec3 fxaa(vec2 uv) {
+        vec3 rgbM = texture2D(tScene, uv).rgb;
+        float lNW = luma(texture2D(tScene, uv + vec2(-1.0, -1.0) * uTexel).rgb);
+        float lNE = luma(texture2D(tScene, uv + vec2(1.0, -1.0) * uTexel).rgb);
+        float lSW = luma(texture2D(tScene, uv + vec2(-1.0, 1.0) * uTexel).rgb);
+        float lSE = luma(texture2D(tScene, uv + vec2(1.0, 1.0) * uTexel).rgb);
+        float lM = luma(rgbM);
+        float lo = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+        float hi = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+        if (hi - lo < max(0.0312, hi * 0.125)) return rgbM;
+        vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+        float reduce = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
+        dir = clamp(dir / (min(abs(dir.x), abs(dir.y)) + reduce), -8.0, 8.0) * uTexel;
+        vec3 a = 0.5 * (texture2D(tScene, uv - dir / 6.0).rgb + texture2D(tScene, uv + dir / 6.0).rgb);
+        vec3 b = a * 0.5 + 0.25 * (texture2D(tScene, uv - dir * 0.5).rgb + texture2D(tScene, uv + dir * 0.5).rgb);
+        float lB = luma(b);
+        return (lB < lo || lB > hi) ? a : b;
+      }
       void main() {
-        vec3 c = texture2D(tScene, vUv).rgb;
+        vec3 c = uFxaa > 0.5 ? fxaa(vUv) : texture2D(tScene, vUv).rgb;
         if (uSharp > 0.0) {
           vec3 n = texture2D(tScene, vUv + vec2(0.0, uTexel.y)).rgb;
           vec3 s = texture2D(tScene, vUv - vec2(0.0, uTexel.y)).rgb;

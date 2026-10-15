@@ -10,6 +10,7 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { lookFor } from './themes.js';
 import { Dressing } from './Dressing.js';
 import { Props } from './Props.js';
+import { disposeTree } from '../core/dispose.js';
 
 // Builds one cavern floor from its hand-authored map and runs its hazards.
 // The scenery is dressed in the floor's look (Dressing.js, themes.js);
@@ -55,7 +56,13 @@ export class Level {
     this.dressing = new Dressing(this, this.look, { light });
     // Beyond this the fog has swallowed everything (exp2 fog at 3%).
     this.viewRange = Math.sqrt(3.5) / Math.max(0.01, def.fog * (this.look.haze || 1));
+    // How far anything can really be seen: past the torch's reach the rock is
+    // unlit and the murk all but black, so nothing further is drawn (the
+    // scenery's chunks, the demons, the camera's far plane).
+    this.sight = Math.min(this.viewRange, def.light * 1.8);
     this.group.add(this.dressing.group);
+    // The scenery standing on the floor is solid.
+    for (const c of this.dressing.solids) this.world.addStatic(c);
     this._buildProps();
     this._buildHazards();
     this.props = new Props(this);
@@ -303,7 +310,7 @@ export class Level {
   update(dt, ctx) {
     this.time += dt;
     const t = this.time;
-    this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.viewRange);
+    this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.sight);
     this.dressing.tick(t);
     this.props.update(dt, ctx);
     if (this.beam) {
@@ -338,7 +345,7 @@ export class Level {
         const l = d.lava[Math.floor(Math.random() * d.lava.length)];
         ps.emit({ x: l.x + (Math.random() - 0.5) * 2, y: 0.1, z: l.z + (Math.random() - 0.5) * 2, vy: 1 + Math.random(), life: 2, size: 0.08, color: C.emberHot, colorEnd: C.emberRed, turbulence: 2, drag: 0.3 });
       }
-      if (!player.dead && player.dodgeT <= 0 && !player.dash && this._onLava(player.position)) {
+      if (!player.dead && !player.dash && this._onLava(player.position)) {
         player.lavaT -= dt;
         if (player.lavaT <= 0) {
           player.lavaT = 0.25;
@@ -429,10 +436,9 @@ export class Level {
     return Math.abs(pos.x - tile.x) < half && Math.abs(pos.z - tile.z) < half;
   }
 
+  // Frees what the floor made (its scenery's far-view copies too).
   dispose() {
-    this.group.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-    });
+    disposeTree(this.group, this.dressing?.geometries() || []);
   }
 }
 

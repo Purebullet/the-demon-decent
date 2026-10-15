@@ -33,10 +33,6 @@ import { SwingTrail, trailStyle } from '../combat/SwingTrail.js';
 const EYE = 1.65;
 const RADIUS = 0.4;
 const WALK = 5.2;
-const DODGE_SPEED = 12.5;
-const DODGE_TIME = 0.3;
-const DODGE_IFRAMES = 0.26;
-const DODGE_CD = 0.7;
 const DRINK_TIME = 0.65;
 const POTION_HEAL = 0.2;
 
@@ -66,10 +62,10 @@ const GUARD_RAISE = 0.25;
 const SPRINT = 1.6;
 const SPRINT_TIME = 2;
 const SPRINT_REFILL = 4;
-// Slime from a smashed urn coats the blade for this long; raise the block
-// while it is coated and it catches: a flaming blade for what is left of
-// it (harder blows that set demons burning, and the light reaches further).
-const COAT_TIME = 12;
+// Slime from a smashed urn coats the blade until you raise the block: then
+// it catches, a flaming blade for this long (harder blows that set demons
+// burning, and the light reaches further).
+const FLAME_TIME = 12;
 const FLAME_DAMAGE = 1.25;
 const FLAME_LIGHT = 1.45;
 // Heavy attack: a press held longer than HOLD draws back; full power after CHARGE_FULL.
@@ -82,7 +78,6 @@ const CHARGE_POS = new THREE.Vector3(0.44, -0.44, -0.82);
 // A weapon thrown back off a guard: how long until it is yours again.
 const BOUNCE_TIME = 0.42;
 // Phantom Step: two taps of a direction key within this long.
-const DOUBLE_TAP = 0.28;
 // The viewmodel is drawn with a narrower lens than the world (Game.js), so
 // the blade on screen sits nearer the middle than the same camera-space
 // point would in the world. Hit tests push it out by tan(world/2)/tan(view/2)
@@ -231,10 +226,6 @@ export class Player {
     this.torchLit = 1;
     this.torchRaise = 1;
     this.wake = 1;
-    this.dodgeT = 0;
-    this.dodgeCd = 0;
-    this.dodgeDir = new THREE.Vector3();
-    this.taps = {};
     this.dash = null;
     this.invuln = 0;
     this.staggerT = 0;
@@ -363,14 +354,12 @@ export class Player {
     this.jolt = Math.max(0, this.jolt - real * 2.8);
 
     this.invuln = Math.max(0, this.invuln - dt);
-    this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
     this.healFlash = Math.max(0, this.healFlash - dt * 2);
     this.shakeT = Math.max(0, this.shakeT - dt * 2.2);
     this.siphonT = Math.max(0, this.siphonT - dt);
     this.staggerT = Math.max(0, this.staggerT - dt);
     this.wrathT = Math.max(0, this.wrathT - dt);
-    this.coatT = Math.max(0, this.coatT - dt);
     if (this.flameT > 0) {
       this.flameT = Math.max(0, this.flameT - dt);
       if (this.flameT === 0) this._extinguish(ctx);
@@ -393,11 +382,11 @@ export class Player {
 
     if (ctx.combat) {
       for (const id of SPELL_IDS) {
-        if (!input.wasPressed(SPELLS[id].key)) continue;
+        if (id === 'step' || !input.wasPressed(SPELLS[id].key)) continue;
         if (castSpell(id, this, ctx)) this.spellCast[id] = 0.6;
         else if (this.run.spells[id]) ctx.onSpellDenied?.(id);
       }
-      if ((input.wasPressed('KeyE') || input.wasPressed('KeyR')) && this.drinkT <= 0 && this.staggerT <= 0) this.drinkPotion(ctx);
+      if (input.wasPressed('KeyE') && this.drinkT <= 0 && this.staggerT <= 0) this.drinkPotion(ctx);
       this._dodgeInput(ctx);
       this._attackInput(dt, ctx);
     }
@@ -450,12 +439,6 @@ export class Player {
     this.vel.z += (dir.z * speed - this.vel.z) * blend;
     let mx = this.vel.x * dt;
     let mz = this.vel.z * dt;
-    if (this.dodgeT > 0) {
-      const k = this.dodgeT / DODGE_TIME;
-      mx = this.dodgeDir.x * DODGE_SPEED * (0.5 + k * 0.7) * dt;
-      mz = this.dodgeDir.z * DODGE_SPEED * (0.5 + k * 0.7) * dt;
-      this.dodgeT -= dt;
-    }
     if (this.dash) {
       this.dash.t += dt;
       mx = this.dash.vx * dt;
@@ -476,7 +459,7 @@ export class Player {
     const step = Math.floor((this.bobT * 2 + Math.PI / 2) / (2 * Math.PI));
     if (step !== this.stepN) {
       this.stepN = step;
-      if (sp > 1.5 && this.dodgeT <= 0 && !this.dash) ctx.audio?.footstep?.(ctx.ground, sp / WALK);
+      if (sp > 1.5 && !this.dash) ctx.audio?.footstep?.(ctx.ground, sp / WALK);
     }
   }
 
@@ -518,7 +501,7 @@ export class Player {
       roll = (1 - up) * 1.25 + Math.sin(k * 9) * 0.03 * (1 - stand);
     } else {
       eye += Math.sin(this.bobT * 2) * 0.02 * Math.min(1, (this.speedNow || 0) / WALK);
-      if (this.dodgeT > 0) eye -= 0.25 * Math.sin((this.dodgeT / DODGE_TIME) * Math.PI);
+      if (this.dash) eye -= 0.2 * Math.sin(Math.min(1, this.dash.t / this.dash.dur) * Math.PI);
       if (this.staggerT > 0) eye -= 0.06 * Math.sin(Math.min(1, this.staggerT / Math.max(0.01, this.staggerMax)) * Math.PI);
       const strafe = this.input ? this.input.moveAxes().strafe : 0;
       roll = -strafe * 0.015;
@@ -543,43 +526,21 @@ export class Player {
 
   // ------------------------------------------------------------ dodge ---
 
-  // Phantom Step (a learned skill): a double tap of A or D sidesteps, of S
-  // steps back; Space dodges the way you are moving.
+  // Shade Step, everyone's dodge: Space dashes the way you are moving (WASD;
+  // straight back if you stand still), through demons and untouchable for a
+  // moment (Spells.js). Not out of a heavy blow or the strike of a light
+  // one; a recovery is fine.
   _dodgeInput(ctx) {
-    if (!this.run.skills?.phantomStep) return;
-    const now = performance.now() / 1000;
-    let dir = null;
-    for (const [code, x, z] of [['KeyA', -1, 0], ['KeyD', 1, 0], ['KeyS', 0, -1]]) {
-      if (!ctx.input.wasPressed(code)) continue;
-      if (now - (this.taps[code] ?? -9) < DOUBLE_TAP) {
-        dir = this._local(x, z, _v);
-        this.taps[code] = -9;
-      } else this.taps[code] = now;
-    }
-    if (!dir && ctx.input.wasPressed('Space')) {
-      dir = this.moveDirection(_v);
-      if (dir.lengthSq() < 0.01) this._local(0, -1, dir);
-    }
-    if (!dir || this.dodgeCd > 0 || this.dodgeT > 0 || this.dash || this.staggerT > 0 || this.charge) return;
-    // Not out of a heavy blow or the strike of a light one; a recovery is fine.
+    if (!ctx.input.wasPressed(SPELLS.step.key)) return;
+    if (this.dash || this.staggerT > 0 || this.charge) return;
     const s = this.swing;
     if (s && (s.heavy || s.bounced || s.t < s.W + s.A)) return;
+    if (!castSpell('step', this, ctx)) return;
+    this.spellCast.step = 0.6;
     this._endSwing();
     this.press = null;
-    this.dodgeDir.copy(dir);
-    this.dodgeT = DODGE_TIME;
-    this.dodgeCd = DODGE_CD + DODGE_TIME;
-    this.invuln = Math.max(this.invuln, DODGE_IFRAMES);
     this.burnT = 0;
-    ctx.audio?.dodge();
     ctx.onRhythm?.('dodge');
-  }
-
-  // A direction relative to where you face: x right, z forward.
-  _local(x, z, out) {
-    const s = Math.sin(this.yaw);
-    const c = Math.cos(this.yaw);
-    return out.set(-s * z + c * x, 0, -c * z - s * x).normalize();
   }
 
   // ----------------------------------------------------------- combat ---
@@ -596,7 +557,7 @@ export class Player {
       return;
     }
     const held = input.mouseDown[0];
-    const free = this.staggerT <= 0 && this.drinkT <= 0 && !this.dash && this.dodgeT <= 0 && this.wake >= 1;
+    const free = this.staggerT <= 0 && this.drinkT <= 0 && !this.dash && this.wake >= 1;
     if (input.mouseClicked[0] && free && !this.charge) this._onPress(ctx);
     if (this.press) {
       this.press.t += dt;
@@ -630,7 +591,7 @@ export class Player {
     // is let go, so a blow knocking it down for a moment buys no time); it can
     // go up again once it has some strength back.
     if (!input.mouseDown[2] && this.guard >= GUARD_RAISE) this.guardSpent = false;
-    this.blocking = !!input.mouseDown[2] && !this.guardSpent && !locked && !this.charge && !this.press && this.staggerT <= 0 && this.drinkT <= 0 && this.dodgeT <= 0;
+    this.blocking = !!input.mouseDown[2] && !this.guardSpent && !locked && !this.charge && !this.press && this.staggerT <= 0 && this.drinkT <= 0 && !this.dash;
     if (this.blocking) {
       this.guard = Math.max(0, this.guard - dt / GUARD_TIME);
       if (this.guard <= 0) {
@@ -910,15 +871,17 @@ export class Player {
   }
 
   // A smashed urn's slime: coats the blade (or feeds a fire already lit).
+  // The coat stays on until a block sets it alight; only then does the
+  // flame's time start running.
   coat(ctx) {
-    if (this.flameT > 0) this.flameT = COAT_TIME;
-    else this.coatT = COAT_TIME;
+    if (this.flameT > 0) this.flameT = FLAME_TIME;
+    else this.coatT = 1;
     ctx.audio?.slime?.();
     ctx.onCombat?.(this.flameT > 0 ? 'refuel' : 'coated');
   }
 
   _ignite(ctx) {
-    this.flameT = this.coatT;
+    this.flameT = FLAME_TIME;
     this.coatT = 0;
     ctx.audio?.ignite?.();
     this.flash(0xff8a2a, 40, 0.4);
@@ -1403,7 +1366,7 @@ export class Player {
   takeDamage(amount, from, knockback, ctx, source = null) {
     if (this.dead) return false;
     if (this.invuln > 0) {
-      if (this.dodgeT > 0 || this.dash) ctx.onDodge?.();
+      if (this.dash) ctx.onDodge?.();
       return false;
     }
     if (source && this.canParry(from)) {

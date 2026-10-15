@@ -50,7 +50,7 @@ const BACK_HUE = { glow: 'rgba(200,50,0,0.85)', accent: '#a8401c' };
 const TOP = 46;
 
 // Skill slots along the bottom: the three demon spells, then Phantom Step.
-const SLOTS = [...SPELL_IDS.map((id) => ({ id, icon: id })), { id: 'dodge', icon: 'dodge' }];
+const SLOTS = SPELL_IDS.map((id) => ({ id, icon: id }));
 
 const FULL_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy * 2.0, 0.0, 1.0); }';
 const QUAD_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
@@ -921,7 +921,6 @@ export class Hud {
       JSON.stringify(r.stats),
       JSON.stringify(r.spells),
       JSON.stringify(r.relics),
-      r.skills?.phantomStep,
       cds,
       i.floorLabel,
       i.enemyLabel,
@@ -992,14 +991,9 @@ export class Hud {
       if (!f.mesh.visible) continue;
       let cd = 0;
       let cast = 0;
-      if (slot.id === 'dodge') {
-        cd = r.skills?.phantomStep ? clamp01(p.dodgeCd / 1.0) : 0;
-        cast = p.dodgeT > 0 ? 1 : 0;
-      } else {
-        const lvl = r.spells[slot.id];
-        cd = lvl ? clamp01((p.spellCd[slot.id] || 0) / SPELLS[slot.id].levels[lvl - 1].cd) : 0;
-        cast = (p.spellCast?.[slot.id] || 0) / 0.6;
-      }
+      const lvl = r.spells[slot.id];
+      cd = lvl ? clamp01((p.spellCd[slot.id] || 0) / SPELLS[slot.id].levels[lvl - 1].cd) : 0;
+      cast = (p.spellCast?.[slot.id] || 0) / 0.6;
       if (f.lastCd > 0 && cd === 0) f.ready = 1;
       f.lastCd = cd;
       f.ready = Math.max(0, f.ready - dt * 2);
@@ -1133,7 +1127,7 @@ export class Hud {
     const r = this.info.run;
     const p = this.info.player;
     SLOTS.forEach((slot, i) => {
-      if (slot.id === 'dodge' || !r.spells[slot.id]) return;
+      if (!r.spells[slot.id]) return;
       const cd = Math.ceil(p.spellCd[slot.id] || 0);
       const R = this.layout.slots[i];
       if (cd > 0) this._text(g, String(cd), R.x + R.w / 2, R.y + R.h / 2 + 1, { size: 26, color: C.light, align: 'center', base: 'middle', glow: 'rgba(0,0,0,1)' });
@@ -1424,13 +1418,12 @@ export class Hud {
     const hy = h - pad - 26;
     const sy = hy - 30 - sz - (this.touch ? 80 : 0);
     for (const slot of SLOTS) {
-      const isDodge = slot.id === 'dodge';
-      const lvl = isDodge ? (r.skills?.phantomStep ? 1 : 0) : r.spells[slot.id];
+      const lvl = r.spells[slot.id];
       g.save();
       this._box(g, sx, sy, sz, sz, C.panel, lvl ? C.edge : '#2a0c08');
       g.globalAlpha = lvl ? 1 : 0.22;
       if (!IconAtlas.draw(g, slot.icon, sx + 4, sy + 4, sz - 8)) {
-        const words = (isDodge ? 'Phantom Step' : SPELLS[slot.id].name).toUpperCase().split(' ');
+        const words = SPELLS[slot.id].name.toUpperCase().split(' ');
         words.forEach((wd2, k) => this._text(g, wd2, sx + sz / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: 8, ls: 1, align: 'center', base: 'middle' }));
       }
       g.globalAlpha = 1;
@@ -1441,12 +1434,12 @@ export class Hud {
       }
       g.restore();
       // Key, level and name.
-      this._text(g, isDodge ? 'A A' : SPELLS[slot.id].label, sx + 7, sy + 15, { size: 13, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ' });
-      if (lvl && !isDodge) this._text(g, 'I'.repeat(lvl), sx + sz - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
-      const name = isDodge ? 'Phantom Step' : SPELLS[slot.id].name;
+      this._text(g, SPELLS[slot.id].label, sx + 7, sy + 15, { size: 13, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ' });
+      if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
+      const name = SPELLS[slot.id].name;
       this._text(g, name.toUpperCase(), sx + sz / 2, sy + sz + 13, { size: 8, ls: 0.5, color: lvl ? C.bone : C.ash, align: 'center' });
       L.slots.push({ x: sx + 3, y: sy + 3, w: sz - 6, h: sz - 6 });
-      if (this.touch && lvl && !isDodge) this.buttons.push({ x: (sx + sz / 2) * this.u, y: (sy + sz / 2) * this.u, r: (sz / 2) * this.u, code: SPELLS[slot.id].key });
+      if (this.touch && lvl) this.buttons.push({ x: (sx + sz / 2) * this.u, y: (sy + sz / 2) * this.u, r: (sz / 2) * this.u, code: SPELLS[slot.id].key });
       sx += sz + gap;
     }
 
@@ -1498,9 +1491,9 @@ export class Hud {
     const tags = [];
     if (p.siphonT > 0) tags.push([`Blood Siphon ${Math.ceil(p.siphonT)}s`, '#ff6a5a']);
     if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
-    if (p.burnT > 0) tags.push(['Burning: dodge to put it out', '#ff8a2a']);
+    if (p.burnT > 0) tags.push(['Burning: shade step (Space) to put it out', '#ff8a2a']);
     if (p.flameT > 0) tags.push([`Flaming blade ${Math.ceil(p.flameT)}s`, '#ff9a3a']);
-    else if (p.coatT > 0) tags.push([`Slime-coated ${Math.ceil(p.coatT)}s: block to ignite`, '#8ef05a']);
+    else if (p.coatT > 0) tags.push(['Slime-coated: block to ignite', '#8ef05a']);
     if (p.invuln > 0.25) tags.push(['Invulnerable', '#c9a0ff']);
     if (tags.length) {
       g.font = `12px ${SERIF}`;
@@ -1610,7 +1603,7 @@ export class Hud {
     const bx = w - 70;
     const by = h - 170;
     btn(bx, by, 34, 'STRIKE', 'Mouse0');
-    if (this.info.run?.skills?.phantomStep) btn(bx - 80, by + 30, 28, 'DODGE', 'Space');
+    btn(bx - 80, by + 30, 28, 'STEP', 'Space');
     btn(bx - 40, by - 75, 26, 'POTION', 'KeyE');
     btn(bx + 20, by - 80, 24, 'USE', 'KeyF');
   }
@@ -1677,12 +1670,14 @@ export class Hud {
     this._text(g, 'Twenty floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.22), ls: 1, color: C.bone, align: 'center' });
     y += big * 0.9;
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 2.6);
-    g.font = `${Math.max(16, big * 0.27)}px ${SERIF}`;
-    const label = 'Fall into the pit';
-    const bw = g.measureText(label).width + 48;
-    this._box(g, (w - bw) / 2, y - 24, bw, 48, `rgba(${40 + pulse * 30},6,4,0.88)`, '#8a2210');
-    this._text(g, label.toUpperCase(), w / 2, y, { size: Math.max(14, big * 0.22), ls: 2, color: C.light, align: 'center', base: 'middle', glow: `rgba(200,40,0,${0.5 + pulse * 0.4})` });
-    y += 50;
+    // The button fits its words as they are drawn: capitals, spaced.
+    const label = 'FALL INTO THE PIT';
+    const ls = Math.max(14, big * 0.22);
+    const bw = this._measure(g, label, { size: ls, ls: 2 }) + 64;
+    const bh = Math.max(48, ls * 2.4);
+    this._box(g, (w - bw) / 2, y - bh / 2, bw, bh, `rgba(${40 + pulse * 30},6,4,0.88)`, '#8a2210');
+    this._text(g, label, w / 2, y, { size: ls, ls: 2, color: C.light, align: 'center', base: 'middle', glow: `rgba(200,40,0,${0.5 + pulse * 0.4})` });
+    y += bh / 2 + 26;
     const t = this.titleInfo;
     const best = t.best ? `Your deepest descent: Floor ${t.best}` : 'No soul has yet returned from the pit.';
     this._text(g, best, w / 2, y, { size: 15, align: 'center' });
@@ -1703,48 +1698,76 @@ export class Hud {
         y += 17;
       });
     }
-    // Controls, in three columns: getting about, fighting, and what you
-    // can do once you have learned it. Keys bold and bright, what they do
-    // quieter beside them.
+    // Controls, in three columns: getting about, fighting, and the demon
+    // spells. Keys bold and bright, what they do quieter beside them; each
+    // column as wide as its words, and the whole panel shrunk to fit.
     if (!this.touch && h > 420) {
       const cols = [
-        { title: 'Move', keyW: 78, rows: [['W A S D', 'move'], ['Mouse', 'aim'], ['Shift', 'sprint'], ['E', 'drink potion'], ['F', 'take / use']] },
+        { title: 'Move', rows: [['W A S D', 'move'], ['Mouse', 'aim'], ['Shift', 'sprint'], ['Space', 'shade step'], ['E', 'drink potion'], ['F', 'take / use']] },
         {
           title: 'Fight',
-          keyW: 186,
           rows: [
             ['Quick left click', 'light attack'],
             ['Hold left click', 'heavy attack'],
             ['Multiple hits', 'chain attack'],
-            ['Hit enemy during wind-up', 'stagger'],
+            ['Hit before it strikes', 'stagger it'],
             ['Right click', 'block'],
           ],
         },
-        { title: 'Once learned', keyW: 86, rows: [['A A / D D', 'dodge'], ['1 2 3', 'demon spells']] },
+        {
+          title: 'Demon spells',
+          rows: [
+            ...SPELL_IDS.map((id) => [SPELLS[id].label === 'SPACE' ? 'Space' : SPELLS[id].label, SPELLS[id].name]),
+            ['', 'Shade Step is yours from the start;'],
+            ['', 'find the others in chests and at'],
+            ['', 'the Magic Circle between floors'],
+          ],
+        },
       ];
-      const colW = [214, 330, 196];
-      const pw = colW.reduce((a, b) => a + b, 0) + 40;
+      const KEY = { size: 14, weight: 'bold ' };
+      const WHAT = { size: 13 };
+      for (const col of cols) {
+        col.keyW = Math.max(...col.rows.map(([k]) => (k ? this._measure(g, k, KEY) : 0))) + 14;
+        col.w = col.keyW + Math.max(...col.rows.map(([, d]) => this._measure(g, d, WHAT)), this._measure(g, col.title.toUpperCase(), { size: 11, ls: 2 }) - col.keyW) + 32;
+      }
+      const pw = cols.reduce((a, c) => a + c.w, 0) + 12;
       const rows = Math.max(...cols.map((c) => c.rows.length));
       const ph = 34 + rows * 20 + 12;
       let cy = Math.max(y + 20, h - 16 - ph);
-      const px = w / 2 - pw / 2;
-      this._box(g, px, cy, pw, ph, 'rgba(10,2,2,0.72)', C.edge);
-      let cx = px + 22;
-      cols.forEach((col, k) => {
-        this._label(g, col.title, cx, cy + 24, { size: 11, color: k === 2 ? C.ember : C.ash });
+      const k = Math.max(0.55, Math.min(1, (w - 24) / pw, (h - 8 - cy) / ph));
+      if (cy + ph * k > h - 8) cy = h - 8 - ph * k;
+      g.save();
+      g.translate(w / 2 - (pw * k) / 2, cy);
+      g.scale(k, k);
+      this._box(g, 0, 0, pw, ph, 'rgba(10,2,2,0.72)', C.edge);
+      let cx = 22;
+      cols.forEach((col, n) => {
+        this._label(g, col.title, cx, 24, { size: 11, color: n === 2 ? C.ember : C.ash });
         col.rows.forEach(([key, what], r) => {
-          const ry = cy + 46 + r * 20;
-          this._text(g, key, cx, ry, { size: 14, weight: 'bold ', color: C.light });
-          this._text(g, what, cx + col.keyW, ry, { size: 13, color: C.ash });
+          const ry = 46 + r * 20;
+          if (key) {
+            this._text(g, key, cx, ry, { ...KEY, color: C.light });
+            this._text(g, what, cx + col.keyW, ry, { ...WHAT, color: C.ash });
+          } else this._text(g, what, cx, ry, { size: 11, color: C.ash });
         });
-        cx += colW[k];
+        cx += col.w;
         // A rule between columns.
-        if (k < cols.length - 1) {
+        if (n < cols.length - 1) {
           g.fillStyle = 'rgba(106,26,16,0.6)';
-          g.fillRect(cx - 14, cy + 14, 1, ph - 28);
+          g.fillRect(cx - 14, 14, 1, ph - 28);
         }
       });
+      g.restore();
     }
+  }
+
+  // How wide `text` is drawn at these settings (letter spacing included).
+  _measure(g, text, { size = 16, weight = '', ls = 0 } = {}) {
+    g.font = `${weight}${size}px ${SERIF}`;
+    if ('letterSpacing' in g) g.letterSpacing = `${ls}px`;
+    const wd = g.measureText(text).width + ('letterSpacing' in g ? 0 : ls * text.length);
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+    return wd;
   }
 
   _paintPause(g) {

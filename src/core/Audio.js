@@ -3,15 +3,16 @@
 // distance from the listener. Rapid repeats of the same sound are thinned so
 // a swarm does not turn into noise.
 //
-// Music: on the title and the surface "Infernal Crescendo"; in the pit the
-// ambient drone, and "Blood in the Arena" on the boss floors. Each loops.
+// Music: on the title and the surface "Infernal Crescendo"; on the first
+// floors the ambient drone; in the Deep (floors 6 on) "Inferno Allegro";
+// and "Blood in the Arena" on the boss floors. Each loops.
 
 import { SOUND_EXT } from './soundFormat.js';
 
 const DIR = 'assets/sounds/';
-const SONGS = { intro: 'assets/music/infernal-crescendo.mp3', boss: 'assets/music/blood-in-the-arena.mp3', drone: `${DIR}drone.wav` };
+const SONGS = { intro: 'assets/music/infernal-crescendo.mp3', boss: 'assets/music/blood-in-the-arena.mp3', deep: 'assets/music/inferno-allegro.mp3', drone: `${DIR}drone.wav` };
 // (The songs are mastered a few dB quieter than the drone is played.)
-const MUSIC = { intro: 0.8, boss: 0.85, drone: 0.35 };
+const MUSIC = { intro: 0.8, boss: 0.85, deep: 0.75, drone: 0.35 };
 
 export class Audio {
   constructor(host) {
@@ -26,7 +27,8 @@ export class Audio {
     this.fade = null;
   }
 
-  // Browsers only allow sound after the first click or key press.
+  // Starts the music. Called when the game starts; browsers that hold sound
+  // back until the first click or key press get it then (the host waits).
   init() {
     if (this.started) return;
     this.started = true;
@@ -41,7 +43,7 @@ export class Audio {
     } else this._startMusic();
   }
 
-  // 'intro', 'boss' or 'drone'. Asking for what is already playing leaves it be.
+  // 'intro', 'boss', 'deep' or 'drone'. Asking for what is already playing leaves it be.
   music(mode) {
     if (mode === this.mode && (this.playing || !this.started)) return;
     this.mode = mode;
@@ -160,7 +162,7 @@ export class Audio {
     if (counter) this.play('counter', { volume: 1, gap: 0.05 });
   }
   smash(kind) {
-    this.play(kind === 'barrel' ? 'smash_wood' : 'smash_clay', { volume: 0.9, gap: 0.05, rate: 0.9 + Math.random() * 0.2 });
+    this.play(kind === 'urn' ? 'smash_clay' : 'smash_wood', { volume: 0.9, gap: 0.05, rate: (kind === 'coffin' ? 0.8 : 0.9) + Math.random() * 0.2 });
   }
   chest() {
     this.play('chest', { volume: 0.9, gap: 0.3 });

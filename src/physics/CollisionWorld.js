@@ -1,6 +1,8 @@
 // Static world collision for characters, which are vertical cylinders and so
 // reduce to circles on the XZ plane. Solids come from a tile grid (caverns),
-// and from loose circles and axis-aligned boxes (surface ruins).
+// from loose circles and axis-aligned boxes (surface ruins, chests, urns),
+// and from scenery circles filed by tile (`addStatic`), so a floor's hundreds
+// of props cost only the few near whoever is moving.
 
 export class CollisionWorld {
   constructor({ grid = null, tileSize = 2, circles = [], boxes = [], boundRadius = 0, boundCenter = null } = {}) {
@@ -10,6 +12,40 @@ export class CollisionWorld {
     this.boxes = boxes; // { minX, minZ, maxX, maxZ }
     this.boundRadius = boundRadius;
     this.boundCenter = boundCenter || { x: 0, z: 0 };
+    this.cells = new Map();
+    this.stamp = 0;
+  }
+
+  // A fixed circle (a prop standing on the floor), filed under every tile it
+  // overlaps.
+  addStatic(c) {
+    const t = this.tileSize;
+    for (let r = Math.floor((c.z - c.r) / t); r <= Math.floor((c.z + c.r) / t); r++) {
+      for (let q = Math.floor((c.x - c.r) / t); q <= Math.floor((c.x + c.r) / t); q++) {
+        const k = r * 4096 + q;
+        if (!this.cells.has(k)) this.cells.set(k, []);
+        this.cells.get(k).push(c);
+      }
+    }
+  }
+
+  _resolveStatic(pos, radius) {
+    if (!this.cells.size) return false;
+    const t = this.tileSize;
+    const stamp = ++this.stamp;
+    let moved = false;
+    for (let r = Math.floor((pos.z - radius) / t); r <= Math.floor((pos.z + radius) / t); r++) {
+      for (let q = Math.floor((pos.x - radius) / t); q <= Math.floor((pos.x + radius) / t); q++) {
+        const list = this.cells.get(r * 4096 + q);
+        if (!list) continue;
+        for (const c of list) {
+          if (c.stamp === stamp) continue;
+          c.stamp = stamp;
+          moved = pushOutOfCircle(pos, radius, c.x, c.z, c.r) || moved;
+        }
+      }
+    }
+    return moved;
   }
 
   isSolidTile(c, r) {
@@ -46,6 +82,7 @@ export class CollisionWorld {
       if (this.grid) moved = this._resolveGrid(pos, radius) || moved;
       for (const b of this.boxes) moved = pushOutOfBox(pos, radius, b.minX, b.minZ, b.maxX, b.maxZ) || moved;
       for (const c of this.circles) moved = pushOutOfCircle(pos, radius, c.x, c.z, c.r) || moved;
+      moved = this._resolveStatic(pos, radius) || moved;
       if (this.boundRadius > 0) {
         const dx = pos.x - this.boundCenter.x;
         const dz = pos.z - this.boundCenter.z;
