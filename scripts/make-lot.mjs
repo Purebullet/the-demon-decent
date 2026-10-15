@@ -200,17 +200,17 @@ float rockNoise(vec3 p) {
 void p0Surface(inout P0Surface s) {
   float r = length(s.position.xz);
   float y = s.position.y;
-  // Big patches the texture's tile can't repeat under: cold dark basalt,
-  // warm rust-brown scoria, grit; layered bands across the slopes, and pale
-  // ash settled on the flats.
+  // Patches the texture's tile can't repeat under, all a little darker than
+  // the rock itself, never lighter: cold basalt, warmer scoria, grit, faint
+  // bands across the slopes, and soot settled on the flats.
   float m1 = rockNoise(s.position * 0.13 + 4.0);
   float m2 = rockNoise(s.position * 0.42 + 9.0);
   float m3 = rockNoise(s.position * 1.9 + 2.0);
-  vec3 tint = mix(vec3(0.6, 0.6, 0.66), vec3(1.3, 0.95, 0.78), smoothstep(0.3, 0.72, m1 * 0.7 + m2 * 0.3));
-  s.color *= tint * (0.72 + 0.45 * m2) * (0.85 + 0.3 * m3);
-  s.color *= 1.0 + 0.14 * sin(y * 2.4 + m1 * 9.0);
-  float ash = smoothstep(0.8, 0.97, s.normal.y) * smoothstep(0.45, 0.7, m2);
-  s.color = mix(s.color, vec3(0.2, 0.18, 0.17), ash * 0.45);
+  vec3 tint = mix(vec3(0.62, 0.6, 0.63), vec3(0.95, 0.82, 0.74), smoothstep(0.3, 0.72, m1 * 0.7 + m2 * 0.3));
+  s.color *= tint * (0.85 + 0.2 * m2) * (0.9 + 0.15 * m3);
+  s.color *= 1.0 + 0.06 * sin(y * 2.4 + m1 * 9.0);
+  float soot = smoothstep(0.8, 0.97, s.normal.y) * smoothstep(0.45, 0.75, m2);
+  s.color *= 1.0 - 0.3 * soot;
   s.color *= 1.0 - 0.3 * smoothstep(mound * 1.2, mound * 2.6, y);
   float n = rockNoise(s.position * 1.3) * 0.6 + rockNoise(s.position * 3.7) * 0.4;
   float crack = smoothstep(0.05, 0.0, abs(n - 0.5));
