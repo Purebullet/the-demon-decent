@@ -743,8 +743,11 @@ export async function buildLod1(width, depth, height, models) {
 export async function buildLod2(width, depth, height, models) {
   const dims = shape(width, depth, height);
   const K = await kit(models);
-  // One texture: the mound's rock as its average colour on the left half (a
-  // shade darker, as the whole build glows a little), fire on the right.
+  // One 256 px texture, glowing where it is bright (the city's halo takes the
+  // glow): a strip of plain dark rock for the pieces and the opening's
+  // depths; a map of the mound seen from above, dark rock split by molten
+  // cracks running out from the crater as near-by; and the lake's fire,
+  // hot at the opening's lip and deep red out at its rim.
   const c = makeCanvas(256, 256);
   const g = c.getContext('2d');
   g.drawImage(rockTextures(265, [58, 46, 44]).map.image, 0, 0, 128, 256);
@@ -752,29 +755,84 @@ export async function buildLod2(width, depth, height, models) {
   const avg = [0, 0, 0];
   for (let i = 0; i < px.length; i += 4) for (let k = 0; k < 3; k++) avg[k] += px[i + k];
   const n = px.length / 4;
-  g.fillStyle = `rgb(${avg.map((v) => Math.round((v / n) * 0.8)).join(',')})`;
+  const rock = `rgb(${avg.map((v) => Math.round((v / n) * 0.7)).join(',')})`;
+  g.fillStyle = rock;
   g.fillRect(0, 0, 128, 256);
-  const grad = g.createLinearGradient(128, 0, 256, 0);
-  grad.addColorStop(0, '#ff8a2a');
-  grad.addColorStop(1, '#c41a06');
+  g.fillStyle = '#050202';
+  g.fillRect(0, 0, 12, 256);
+  // The mound from above: lot x across [16, 128), z down the height.
+  const W = width;
+  const D = depth;
+  const mx = (x) => 16 + (x / W + 0.5) * 112;
+  const mz = (z) => (z / D + 0.5) * 256;
+  const r = mulberry32(271);
+  g.lineCap = 'round';
+  for (let k = 0; k < 46; k++) {
+    // A crack from the crater's lip out down the slope, wandering, forking.
+    let a = r() * TAU;
+    let rad = dims.rc * (0.9 + r() * 0.25);
+    const pts = [[Math.cos(a) * rad, Math.sin(a) * rad]];
+    const len = dims.rc * (0.5 + r() * 1.1);
+    for (let d = 0; d < len; d += 0.7) {
+      a += (r() - 0.5) * 0.35;
+      rad += 0.7;
+      pts.push([Math.cos(a) * rad, Math.sin(a) * rad]);
+    }
+    for (const [w, col] of [[3.2, 'rgba(150,20,4,0.55)'], [1.4, 'rgba(255,110,24,0.95)']]) {
+      g.strokeStyle = col;
+      g.lineWidth = w;
+      g.beginPath();
+      pts.forEach(([x, z], i) => (i ? g.lineTo(mx(x), mz(z)) : g.moveTo(mx(x), mz(z))));
+      g.stroke();
+    }
+  }
+  // The fire, inner (u = 0.52) to outer (u = 0.98).
+  const grad = g.createLinearGradient(132, 0, 252, 0);
+  grad.addColorStop(0, '#ff7418');
+  grad.addColorStop(0.35, '#e0400a');
+  grad.addColorStop(1, '#7a1004');
   g.fillStyle = grad;
   g.fillRect(128, 0, 128, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshStandardMaterial({ name: 'Rock', map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1, roughness: 0.95 });
-  const toHalf = (geo, right) => {
+  // UVs: the mound from above; the pieces and the opening plain dark; the
+  // lake by how far out from the opening.
+  const above = (geo) => {
+    const p = prep(geo);
+    const pos = p.attributes.position;
+    const uv = p.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (16 + (pos.getX(i) / W + 0.5) * 112) / 256, 1 - pos.getZ(i) / D - 0.5);
+    return p;
+  };
+  const plain = (geo) => {
     const p = prep(geo);
     const uv = p.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, (right ? 0.52 : 0.02) + 0.46 * (((uv.getX(i) % 1) + 1) % 1), 0.5);
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.02, 0.5);
+    return p;
+  };
+  const fire = (geo) => {
+    const p = prep(geo);
+    const pos = p.attributes.position;
+    const uv = p.attributes.uv;
+    const pool = lavaRadius(dims);
+    for (let i = 0; i < uv.count; i++) {
+      const k = Math.min(1, Math.max(0, (Math.hypot(pos.getX(i), pos.getZ(i)) - dims.hole) / (pool - dims.hole)));
+      uv.setXY(i, 0.52 + 0.46 * k, 0.5);
+    }
     return p;
   };
   const list = placements(dims, height, groundSampler(mound(dims, { segs: 160, rings: 18, lift: 0.1 })), mulberry32(266));
-  const rockGeo = toHalf(mound(dims, { segs: 24, rings: 3, lift: 1.0 }), false);
-  const fire = toHalf(pitFloor(dims, 10), true);
+  const ground = above(mound(dims, { segs: 24, rings: 3, lift: 1.0 }));
+  const lake = fire(lakeRing(dims, 16));
+  // The opening's depths, a dark floor under the lake.
+  const depths = new THREE.CircleGeometry(dims.rb, 12);
+  depths.rotateX(-Math.PI / 2);
+  depths.translate(0, 0.25, 0);
   // The horns, towers and pillars as a few dozen triangles each (no crags).
   const pieces = piecesGeometry(list, K.pieces, 'far', dims);
-  const parts = [rockGeo, fire];
-  if (pieces) parts.push(toHalf(pieces, false));
+  const parts = [ground, lake, plain(depths)];
+  if (pieces) parts.push(plain(pieces));
   const root = new THREE.Group();
   root.name = 'HellMouth';
   root.add(mesh('HellMouth', mergeGeometries(parts), mat));
