@@ -1008,6 +1008,12 @@ export class Hud {
       let cd = 0;
       let cast = 0;
       const lvl = r.spells[slot.id];
+      // A spell just learned (or raised a level): its slot flashes a while.
+      if (f.run === r && lvl > f.level) f.learned = 3.2;
+      f.run = r;
+      f.level = lvl;
+      f.learned = Math.max(0, (f.learned || 0) - dt);
+      const learn = f.learned > 0 ? Math.min(1, f.learned) * (0.45 + 0.55 * Math.abs(Math.sin(this.time * 6))) : 0;
       cd = lvl ? clamp01((p.spellCd[slot.id] || 0) / SPELLS[slot.id].levels[lvl - 1].cd) : 0;
       cast = (p.spellCast?.[slot.id] || 0) / 0.6;
       if (f.lastCd > 0 && cd === 0) f.ready = 1;
@@ -1015,12 +1021,12 @@ export class Hud {
       f.ready = Math.max(0, f.ready - dt * 2);
       f.denied = Math.max(0, f.denied - dt * 4);
       U.uCd.value = cd;
-      U.uFlash.value = clamp01(cast);
-      U.uReady.value = f.ready * (0.6 + 0.4 * Math.sin(this.time * 20));
+      U.uFlash.value = Math.max(clamp01(cast), learn * 0.7);
+      U.uReady.value = Math.max(f.ready * (0.6 + 0.4 * Math.sin(this.time * 20)), learn);
       U.uDenied.value = f.denied;
       U.uColor.value.set(slot.id === 'nova' ? '#ff7a24' : slot.id === 'step' ? '#b080ff' : slot.id === 'siphon' ? '#ff3a2a' : '#c8b8ff');
       // A cast swells the slot for a moment.
-      const bump = 1 + 0.12 * clamp01(cast);
+      const bump = 1 + 0.12 * clamp01(cast) + 0.1 * learn;
       this._place(f.mesh, rect.x + (rect.w * (1 - bump)) / 2, rect.y + (rect.h * (1 - bump)) / 2, rect.w * bump, rect.h * bump);
     }
 

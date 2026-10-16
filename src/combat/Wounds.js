@@ -16,6 +16,10 @@ const ALL = 24;
 const CHUNKS = 30;
 
 let mats = null;
+// (Exported for the warm-up, which draws each once before play.)
+export function woundMaterials() {
+  return materials();
+}
 function materials() {
   if (mats) return mats;
   const make = (paint) => {

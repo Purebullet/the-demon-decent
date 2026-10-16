@@ -203,12 +203,14 @@ export const RIGS = {
       LeftForeArm: [0.48, 0.74, 0],
       LeftHand: [0.64, 0.69, 0.02],
       LeftHandTip: [0.82, 0.65, 0.05],
+      // Knees and ankles placed by hand (and mirrored as they are): centred
+      // in their cross-section, the right ankle landed in the shin.
       LeftUpLeg: [0.14, 0.31, 0],
-      LeftLeg: [0.18, 0.16, 0.03],
-      LeftFoot: [0.22, 0.06, 0],
+      LeftLeg: [0.215, 0.168, 0.04],
+      LeftFoot: [0.225, 0.075, 0],
       LeftToe: [0.25, 0.01, 0.2],
     },
-    snap: { LeftArm: 0.12, LeftForeArm: 0.1, LeftHand: 0.08, LeftLeg: 0.12, LeftFoot: 0.09 },
+    snap: { LeftArm: 0.12, LeftForeArm: 0.1, LeftHand: 0.08 },
     r: { Hips: 0.22, Waist: 0.3, Chest: 0.27, Neck: 0.12, Head: 0.4, LeftShoulder: 0.12, LeftArm: 0.08, LeftForeArm: 0.065, LeftHand: 0.055, LeftUpLeg: 0.11, LeftLeg: 0.09, LeftFoot: 0.07 },
     limit: {
       // Only the skull above the mouth: the jaw stays with the chest.
@@ -227,8 +229,8 @@ export const RIGS = {
     idle: { breath: 0.06, look: 0.12 },
     death: 'forward',
     deathMotion: 'kneelDeath',
-    clips: ['sleep', 'rise'],
-    attacks: { sweep: 'axeSweep', chop: 'axeChop', turn: 'axeSweep', stomp: 'stomp' },
+    clips: ['sleep', 'rise', 'toss'],
+    attacks: { sweep: 'axeSweep', chop: 'axeChop', spin: 'axeSpin', grab: 'grab', swat: 'axeSweep', stomp: 'stomp' },
   },
 
   // Zoodle #206 "Demon Witch": the Pyre Witch, staff in her right hand.

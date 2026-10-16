@@ -141,6 +141,10 @@ export class Player {
     this.pitch = 0;
     this.vel = new THREE.Vector3();
     this.knock = new THREE.Vector3();
+    // Held fast in a giant's fist ({ by, at }), or flung through the air
+    // ({ vx, vy, vz }): see seize/toss.
+    this.held = null;
+    this.air = null;
     this.run = null;
     this.blade = new OBB();
     this.bladeSeg = { a: new THREE.Vector3(), b: new THREE.Vector3() };
@@ -316,6 +320,8 @@ export class Player {
   }
 
   spawnAt(x, z, yaw) {
+    this.held = null;
+    this.air = null;
     this.position.set(x, 0, z);
     this.yaw = yaw;
     this.pitch = 0;
@@ -378,7 +384,21 @@ export class Player {
 
     if (this.dead) {
       this.deathT += dt;
+      // Killed in the air: down to the floor.
+      this.held = null;
+      if (this.air || this.position.y > 0) this._updateAir(dt, ctx);
       this._updateCamera(real);
+      return;
+    }
+
+    // In a giant's fist: no moving, no striking; you can still look round.
+    // Flung: you fly until you land.
+    if (this.held || this.air) {
+      if (this.held) this.position.copy(this.held.at);
+      else this._updateAir(dt, ctx);
+      this.vel.set(0, 0, 0);
+      this._updateCamera(real);
+      this._updateWeapon(dt, ctx);
       return;
     }
 
@@ -410,6 +430,45 @@ export class Player {
     this.trail.update(dt);
     this.prevCamQ.copy(this.camera.quaternion);
     this.prevCamP.copy(this.camera.position);
+  }
+
+  // Caught (by a boss's grab): whatever you were doing is cut short.
+  seize(by) {
+    this.held = { by, at: this.position.clone() };
+    this.air = null;
+    if (this.swing) this._endSwing(true);
+    this.charge = null;
+    this.press = null;
+    this.blocking = false;
+    this.dash = null;
+  }
+
+  release() {
+    this.held = null;
+    if (this.position.y > 0) this.air = { vx: 0, vy: 0, vz: 0 };
+  }
+
+  // Thrown: up and away; you come down where you come down.
+  toss(vx, vy, vz) {
+    this.held = null;
+    this.air = { vx, vy, vz };
+  }
+
+  _updateAir(dt, ctx) {
+    const a = this.air || (this.air = { vx: 0, vy: 0, vz: 0 });
+    ctx.world.move(this.position, RADIUS, a.vx * dt, a.vz * dt);
+    this.position.y += a.vy * dt;
+    a.vy -= 22 * dt;
+    if (this.position.y <= 0) {
+      this.position.y = 0;
+      this.air = null;
+      if (!this.dead) {
+        this.shake(0.45);
+        this.jolt = Math.min(1, this.jolt + 0.6);
+        this.staggerT = this.staggerMax = 0.7;
+        ctx.audio?.slam?.(this.position);
+      }
+    }
   }
 
   _move(dt, ctx) {

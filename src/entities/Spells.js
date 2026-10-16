@@ -26,9 +26,9 @@ export const SPELLS = {
     key: 'Space',
     label: 'SPACE',
     levels: [
-      { cd: 1.4, dist: 4.5, invuln: 0.4 },
-      { cd: 1.15, dist: 5.5, invuln: 0.5 },
-      { cd: 0.9, dist: 6.5, invuln: 0.6, dmg: 35 },
+      { cd: 3.4, dist: 4.5, invuln: 0.4 },
+      { cd: 3.15, dist: 5.5, invuln: 0.5 },
+      { cd: 2.9, dist: 6.5, invuln: 0.6, dmg: 35 },
     ],
     describe: (l) => `Space: become shadow and dash ${l.dist} m the way you are moving (back if you stand still), through enemies, untouchable for ${l.invuln}s${l.dmg ? `, cutting all you pass for ${l.dmg}` : ''}. ${l.cd}s cooldown.`,
   },

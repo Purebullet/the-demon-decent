@@ -171,9 +171,10 @@ export const LOOKS = {
     hemi: 0.55,
     glow: 0xffb050,
     flame: 0xffa040,
-    ceiling: 9,
+    // The walls' height: a vault and a dome rise above them (Hall.js).
+    ceiling: 6,
     walls: { slab: 3, rock: 1 },
-    hang: 0.1,
+    hang: 0,
     rubble: 0.15,
     density: 0,
     decor: [],

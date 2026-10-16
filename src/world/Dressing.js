@@ -238,6 +238,7 @@ export class Dressing {
     ceil.rotation.x = Math.PI / 2;
     ceil.position.set(W / 2, this.ceiling, H / 2);
     this.group.add(floor, ceil);
+    this.ceilMesh = ceil;
 
     // Walls: generated boulders and slabs stacked up to the ceiling along
     // every wall tile that faces open ground.
@@ -362,7 +363,8 @@ export class Dressing {
   // and draw the far ones' walls coarse.
   cull(x, z, range) {
     const r2 = (range + CHUNK * 0.75) ** 2;
-    const near2 = (LOD_NEAR + CHUNK * 0.7) ** 2;
+    // (`lodNear`: a floor can see further in full detail, the lit arena.)
+    const near2 = ((this.lodNear ?? LOD_NEAR) + CHUNK * 0.7) ** 2;
     for (const c of this.chunks.values()) {
       const d2 = (c.x - x) ** 2 + (c.z - z) ** 2;
       c.group.visible = d2 < r2;

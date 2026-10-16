@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TILE } from './LevelData.js';
+import { rockTextures } from './Textures.js';
 import { Assets } from '../assets/AssetLibrary.js';
 import { C, burst } from './Particles.js';
 import { angleDelta } from '../core/rng.js';
@@ -8,17 +10,21 @@ import { angleDelta } from '../core/rng.js';
 // candle pedestals down both sides that light as you come up to them, stone
 // columns and banners along the walls; then a round arena ringed with
 // candelabra and columns, Vorgrath asleep on a nest of bones in the middle.
-// Step into the arena and its candles light one after another from either
-// side of the way in round to the far side; once the last is lit the whole
-// arena brightens (`litK`) and `phase` becomes 'lit' (Game wakes him).
+// Come up to the arena and its candles light one after another from either
+// side of the way in round to the far side, the great ring of candles hung
+// under the dome last; then the whole arena brightens (`litK`), seen in
+// full detail, and `phase` becomes 'lit' (Game wakes him). Overhead: a
+// ribbed barrel vault down the corridor, a ribbed dome over the arena.
 //
 // Every candle flame is one instance of two instanced quads (the flame and
 // its halo): two draws for the lot, however many burn.
 
 // The corridor's candles light this far ahead of you.
 const AHEAD = 10;
-// The arena's candles: the last one lights this long after the first.
-const DOMINO = 3;
+// The arena's candles start to light this far (m) before you reach its
+// edge; the last one lights this long after the first.
+const EARLY = 7;
+const DOMINO = 2.2;
 const PEDESTAL_STEP = 3;
 const COLUMN_STEP = 6;
 
@@ -112,8 +118,11 @@ export class Hall {
     const solid = (c, r) => !level.data.nav.isWalkable(c, r);
     this.solid = solid;
 
+    // No flat roof here: the vault and the dome.
+    if (this.dressing.ceilMesh) this.dressing.ceilMesh.visible = false;
     this._corridor();
     this._arena();
+    this._roof();
     this._buildFlames();
   }
 
@@ -151,11 +160,18 @@ export class Hall {
     const open = (x, z) => !this.solid(Math.floor(x / TILE), Math.floor(z / TILE));
     const P = Assets.props.get('candlePedestal')?.entry.size ?? 1.35;
     // The pedestal's candles: a tall one in the middle, two shorter beside it.
+    // Measured off the model (its wick tops, at its 1.35 m): one tall
+    // candle in the middle, six short ones round it.
+    const k = P / 1.35;
     const tips = [
-      [0, P * 1.0, 0, 0.3],
-      [0.15, P * 0.84, 0.04, 0.2],
-      [-0.15, P * 0.84, -0.04, 0.2],
-    ];
+      [0.002, 1.35, 0.003, 0.3],
+      [-0.053, 1.056, -0.2, 0.17],
+      [-0.117, 1.035, 0.144, 0.17],
+      [0.114, 1.026, -0.185, 0.17],
+      [0.115, 1.023, 0.124, 0.17],
+      [-0.051, 1.013, 0.173, 0.17],
+      [-0.207, 1.008, 0.046, 0.17],
+    ].map(([x, y, z, s]) => [x * k, y * k - 0.025, z * k, s]);
     for (let x = this.x0 + 1.5 * TILE; x < this.x1 - TILE; x += PEDESTAL_STEP * TILE) {
       for (const [z, wall] of [
         [this.north + 0.85, this.north - 0.5],
@@ -200,11 +216,16 @@ export class Hall {
     this.entry = Math.atan2(this.x1 - 4 - c.x, (this.north + this.south) / 2 - c.z);
     const gapIn = Math.asin(Math.min(1, ((this.south - this.north) / 2 + 2) / (this.radius - 2)));
     const A = Assets.props.get('candelabra')?.entry.size ?? 2.4;
+    // Measured off the model (at its 2.4 m): the tall middle candle and
+    // the four on its arms.
+    const ka = A / 2.4;
     const tips = [
-      [0, A * 1.0, 0, 0.32],
-      [0.29, A * 0.86, 0, 0.26],
-      [-0.29, A * 0.86, 0, 0.26],
-    ];
+      [-0.038, 2.4, -0.003, 0.32],
+      [0.273, 2.095, -0.295, 0.25],
+      [-0.258, 2.087, -0.287, 0.25],
+      [-0.267, 2.086, 0.3, 0.25],
+      [0.262, 2.02, 0.267, 0.25],
+    ].map(([x, y, z, s]) => [x * ka, y * ka - 0.03, z * ka, s]);
     const ring = this.radius - 2.2;
     const n = Math.round((Math.PI * 2 * ring) / 4.3);
     const stands = [];
@@ -244,8 +265,78 @@ export class Hall {
     this._put('hallColumn', columns);
     this._put('banner', banners);
     // His bed: a nest of bones in the middle.
-    d._place('boneNest', c.x, c.z, { scale: 0.85, yaw: this.entry });
+    d._place('boneNest', c.x, c.z, { scale: 0.85, yaw: this.entry, stretchY: 0.45 });
     d.claim(c.x, c.z, 3);
+  }
+
+  // Overhead: a barrel vault down the corridor with an arch over each pair
+  // of columns and a ridge along its crown; over the arena a dome with ribs
+  // meeting at its crown, and a great iron ring of candles hung under it on
+  // chains (the last of the arena's candles to light).
+  _roof() {
+    const top = this.ceiling;
+    const c = this.centre;
+    const tex = rockTextures(5, this.level.look.ground.map((v) => Math.round(v * 0.6)));
+    const shell = (rx, ry) => {
+      const m = new THREE.MeshLambertMaterial({ map: tex.map.clone(), bumpMap: tex.bump.clone(), bumpScale: 3, side: THREE.BackSide });
+      for (const t of [m.map, m.bumpMap]) {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(rx, ry);
+        t.needsUpdate = true;
+      }
+      return m;
+    };
+    const ribs = [];
+    // The corridor's vault, wall to wall, as far as the arena's edge.
+    const half = (this.south - this.north) / 2 + 0.6;
+    const zc = (this.north + this.south) / 2;
+    const xEnd = c.x - Math.sqrt(Math.max(0, this.radius ** 2 - half ** 2));
+    const len = xEnd - this.x0;
+    const vault = new THREE.CylinderGeometry(half, half, len, 28, 1, true, Math.PI, Math.PI).rotateZ(-Math.PI / 2).translate(this.x0 + len / 2, top, zc);
+    this.level.group.add(new THREE.Mesh(vault, shell(len / 9, 2)));
+    for (let x = this.x0 + 3 * TILE; x < xEnd - 1; x += COLUMN_STEP * TILE) {
+      ribs.push(new THREE.TorusGeometry(half - 0.2, 0.32, 8, 28, Math.PI).rotateY(Math.PI / 2).translate(x, top, zc));
+    }
+    ribs.push(new THREE.BoxGeometry(len, 0.35, 0.55).translate(this.x0 + len / 2, top + half - 0.15, zc));
+    // The arena's dome.
+    const R = this.radius + 0.8;
+    const H = 0.55;
+    const dome = new THREE.SphereGeometry(R, 56, 20, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, H, 1).translate(c.x, top, c.z);
+    this.level.group.add(new THREE.Mesh(dome, shell(10, 3)));
+    for (let k = 0; k < 6; k++) ribs.push(new THREE.TorusGeometry(R - 0.25, 0.42, 8, 48, Math.PI).scale(1, H, 1).rotateY((k * Math.PI) / 6).translate(c.x, top, c.z));
+    ribs.push(new THREE.TorusGeometry(R - 0.15, 0.5, 8, 72).rotateX(Math.PI / 2).translate(c.x, top, c.z));
+    const ribMat = new THREE.MeshLambertMaterial({ map: tex.map, color: 0x9a8a90 });
+    this.level.group.add(new THREE.Mesh(mergeGeometries(ribs.map((g) => g.toNonIndexed())), ribMat));
+    for (const g of ribs) g.dispose();
+
+    // The ring of candles hung from the crown.
+    const ringY = top + 4;
+    const ringR = 3.2;
+    const crown = top + R * H - 0.3;
+    const iron = new THREE.MeshLambertMaterial({ color: 0x2a2224 });
+    const parts = [new THREE.TorusGeometry(ringR, 0.14, 8, 48).rotateX(Math.PI / 2).translate(c.x, ringY, c.z)];
+    const n = 12;
+    const tips = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const x = Math.sin(a) * ringR;
+      const z = Math.cos(a) * ringR;
+      parts.push(new THREE.CylinderGeometry(0.07, 0.08, 0.36, 8).translate(c.x + x, ringY + 0.25, c.z + z));
+      tips.push([x, ringY + 0.42, z, 0.24]);
+    }
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+      const from = new THREE.Vector3(c.x + Math.sin(a) * ringR, ringY, c.z + Math.cos(a) * ringR);
+      const to = new THREE.Vector3(c.x, crown, c.z);
+      const chain = new THREE.CylinderGeometry(0.05, 0.05, from.distanceTo(to), 6).translate(0, from.distanceTo(to) / 2, 0);
+      chain.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(THREE.Object3D.DEFAULT_UP, to.clone().sub(from).normalize()));
+      parts.push(chain.translate(from.x, from.y, from.z));
+    }
+    this.level.group.add(new THREE.Mesh(mergeGeometries(parts.map((g) => g.toNonIndexed())), iron));
+    for (const g of parts) g.dispose();
+    const ring = this._candles(c.x, c.z, 0, tips);
+    ring.delay = DOMINO;
+    this.candelabra.push(ring);
   }
 
   _buildFlames() {
@@ -302,8 +393,8 @@ export class Hall {
     // Down the corridor: the candles ahead light as you come.
     for (const g of this.pedestals) if (!g.lit && p.x > g.x - AHEAD) this._light(g, ctx);
     // Into the arena: the ring lights from the way in round to the far side.
-    const inArena = Math.hypot(p.x - this.centre.x, p.z - this.centre.z) < this.radius - 2.5;
-    if (this.domino < 0 && inArena) {
+    const near = Math.hypot(p.x - this.centre.x, p.z - this.centre.z) < this.radius + EARLY;
+    if (this.domino < 0 && near) {
       this.domino = 0;
       this.phase = 'arena';
     }
@@ -315,13 +406,15 @@ export class Hall {
         if (this.domino >= g.delay) this._light(g, ctx, { base: 10, distance: 12 });
         else all = false;
       }
-      if (all && this.domino > DOMINO + 0.6) {
+      if (all && this.domino > DOMINO + 0.3) {
         this.phase = 'lit';
+        // Everything in the arena in full detail from now on.
+        this.dressing.lodNear = 90;
         // A great light over the whole arena, always given a real light.
-        this.level._spot({ color: 0xffb27a, base: 150, distance: 70, decay: 1, x: this.centre.x, y: this.ceiling * 0.6, z: this.centre.z, seed: 0, slow: true, prio: 1e6 });
+        this.level._spot({ color: 0xffb27a, base: 150, distance: 70, decay: 1, x: this.centre.x, y: this.ceiling + 2, z: this.centre.z, seed: 0, slow: true, prio: 1e6 });
       }
     }
-    if (this.phase === 'lit') this.litK = Math.min(1, this.litK + dt / 2.5);
+    if (this.phase === 'lit') this.litK = Math.min(1, this.litK + dt / 1.6);
     // Flames flare up as they catch, then settle.
     let changed = false;
     this.flames.forEach((f, i) => {

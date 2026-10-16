@@ -17,9 +17,11 @@ import { VOICE_LINES, VOICE_FPS } from './voiceLines.js';
 
 export const BOSS_TYPES = {
   // Huge, slow and patient: wide, slow arcs of a great axe, an overhead chop
-  // that cracks the floor, a stamp when you crowd him. Nothing staggers him
-  // (every blow is armoured: dodge it, block it, or be elsewhere). About two
-  // to three minutes of fighting.
+  // that cracks the floor, a stamp when you crowd him, and a quicker grab:
+  // caught, you are held up before his face, flung into the air and swatted
+  // with the axe. Get behind him and he spins right round with the axe held
+  // out. Nothing staggers him (every blow is armoured: dodge it, block it,
+  // or be elsewhere). About two to three minutes of fighting.
   sleeper: {
     name: 'Vorgrath, the Sleeper',
     asset: 'sleeper',
@@ -43,8 +45,13 @@ export const BOSS_TYPES = {
       { name: 'sweep', windup: 1.05, strike: 0.6, recover: 1.15, dmg: 1, minRange: 0, maxRange: 5.8, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 3, armor: true },
       { name: 'chop', windup: 1.15, strike: 0.32, recover: 1.35, dmg: 1.35, minRange: 2, maxRange: 6.5, volume: { c: [-0.6, 1.4, 3.4], h: [1.1, 1.6, 2.0] }, lunge: 1.2, knockback: 10, aoe: { at: [-0.6, 3.9], radius: 3.0, dmg: 0.55 }, weight: 2, armor: true },
       { name: 'stomp', windup: 0.85, strike: 0.25, recover: 1.0, dmg: 0.6, minRange: 0, maxRange: 3.4, volume: null, aoe: { at: [0, 0], radius: 4.2, dmg: 0.6 }, weight: 1, armor: true },
-      // Behind him: he wheels round and sweeps (Sleeper._considerAttack).
-      { name: 'turn', windup: 0.6, strike: 0.6, recover: 1.0, dmg: 1, minRange: 0, maxRange: 9, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 0, armor: true, behind: true },
+      // Quicker than his axe: the left hand lunges (see Sleeper: held, tossed,
+      // swatted).
+      { name: 'grab', windup: 0.42, strike: 0.38, recover: 1.0, dmg: 0.25, minRange: 0, maxRange: 4.6, volume: null, lunge: 3.2, grab: true, weight: 2, armor: true },
+      // Only after a grab: the axe across whatever he threw up.
+      { name: 'swat', windup: 0.28, strike: 0.4, recover: 1.1, dmg: 1.1, minRange: 0, maxRange: 99, volume: null, arc: [-1.95, 1.95], swat: true, knockback: 18, weight: 0, armor: true, behind: true },
+      // Behind him: one full turn with the axe held out (Sleeper._considerAttack).
+      { name: 'spin', windup: 0.32, strike: 0.75, recover: 1.0, dmg: 0.9, minRange: 0, maxRange: 9, volume: null, spin: true, knockback: 14, weight: 0, armor: true, behind: true },
     ],
   },
   gorvath: {
@@ -293,7 +300,10 @@ export class Boss extends Enemy {
 
   die(ctx) {
     super.die(ctx);
-    ring(ctx.fx.add, tmp.set(this.position.x, 0.5, this.position.z), 8, { count: 120, speed: 14, size: 0.9, life: 1.2 });
+    // A shockwave along the floor (kept low and thin: a ring of big glowing
+    // sprites sweeping through the view would cover the screen many times
+    // over for a second).
+    ring(ctx.fx.add, tmp.set(this.position.x, 0.25, this.position.z), 8, { count: 60, speed: 12, size: 0.45, life: 1.1 });
     ctx.shake?.(1);
   }
 
@@ -314,6 +324,9 @@ const SETTLE = 1.3;
 const KNEEL = 1.6;
 const FALL = 1.8;
 const LIE = 7;
+// Caught: held this long, then flung.
+const HOLD = 1.1;
+const FLING = 0.32;
 
 const _v = new THREE.Vector3();
 
@@ -339,10 +352,13 @@ export class Sleeper extends Boss {
     this.behindT = 0;
     this.fightT = 0;
     this.light.intensity = 0;
-    // The axe's path: a box swung round him on a pivot.
+    // The axe's path: a box swung round him on a pivot. His grab: a box
+    // before his left hand.
     this.arcPivot = new THREE.Object3D();
     this.root.add(this.arcPivot);
     this.arc = new StrikeVolume(this.arcPivot, new THREE.Vector3(0, 1.5, 3.3), new THREE.Vector3(1.4, 1.7, 2.3));
+    this.grabVol = new StrikeVolume(this.root, new THREE.Vector3(0.9, 1.4, 2.6), new THREE.Vector3(1.3, 1.5, 1.6));
+    this.leftHand = this.model.bones.find((b) => b.name === 'LeftHand') || this.root;
     this._holdAxe();
   }
 
@@ -352,13 +368,18 @@ export class Sleeper extends Boss {
     const hand = this.model.bones.find((b) => b.name === 'RightHand');
     const axe = Assets.instanceProp('sleeperAxe');
     if (!hand || !axe) return;
+    // Its runes glow once he is up (asleep in the dark it shows nothing).
+    this.axeMats = [];
     axe.traverse((o) => {
-      if (o.isMesh) o.material = sceneryMaterial(o.material, { tint: [1.1, 1.05, 1.05], glow: 0xff7a3a, strength: 0.55 });
+      if (!o.isMesh) return;
+      o.material = sceneryMaterial(o.material, { tint: [1.1, 1.05, 1.05], glow: 0xff7a3a, strength: 0 });
+      this.axeMats.push(o.material);
     });
     this.root.updateMatrixWorld(true);
     const holder = new THREE.Group();
     holder.scale.setScalar(1 / hand.getWorldScale(_v).x);
-    holder.position.set(-0.075, -0.012, 0.02);
+    // (Down into the curl of the fingers, below the wrist's line.)
+    holder.position.set(-0.08, -0.045, 0.02);
     axe.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)));
     holder.add(axe);
     hand.add(holder);
@@ -402,8 +423,11 @@ export class Sleeper extends Boss {
       this.light.intensity = Math.min(6, this.stateT * 2);
       return;
     }
-    // Wheeling round on you: far quicker than he ever turns otherwise.
-    if (this.state === 'windup' && this.attack?.name === 'turn') this._turnToward(toPlayer, dt, 5.5);
+    if (this.state === 'holding' || this.state === 'flinging') {
+      this._updateHold(dt, ctx, toPlayer);
+      this.root.rotation.y = this.yaw;
+      return;
+    }
     super.update(dt, ctx);
     if (this.alive) {
       this.light.intensity = 6 + Math.sin(ctx.time * 2.3) * 1.2 + (this.phase - 1) * 2;
@@ -429,6 +453,7 @@ export class Sleeper extends Boss {
       ctx.shake?.(0.3);
       burst(ctx.fx.alpha, _v.set(this.position.x, 0.4, this.position.z), { count: 40, speed: 3, color: C.smoke, colorEnd: C.smoke, size: 0.8, life: 1.4, gravity: -1 });
     }
+    for (const m of this.axeMats || []) m.emissiveIntensity = Math.min(0.55, Math.max(0, (t - RISE) / speak) * 0.55);
     if (t >= RISE + speak + SETTLE) {
       this.pose = null;
       this.setState('chase');
@@ -485,15 +510,15 @@ export class Sleeper extends Boss {
     const player = ctx.player;
     if (player.dead) return;
     const off = Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z)));
-    // Behind him: "Clever...", and he wheels round with the axe (whether
-    // or not he has got his breath back from his last blow).
+    // Behind him: "Clever...", and he spins right round with the axe held
+    // out (whether or not he has got his breath back from his last blow).
     if (off > 1.75 && dist < 8.5) {
       this.behindT += dt;
-      if (this.behindT > 0.35) {
+      if (this.behindT > 0.3) {
         this.behindT = 0;
         this._say('clever');
-        this._startAttack(this.type.attacks.find((a) => a.name === 'turn'), ctx, this.phase === 1 ? 1 : 0.85);
-        this.lastMoves.push('turn');
+        this._startAttack(this.type.attacks.find((a) => a.name === 'spin'), ctx, this.phase === 1 ? 1 : 0.85);
+        this.lastMoves.push('spin');
         if (this.lastMoves.length > 2) this.lastMoves.shift();
         return;
       }
@@ -518,19 +543,45 @@ export class Sleeper extends Boss {
   _startAttack(a, ctx, windupScale = 1, chained = false) {
     super._startAttack(a, ctx, windupScale, chained);
     // The reach of the sweep marked on the floor round him as it winds up.
-    if (a.arc) ctx.effects?.telegraph(this.position.x, this.position.z, 5.6, this.stateDur, null, 0xff6a20);
+    if ((a.arc && !a.swat) || a.spin) ctx.effects?.telegraph(this.position.x, this.position.z, 5.6, this.stateDur, null, 0xff6a20);
     else if (a.name === 'stomp') ctx.effects?.telegraph(this.position.x, this.position.z, a.aoe.radius, this.stateDur, null, 0xff6a20);
   }
 
   _updateStrike(dt, ctx) {
     const a = this.attack;
-    if (a?.arc) {
-      const k = Math.min(1, this.stateT / Math.max(1e-3, this.stateDur));
-      this.arcPivot.rotation.y = a.arc[0] + (a.arc[1] - a.arc[0]) * k;
+    const player = ctx.player;
+    if (a?.grab) {
+      // The hand closes on whoever is in it (a Shade Step slips it).
       this.root.updateMatrixWorld(true);
-      if (!this.hitPlayer && ctx.player.overlapsOBB(this.arc.update())) {
+      if (!player.dead && !player.held && player.invuln <= 0 && player.overlapsOBB(this.grabVol.update())) {
+        this._seize(ctx);
+        return;
+      }
+    }
+    if (a?.spin) {
+      // One full turn through the strike, the axe out to his right.
+      this.yaw += ((Math.PI * 2) / Math.max(0.1, this.stateDur)) * dt;
+      this.root.rotation.y = this.yaw;
+    }
+    if (a?.swat && !this.hitPlayer && player.air && !player.dead && this.distToPlayer < 9) {
+      // Whatever he threw up is still in the air: it is swatted.
+      this.hitPlayer = true;
+      _v.set(player.position.x - this.position.x, 0, player.position.z - this.position.z).normalize();
+      player.takeDamage(this.damage * a.dmg, this.position, 0, ctx, null);
+      player.air.vx += _v.x * 9;
+      player.air.vz += _v.z * 9;
+      player.air.vy = Math.max(player.air.vy, 3);
+      ctx.shake?.(0.6);
+      ctx.audio?.slam(this.position);
+      burst(ctx.fx.alpha, _v.set(player.position.x, player.position.y + 1.2, player.position.z), { count: 40, speed: 5, color: C.blood, colorEnd: C.bloodDark, size: 0.2, life: 1 });
+    }
+    if (a?.arc || a?.spin) {
+      const k = Math.min(1, this.stateT / Math.max(1e-3, this.stateDur));
+      this.arcPivot.rotation.y = a.spin ? -1.25 : a.arc[0] + (a.arc[1] - a.arc[0]) * k;
+      this.root.updateMatrixWorld(true);
+      if (!this.hitPlayer && player.overlapsOBB(this.arc.update())) {
         this.hitPlayer = true;
-        ctx.player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
+        player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
         if (this.state !== 'strike') return;
       }
       // Grit thrown up where the axe skims the floor.
@@ -540,6 +591,64 @@ export class Sleeper extends Boss {
       }
     }
     super._updateStrike(dt, ctx);
+  }
+
+  // ---- His grab ----
+
+  // Caught: the player is held up in his left fist before his face.
+  _seize(ctx) {
+    const p = ctx.player;
+    p.seize(this);
+    this.setState('holding', HOLD);
+    this.pose = { name: 'toss', u: 0, rate: 10 };
+    this.squeezed = false;
+    ctx.shake?.(0.35);
+    ctx.audio?.roar(this.position);
+    ctx.onCombat?.('grabbed');
+  }
+
+  _updateHold(dt, ctx, toPlayer) {
+    const p = ctx.player;
+    const t = (this.stateT += dt);
+    this.cooldown -= dt;
+    this.leftHand.getWorldPosition(_v);
+    if (this.state === 'holding') {
+      if (p.held) {
+        // A little before his fist, at the height of it, looking at him.
+        p.held.at.set(_v.x + Math.sin(this.yaw) * 0.6, Math.max(0, _v.y - 1.45), _v.z + Math.cos(this.yaw) * 0.6);
+        const want = Math.atan2(-(this.position.x - p.position.x), -(this.position.z - p.position.z));
+        p.yaw += Math.atan2(Math.sin(want - p.yaw), Math.cos(want - p.yaw)) * Math.min(1, dt * 6);
+      }
+      // A crushing squeeze.
+      if (t > 0.5 && !this.squeezed && p.held) {
+        this.squeezed = true;
+        p.held = null;
+        p.takeDamage(this.damage * this.attack.dmg, this.position, 0, ctx, null);
+        if (!p.dead) p.seize(this);
+        burst(ctx.fx.alpha, _v.clone().setY(_v.y - 0.3), { count: 30, speed: 3, color: C.blood, colorEnd: C.bloodDark, size: 0.16, life: 0.9 });
+      }
+      if (p.dead || !p.held) {
+        p.release?.();
+        this.pose = null;
+        this.setState('recover', 1);
+        return;
+      }
+      if (t >= HOLD) {
+        // Flung up into the air in front of him...
+        p.toss(Math.sin(this.yaw) * 3.2, 9.5, Math.cos(this.yaw) * 3.2);
+        this.setState('flinging', FLING);
+        this.pose = { name: 'toss', u: 0, rate: 16 };
+        ctx.audio?.enemySwing?.('brute', this.position);
+      }
+      return;
+    }
+    // ...and, as it comes down, the axe.
+    this.pose.u = 0.25 * Math.min(1, t / FLING);
+    if (t >= FLING) {
+      this.pose = null;
+      this._startAttack(this.type.attacks.find((a) => a.name === 'swat'), ctx, 1);
+    }
+    void toPlayer;
   }
 
   // Phase two at half health: quicker to swing; nothing summoned.
@@ -570,6 +679,11 @@ export class Sleeper extends Boss {
     this.flash = 0.6;
   }
 
+  // His death is a scene: nothing else (a level gained) interrupts it.
+  dyingScene() {
+    return this.state === 'dying' && !this.landed;
+  }
+
   // His blows cannot be countered: there is no catching him in a wind-up.
   isWindingUp() {
     return false;
@@ -579,6 +693,7 @@ export class Sleeper extends Boss {
 
   die(ctx) {
     this.ctx = ctx;
+    if (ctx.player.held?.by === this) ctx.player.release();
     super.die(ctx);
     this.setState('dying', Infinity);
     this.voice.queued = 'death';

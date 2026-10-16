@@ -95,10 +95,11 @@ export class Props {
     for (const e of ends) {
       if (this.chests.length >= CHEST_MAX) break;
       if (this.chests.some((c) => Math.hypot(c.x - e.t.x, c.z - e.t.z) < 12)) continue;
-      // Pushed to the closed end, facing out along the passage.
+      // A little out from the closed end (clear of the rock that closes it),
+      // facing out along the passage.
       const [dc, dr] = e.dir;
-      const x = e.t.x - dc * 0.35;
-      const z = e.t.z - dr * 0.35;
+      const x = e.t.x + dc * 0.3;
+      const z = e.t.z + dr * 0.3;
       if (!dressing.free(x, z, 0.6)) continue;
       dressing.claim(x, z, 0.7);
       this._addChest(x, z, Math.atan2(dc, dr));
@@ -246,15 +247,15 @@ export class Props {
     if (shards) burst(ctx.fx.alpha, new THREE.Vector3(p.x, Math.min(1.2, b.height * 0.5), p.z), { count: 24, speed: 2.6, color: shards[0], colorEnd: shards[1], size: 0.14, life: 1, gravity: -7 });
     ctx.audio?.smash?.(b.id);
     ctx.shake?.(0.08);
-    // An urn holds slime: it splashes out and coats the blade that broke it.
+    // An urn holds slime (and only slime): it splashes out and coats the
+    // blade that broke it.
     if (b.id === 'urn') {
       burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.55, p.z), { count: 34, speed: 3, color: SLIME, colorEnd: SLIME_DARK, size: 0.16, life: 0.9, gravity: -9 });
       ctx.player?.coat?.(ctx);
+      return;
     }
-    // The dressing seldom hides anything; urns, barrels and crates often do.
-    const roll = Math.random() * (b.mm ? 3 : 1);
-    if (roll < 0.2) ctx.pickups?.addPotion(p.x, p.z);
-    else if (roll < 0.23) ctx.pickups?.addSpell(p.x, p.z);
+    // Now and then a potion; spells are only ever found in chests.
+    if (Math.random() < (b.mm ? 0.02 : 0.07)) ctx.pickups?.addPotion(p.x, p.z);
   }
 
   // Open: the chest jolts, light bursts out of it, and what it held spills

@@ -16,7 +16,7 @@ import { Enemy } from '../entities/Enemy.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss, Sleeper } from '../entities/Bosses.js';
 import { Pickups } from '../entities/Pickups.js';
-import { rollWeapon, makeWeapon, weaponMemory } from '../entities/Weapons.js';
+import { rollWeapon, makeWeapon, weaponMemory, WEAPON_MODELS } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
@@ -27,7 +27,7 @@ import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
 import { disposeTree } from '../core/dispose.js';
-import { Wounds } from '../combat/Wounds.js';
+import { Wounds, woundMaterials } from '../combat/Wounds.js';
 
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
@@ -331,12 +331,17 @@ export class Game {
       const before = this.pickups.items.length;
       this.pickups.addPotion(0, 0);
       this.pickups.addSpell(0, 0);
-      this.pickups.addWeapon(0, 0, rollWeapon(this.run?.floor || 1, 0));
+      // Every weapon a demon or a boss might drop (each its own textures),
+      // and a relic (its sprites), all of which a boss drops at once.
+      for (const id of Object.keys(WEAPON_MODELS)) this.pickups.addWeapon(0, 0, makeWeapon(id, 1));
+      this.pickups.addRelic(0, 0, Object.keys(RELICS)[0]);
       for (const it of this.pickups.items.splice(before)) {
         it.mesh.removeFromParent();
         far(it.mesh);
       }
     }
+    // The cuts, gashes and dents a blow leaves on a demon.
+    for (const m of Object.values(woundMaterials())) far(new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), m));
     // The weapon in hand once a rare one is taken up.
     const held = this.player.previewWeapon(makeWeapon('swordBone', 2));
     held.position.set(0, -50, 0);
@@ -755,6 +760,10 @@ export class Game {
       this.armoredT = this.time;
       this._hint('armor', ARMOR_HINT);
     } else if (kind === 'stunned') this.hud.callout('STUNNED', { color: '#ffd080', size: 1.0 });
+    else if (kind === 'grabbed') {
+      this.hud.callout('SEIZED', { color: '#ff6a4a', size: 1.0 });
+      this._hint('grab', 'His open hand is quicker than his axe: <b>Shade Step</b> out of its reach');
+    }
     else if (kind === 'enrage') this.hud.callout('ENRAGED', { color: '#ff4020', size: 1.0 });
     else if (kind === 'blocked') this._hint('parry', 'Raise your block <b>just as a blow lands</b> to parry it (fireballs too)');
     else if (kind === 'coated') {
@@ -862,8 +871,9 @@ export class Game {
     // Demons never stand inside one another.
     this._separate(level);
 
-    // Bodies push the player out (except when passing through as a shade).
-    if (!p.dash && !p.dead) {
+    // Bodies push the player out (except when passing through as a shade,
+    // or held in a giant's fist).
+    if (!p.dash && !p.dead && !p.held && !p.air) {
       for (const e of this.enemies) {
         if (!e.alive || e.state === 'burrowed' || e.root.position.y > 1) continue;
         pushOutOfCircle(p.position, p.radius, e.position.x, e.position.z, e.radius);
@@ -940,7 +950,8 @@ export class Game {
     const p = this.player;
     if (!this.levelUp) {
       this.levelUpT = Math.max(0, this.levelUpT - dt);
-      if (!run?.points || this.levelUpT > 0 || this.busy || this.intro || p.dead || this.hud.panel) return false;
+      // (Not while a boss's death plays out: it waits until he is down.)
+      if (!run?.points || this.levelUpT > 0 || this.busy || this.intro || p.dead || this.hud.panel || this.boss?.dyingScene?.()) return false;
       this.levelUp = true;
       p.swing = null;
       p.charge = null;

@@ -609,7 +609,7 @@ async function rig(id) {
   const path = join(ROOT, def.out);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, out);
-  const joints = Object.fromEntries(skel.bones.filter((b) => !b.name.startsWith('Right')).map((b) => [b.name, b.pos.toArray().map(r3)]));
+  const joints = Object.fromEntries(skel.bones.filter((b) => process.argv.includes('--all') || !b.name.startsWith('Right')).map((b) => [b.name, b.pos.toArray().map(r3)]));
   if (process.argv.includes('--joints')) console.log(JSON.stringify(joints));
   console.log(`${id}: ${def.out} (${(out.length / 1024).toFixed(0)} KB, ${skel.bones.length} bones, ${mesh.index.length / 3} tris, clips: ${clips.map((c) => c.name).join(' ')})`);
 }
