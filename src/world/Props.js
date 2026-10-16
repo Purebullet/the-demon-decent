@@ -14,8 +14,10 @@ import { mulberry32 } from '../core/rng.js';
 //   burst of light, and one thing spills out in front of it (a relic, a
 //   weapon, a potion or a demon sigil).
 //   Breakables (burial urns, rotten barrels, crates, and in the Deep upright
-//   coffins) stand in groups along the walls of the rooms. A blow smashes
-//   one into flying pieces; some hold a potion. An urn holds slime that
+//   coffins) stand in groups along the walls of the rooms, and much of the
+//   dressing by the walls breaks too (bones, skulls, stakes, eggs, fungus,
+//   crystals, pyres, statues: Dressing's FRAGILE). A blow smashes one into
+//   flying pieces; some hold a potion. An urn holds slime that
 //   coats the blade (Player.coat): block while it is coated and the blade
 //   catches fire.
 //
@@ -34,6 +36,15 @@ const DIRS = [
 
 const SLIME = new THREE.Color(0.45, 0.95, 0.2);
 const SLIME_DARK = new THREE.Color(0.1, 0.35, 0.05);
+// What else bursts out of a broken piece of dressing.
+const SHARDS = {
+  eggs: [SLIME, SLIME_DARK],
+  fungus: [new THREE.Color(0.5, 1, 0.45), new THREE.Color(0.08, 0.3, 0.1)],
+  crystal: [new THREE.Color(1, 0.4, 0.25), new THREE.Color(0.35, 0.05, 0.05)],
+  pyre: [new THREE.Color(1, 0.6, 0.2), new THREE.Color(0.3, 0.05, 0)],
+};
+const GONE = new THREE.Matrix4().makeScale(0, 0, 0);
+const PIECE = new THREE.IcosahedronGeometry(1, 0);
 
 export class Props {
   constructor(level) {
@@ -50,6 +61,7 @@ export class Props {
     this._occupied();
     if (Assets.hasProp('chest')) this._chests();
     this._breakables();
+    this._fragile();
   }
 
   // Tiles that already hold something the map placed.
@@ -126,7 +138,7 @@ export class Props {
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if ((dc || dr) && !this._solid(t.c + dc, t.r + dr)) open++;
       return open >= 5 && dressing.clear(t.x, t.z, 2 * TILE);
     });
-    const groups = Math.min(14, Math.round(slots.length * 0.11));
+    const groups = Math.min(22, Math.round(slots.length * 0.16));
     for (let g = 0; g < groups && slots.length; g++) {
       const { t, dx, dz } = slots.splice(Math.floor(r() * slots.length), 1)[0];
       const id = kinds[Math.floor(r() * kinds.length)];
@@ -177,17 +189,41 @@ export class Props {
     });
   }
 
+  // The dressing's breakable pieces: each stays in its batch until a blow
+  // takes it out.
+  _fragile() {
+    const dressing = this.level.dressing;
+    for (const f of dressing.fragile) {
+      if (!f.mm.inst) continue;
+      const root = new THREE.Object3D();
+      root.position.set(f.x, 0, f.z);
+      root.updateMatrixWorld(true);
+      const w = Math.max(0.25, f.r);
+      const hb = new Hurtbox(root, new THREE.Vector3(0, f.h / 2, 0), new THREE.Vector3(w, f.h / 2, w), { name: 'prop' });
+      hb.update();
+      const b = { isProp: true, id: f.id, root, material: dressing.mat(f.id), height: Math.min(f.h, 2.5), solid: f.solid, mm: f.mm, alive: true, position: root.position, hitRadius: w + 0.25, hurtboxes: [hb] };
+      b.smash = (ctx, dir) => this._smash(b, ctx, dir);
+      this.breakables.push(b);
+    }
+  }
+
   // Burst into pieces thrown away from the blow; sometimes a potion inside.
   _smash(b, ctx, dir) {
     if (!b || !b.alive) return;
     b.alive = false;
-    b.root.removeFromParent();
-    const w = this.level.world.circles;
-    w.splice(w.indexOf(b.circle), 1);
+    if (b.mm) {
+      // Out of its batch.
+      b.mm.inst.setMatrixAt(b.mm.index, GONE);
+      b.mm.inst.instanceMatrix.needsUpdate = true;
+      this.level.world.removeStatic(b.solid);
+    } else {
+      b.root.removeFromParent();
+      const w = this.level.world.circles;
+      w.splice(w.indexOf(b.circle), 1);
+    }
     const p = b.position;
-    const geo = new THREE.IcosahedronGeometry(1, 0);
     for (let i = 0; i < 12; i++) {
-      const piece = new THREE.Mesh(geo, b.material);
+      const piece = new THREE.Mesh(PIECE, b.material);
       const s = 0.035 + Math.random() * 0.06;
       piece.scale.set(s * (1 + Math.random()), s, s * (0.6 + Math.random()));
       piece.position.set(p.x + (Math.random() - 0.5) * 0.4, 0.2 + Math.random() * b.height * 0.8, p.z + (Math.random() - 0.5) * 0.4);
@@ -206,6 +242,8 @@ export class Props {
     }
     burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.6, p.z), { count: 26, speed: 2.2, color: C.smoke, colorEnd: C.smoke, size: 0.35, life: 0.9, gravity: 1 });
     if (b.id !== 'urn') burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.7, p.z), { count: b.id === 'coffin' ? 18 : 10, speed: 3, color: C.bone ?? C.smoke, colorEnd: C.smoke, size: 0.12, life: 0.9 });
+    const shards = SHARDS[b.id];
+    if (shards) burst(ctx.fx.alpha, new THREE.Vector3(p.x, Math.min(1.2, b.height * 0.5), p.z), { count: 24, speed: 2.6, color: shards[0], colorEnd: shards[1], size: 0.14, life: 1, gravity: -7 });
     ctx.audio?.smash?.(b.id);
     ctx.shake?.(0.08);
     // An urn holds slime: it splashes out and coats the blade that broke it.
@@ -213,7 +251,8 @@ export class Props {
       burst(ctx.fx.alpha, new THREE.Vector3(p.x, 0.55, p.z), { count: 34, speed: 3, color: SLIME, colorEnd: SLIME_DARK, size: 0.16, life: 0.9, gravity: -9 });
       ctx.player?.coat?.(ctx);
     }
-    const roll = Math.random();
+    // The dressing seldom hides anything; urns, barrels and crates often do.
+    const roll = Math.random() * (b.mm ? 3 : 1);
     if (roll < 0.2) ctx.pickups?.addPotion(p.x, p.z);
     else if (roll < 0.23) ctx.pickups?.addSpell(p.x, p.z);
   }

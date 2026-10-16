@@ -5,6 +5,11 @@
 // Looking around: mouse movement while the pointer is locked, or a drag when
 // it is not (pointer lock can be refused, and phones have none). On a touch
 // screen a short tap is a click.
+//
+// A menu over the game (a level gained, an altar's choice) keeps the pointer
+// locked: the mouse moves a cursor the game draws (`menuCursor`) instead of
+// the view, so it never has to let the mouse go and win it back, which a
+// browser may refuse, leaving the page's cursor out while you play.
 
 export class Input {
   constructor(host) {
@@ -22,6 +27,7 @@ export class Input {
     this.dragSensitivity = 0.005;
     this.onLockChange = null;
     this._down = null;
+    this.menu = null;
 
     host.on('keydown', (e) => {
       if (!e.code || e.repeat) return;
@@ -39,7 +45,8 @@ export class Input {
         this.mouseDown[b] = true;
         this.mouseClicked[b] = true;
       }
-      this.taps.push({ x: e.x, y: e.y, touch: !!e.touch });
+      const at = this.cursor;
+      this.taps.push({ x: at === this.menu ? at.x : e.x, y: at === this.menu ? at.y : e.y, touch: !!e.touch });
     });
     host.on('pointerup', (e) => {
       const b = Math.max(0, e.button ?? 0);
@@ -54,7 +61,11 @@ export class Input {
       this.pointer.y = e.y;
       const dx = e.dx || 0;
       const dy = e.dy || 0;
-      if (this.locked) {
+      if (this.locked && this.menu) {
+        const m = this.menu;
+        m.x = Math.max(0, Math.min(m.w, m.x + dx));
+        m.y = Math.max(0, Math.min(m.h, m.y + dy));
+      } else if (this.locked) {
         if (Math.abs(dx) < 300 && Math.abs(dy) < 300) {
           this.mouseDX += dx * this.sensitivity;
           this.mouseDY += dy * this.sensitivity;
@@ -76,6 +87,23 @@ export class Input {
 
   get locked() {
     return this.host.pointerLocked;
+  }
+
+  // A menu is up: the mouse moves a cursor from (x, y) over a w x h screen.
+  menuCursor(x, y, w, h) {
+    this.menu = { x, y, w, h };
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+  }
+
+  closeMenu() {
+    this.menu = null;
+  }
+
+  // Where the cursor is: the menu's while the pointer is locked, else the
+  // page's.
+  get cursor() {
+    return this.menu && this.locked ? this.menu : this.pointer;
   }
 
   requestLock() {

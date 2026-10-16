@@ -457,6 +457,245 @@ const BIPED_ATTACKS = {
     ]),
 };
 
+// The Sleeper's axe (in his right hand, its handle running out of the fist
+// the way his thumb points) and the poses only he has. His arms are
+// lowered from his model's T-pose in every clip (`armDrop`, see clipsFor).
+const AXE_ATTACKS = {
+  // A vast flat arc: the axe hauled back to the right, then swept round
+  // across the whole front of him to the left, the body turning with it.
+  axeSweep: (u) =>
+    keyed(u, [
+      [0, null],
+      [W * 0.8, (p) => {
+        C(p, 'Waist', 0.05, -0.45, 0);
+        C(p, 'Chest', -0.08, -0.55, 0);
+        C(p, 'Head', 0, 0.45, 0);
+        R(p, 'Arm', -0.15, 1.05, 1.0);
+        R(p, 'ForeArm', -0.5, 0, 0);
+        R(p, 'Hand', 0, 0, 0.3);
+        L(p, 'Arm', -0.5, -0.2, 0.5);
+        L(p, 'ForeArm', -0.6, 0, 0);
+        B(p, 'UpLeg', -0.25, 0, 0);
+        B(p, 'Leg', 0.45, 0, 0);
+        T(p, 'Hips', 0, 0, -0.03);
+      }],
+      [W, (p) => {
+        C(p, 'Waist', 0.05, -0.5, 0);
+        C(p, 'Chest', -0.1, -0.6, 0);
+        C(p, 'Head', 0, 0.5, 0);
+        R(p, 'Arm', -0.15, 1.15, 1.05);
+        R(p, 'ForeArm', -0.55, 0, 0);
+        R(p, 'Hand', 0, 0, 0.3);
+        L(p, 'Arm', -0.5, -0.2, 0.55);
+        L(p, 'ForeArm', -0.6, 0, 0);
+        B(p, 'UpLeg', -0.28, 0, 0);
+        B(p, 'Leg', 0.5, 0, 0);
+        T(p, 'Hips', 0, 0, -0.03);
+      }],
+      [(W + S) / 2, (p) => {
+        C(p, 'Waist', 0.15, 0, 0);
+        C(p, 'Chest', 0.08, 0.05, 0);
+        R(p, 'Arm', -0.3, -0.2, 1.1);
+        R(p, 'ForeArm', -0.15, 0, 0);
+        L(p, 'Arm', -0.3, 0, 0.4);
+        B(p, 'UpLeg', -0.3, 0, 0);
+        B(p, 'Leg', 0.5, 0, 0);
+        T(p, 'Hips', 0, 0, 0.03);
+      }],
+      [S, (p) => {
+        C(p, 'Waist', 0.2, 0.55, 0);
+        C(p, 'Chest', 0.12, 0.65, 0);
+        C(p, 'Head', 0, -0.4, 0);
+        R(p, 'Arm', -0.35, -1.45, 0.95);
+        R(p, 'ForeArm', -0.2, 0, 0);
+        R(p, 'Hand', 0, 0, -0.2);
+        L(p, 'Arm', 0.3, 0, 0.45);
+        B(p, 'UpLeg', -0.3, 0, 0);
+        B(p, 'Leg', 0.5, 0, 0);
+        T(p, 'Hips', 0, 0, 0.05);
+      }],
+      [0.8, (p) => {
+        C(p, 'Waist', 0.15, 0.45, 0);
+        C(p, 'Chest', 0.1, 0.5, 0);
+        R(p, 'Arm', -0.3, -1.2, 0.8);
+        R(p, 'ForeArm', -0.3, 0, 0);
+        B(p, 'UpLeg', -0.2, 0, 0);
+        B(p, 'Leg', 0.35, 0, 0);
+        T(p, 'Hips', 0, 0, 0.04);
+      }],
+      [1, null],
+    ]),
+
+  // The axe raised high over his head and brought straight down in front.
+  axeChop: (u) =>
+    keyed(u, [
+      [0, null],
+      [W, (p) => {
+        C(p, 'Waist', -0.25, 0.15, 0);
+        C(p, 'Chest', -0.25, 0.1, 0);
+        C(p, 'Neck', 0.1, 0, 0);
+        C(p, 'Head', 0.15, 0, 0);
+        R(p, 'Shoulder', 0, 0, 0.25);
+        R(p, 'Arm', -2.5, 0.3, 0.35);
+        R(p, 'ForeArm', -0.9, 0, 0);
+        R(p, 'Hand', -0.4, 0, 0);
+        L(p, 'Arm', -1.0, 0, 0.6);
+        L(p, 'ForeArm', -0.7, 0, 0);
+        B(p, 'UpLeg', -0.12, 0, 0);
+        B(p, 'Leg', 0.2, 0, 0);
+      }],
+      [S, (p) => {
+        C(p, 'Waist', 0.55, 0, 0);
+        C(p, 'Chest', 0.35, 0, 0);
+        C(p, 'Neck', -0.2, 0, 0);
+        C(p, 'Head', -0.35, 0, 0);
+        R(p, 'Arm', -0.75, 0.15, 0.2);
+        R(p, 'ForeArm', -0.1, 0, 0);
+        R(p, 'Hand', 1.1, 0, 0);
+        L(p, 'Arm', -0.3, 0, 0.5);
+        L(p, 'ForeArm', -0.4, 0, 0);
+        B(p, 'UpLeg', -0.5, 0, 0);
+        B(p, 'Leg', 0.85, 0, 0);
+        B(p, 'Foot', -0.35, 0, 0);
+        T(p, 'Hips', 0, 0, 0.05);
+      }],
+      [0.82, (p) => {
+        C(p, 'Waist', 0.45, 0, 0);
+        C(p, 'Chest', 0.3, 0, 0);
+        C(p, 'Head', -0.3, 0, 0);
+        R(p, 'Arm', -0.7, 0.1, 0.2);
+        R(p, 'ForeArm', -0.2, 0, 0);
+        R(p, 'Hand', 1.0, 0, 0);
+        B(p, 'UpLeg', -0.45, 0, 0);
+        B(p, 'Leg', 0.75, 0, 0);
+        B(p, 'Foot', -0.3, 0, 0);
+        T(p, 'Hips', 0, 0, 0.04);
+      }],
+      [1, null],
+    ]),
+};
+
+// Asleep, sat slumped on his bones: thighs out in front, forearms on his
+// knees, head sunk on his chest, breathing slow and deep.
+function sleepPose(p, breath = 0) {
+  T(p, 'Hips', 0, -0.1, -0.04);
+  B(p, 'UpLeg', -1.35, 0, 0.12);
+  B(p, 'Leg', 1.45, 0, 0);
+  B(p, 'Foot', -0.15, 0, 0);
+  C(p, 'Waist', 0.3 + breath * 0.04, 0, 0);
+  C(p, 'Chest', 0.28 + breath * 0.05, 0, 0);
+  C(p, 'Neck', 0.25, 0, 0);
+  C(p, 'Head', 0.35 - breath * 0.04, 0, 0);
+  B(p, 'Arm', -0.75, 0, -0.05);
+  B(p, 'ForeArm', -0.55, 0, 0);
+  B(p, 'Hand', 0.3, 0, 0);
+}
+
+const SLEEPER_CLIPS = {
+  sleep: { duration: 4, loop: true, ground: () => 'all', sample: (u) => make((p) => sleepPose(p, Math.sin(TAU * u))) },
+  // Waking: pushes himself up off his knees, stands, then rears back and
+  // spreads his arms as he speaks (the intro), and settles.
+  rise: {
+    duration: 1,
+    ground: (u) => (u < 0.32 ? 'all' : 'feet'),
+    sample: (u) =>
+      keyed(u, [
+        [0, (p) => sleepPose(p)],
+        [0.12, (p) => {
+          sleepPose(p);
+          C(p, 'Head', -0.3, 0, 0);
+          C(p, 'Neck', -0.15, 0, 0);
+        }],
+        [0.3, (p) => {
+          T(p, 'Hips', 0, -0.06, 0);
+          B(p, 'UpLeg', -0.95, 0, 0.1);
+          B(p, 'Leg', 1.3, 0, 0);
+          B(p, 'Foot', -0.3, 0, 0);
+          C(p, 'Waist', 0.55, 0, 0);
+          C(p, 'Chest', 0.3, 0, 0);
+          C(p, 'Head', -0.2, 0, 0);
+          B(p, 'Arm', -0.9, 0, 0);
+          B(p, 'ForeArm', -0.3, 0, 0);
+        }],
+        [0.5, (p) => {
+          B(p, 'UpLeg', -0.3, 0, 0);
+          B(p, 'Leg', 0.45, 0, 0);
+          C(p, 'Waist', 0.3, 0, 0);
+          C(p, 'Chest', 0.15, 0, 0);
+          C(p, 'Head', -0.1, 0, 0);
+          B(p, 'Arm', -0.3, 0, 0.1);
+        }],
+        [0.62, (p) => {
+          C(p, 'Waist', -0.18, 0, 0);
+          C(p, 'Chest', -0.25, 0, 0);
+          C(p, 'Neck', -0.15, 0, 0);
+          C(p, 'Head', -0.3, 0, 0);
+          B(p, 'Arm', -0.2, 0, 1.0);
+          B(p, 'ForeArm', -0.5, 0, 0);
+          B(p, 'UpLeg', -0.1, 0, 0.08);
+          B(p, 'Leg', 0.15, 0, 0);
+        }],
+        [0.85, (p) => {
+          C(p, 'Waist', -0.12, 0, 0);
+          C(p, 'Chest', -0.2, 0, 0);
+          C(p, 'Head', -0.15, 0, 0);
+          B(p, 'Arm', -0.25, 0, 0.85);
+          B(p, 'ForeArm', -0.6, 0, 0);
+          B(p, 'UpLeg', -0.1, 0, 0.08);
+          B(p, 'Leg', 0.15, 0, 0);
+        }],
+        [1, null],
+      ]),
+  },
+};
+
+// The Sleeper's death: struck to his knees, he kneels there swaying while he
+// speaks his last (the game holds the middle of the clip for as long as the
+// line runs), then pitches forward onto his face.
+function kneelDeath(u) {
+  const kneel = (p, sway = 0) => {
+    T(p, 'Hips', 0, -0.12, 0);
+    B(p, 'UpLeg', -0.25, 0, 0.1);
+    B(p, 'Leg', 1.9, 0, 0);
+    B(p, 'Foot', 0.6, 0, 0);
+    C(p, 'Waist', 0.25, 0, sway * 0.05);
+    C(p, 'Chest', 0.15, 0, sway * 0.04);
+    C(p, 'Head', -0.15, 0, 0);
+    B(p, 'Arm', 0.1, 0, -0.1);
+    B(p, 'ForeArm', -0.3, 0, 0);
+  };
+  return keyed(u, [
+    [0, null],
+    [0.08, (p) => {
+      C(p, 'Waist', -0.3, 0, 0.1);
+      C(p, 'Chest', -0.3, 0, 0);
+      C(p, 'Head', -0.45, 0.2, 0);
+      B(p, 'Arm', 0.3, 0, 0.6);
+      B(p, 'ForeArm', -0.4, 0, 0);
+    }],
+    [0.25, (p) => kneel(p, 0)],
+    [0.45, (p) => kneel(p, 1)],
+    [0.62, (p) => kneel(p, -1)],
+    [0.72, (p) => kneel(p, 0)],
+    [0.9, (p) => {
+      C(p, 'Root', 1.45, 0, 0.1);
+      B(p, 'UpLeg', -0.6, 0, 0.1);
+      B(p, 'Leg', 1.2, 0, 0);
+      C(p, 'Head', 0.25, 0.6, 0.1);
+      B(p, 'Arm', -1.1, 0, 0.9);
+      B(p, 'ForeArm', -0.2, 0, 0);
+    }],
+    [1, (p) => {
+      C(p, 'Root', 1.5, 0, 0.12);
+      B(p, 'UpLeg', -0.5, 0, 0.1);
+      B(p, 'Leg', 1.0, 0, 0);
+      C(p, 'Head', 0.2, 0.7, 0.1);
+      B(p, 'Arm', -1.15, 0, 1.0);
+      B(p, 'ForeArm', -0.2, 0, 0);
+    }],
+  ]);
+}
+
 function hatKick(p) {
   C(p, 'Hat', -0.25, 0, 0.1);
   C(p, 'HatTip', -0.3, 0, 0.35);
@@ -787,20 +1026,33 @@ function beastDeath(u) {
 export function clipsFor(def) {
   const biped = def.plan === 'biped';
   const gait = biped ? bipedGait : beastGait;
-  const attacks = biped ? BIPED_ATTACKS : BEAST_ATTACKS;
+  const attacks = biped ? { ...BIPED_ATTACKS, ...AXE_ATTACKS } : BEAST_ATTACKS;
   const feet = () => 'feet';
+  const death = def.deathMotion === 'kneelDeath' ? kneelDeath : (u) => (biped ? bipedDeath : beastDeath)(u, def);
   const clips = [
     { name: 'idle', duration: 3, loop: true, sample: (u) => (biped ? bipedIdle : beastIdle)(u, def), ground: feet },
     { name: 'walk', duration: 1, loop: true, sample: (u) => gait(u, def.walk), ground: feet },
     { name: 'run', duration: 0.7, loop: true, sample: (u) => gait(u, def.run), ground: feet },
     { name: 'hit', duration: 0.6, sample: (u) => (biped ? bipedHit : beastHit)(u), ground: feet },
-    { name: 'death', duration: 1.6, sample: (u) => (biped ? bipedDeath : beastDeath)(u, def), ground: (u) => (u < 0.5 ? 'feet' : 'all') },
+    { name: 'death', duration: 1.6, sample: death, ground: (u) => (u < (def.deathMotion ? 0.12 : 0.5) ? 'feet' : 'all') },
   ];
   for (const [attack, motion] of Object.entries(def.attacks)) {
     const fn = attacks[motion];
     if (!fn) throw new Error(`No ${def.plan} motion "${motion}" (for ${attack})`);
     const airborne = motion === 'pounce' || motion === 'leap';
     clips.push({ name: attack, duration: 1, sample: (u) => fn(u, def), ground: (u) => (airborne && u > W && u < S ? null : 'feet') });
+  }
+  for (const name of def.clips || []) clips.push({ name, ...SLEEPER_CLIPS[name] });
+  // A model rigged in a T-pose: its arms brought down to its sides in every clip.
+  if (def.armDrop) {
+    for (const c of clips) {
+      const sample = c.sample;
+      c.sample = (u) => {
+        const p = sample(u);
+        B(p, 'Arm', 0, 0, -def.armDrop);
+        return p;
+      };
+    }
   }
   return clips;
 }

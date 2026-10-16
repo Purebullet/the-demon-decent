@@ -17,7 +17,7 @@ export const LEVEL_STATS = {
 export const STAT_IDS = Object.keys(LEVEL_STATS);
 
 // Experience for each kind of demon, before its depth.
-const XP = { ghoul: 10, hound: 14, fiend: 18, witch: 20, brute: 35, gorvath: 250, azrakel: 500 };
+const XP = { ghoul: 10, hound: 14, fiend: 18, witch: 20, brute: 35, sleeper: 180, gorvath: 250, azrakel: 500 };
 
 export function newLevels() {
   return { level: 0, xp: 0, points: 0, stats: { attack: 0, defence: 0, agility: 0 } };

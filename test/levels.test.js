@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { FLOORS, BOSS_FLOORS } from '../src/world/LevelData.js';
 import { parseLevel, validateLevel } from '../src/world/levelParser.js';
 
-test('there are 20 floors with bosses on 10 and 20', () => {
+test('there are 20 floors with bosses on 5, 10 and 20', () => {
   assert.equal(FLOORS.length, 20);
-  assert.deepEqual(BOSS_FLOORS, [10, 20]);
+  assert.deepEqual(BOSS_FLOORS, [5, 10, 20]);
 });
 
 test('every floor is playable: spawn, exit, and every enemy and potion reachable', () => {
@@ -48,7 +48,7 @@ test('every creature in the maps and boss summons has stats and a model slot', a
   for (const b of Object.values(BOSS_TYPES)) for (const s of b.summons) s.spawn.forEach((t) => used.add(t));
   for (const t of used) assert.ok(ENEMY_TYPES[t], `no stats for ${t}`);
   for (const t of [...Object.values(ENEMY_TYPES), ...Object.values(BOSS_TYPES)]) assert.ok(CHARACTERS[t.asset], `no model slot for ${t.name}`);
-  assert.equal(Object.keys(CHARACTERS).length, 7);
+  assert.equal(Object.keys(CHARACTERS).length, 8);
 });
 
 test('every floor has a look, and every look dresses with props that exist', async () => {
@@ -98,4 +98,34 @@ test('every non-boss floor runs one way, from spawn to exit', () => {
     const d = parseLevel(f);
     assert.ok(d.exit.c - d.spawn.c > d.cols * 0.6, `floor ${i + 1}: the exit is not far along from the spawn`);
   });
+});
+
+test('nothing solid stands within three tiles of an exit (its gate stands there)', () => {
+  FLOORS.forEach((f, i) => {
+    if (f.boss) return;
+    const d = parseLevel(f);
+    for (const p of [...d.pillars, ...d.braziers]) {
+      const c = Math.floor(p.x / 2);
+      const r = Math.floor(p.z / 2);
+      assert.ok(Math.max(Math.abs(c - d.exit.c), Math.abs(r - d.exit.r)) > 3, `floor ${i + 1}: something solid by the exit`);
+    }
+  });
+});
+
+test("floor 5 is the Sleeper's hall: a long candle corridor into a round arena", () => {
+  const def = FLOORS[4];
+  assert.equal(def.boss, 'sleeper');
+  const level = parseLevel(def);
+  const [c0, c1, r0, r1] = def.hall.corridor;
+  // Half a minute or more to walk it.
+  assert.ok(((c1 - c0 + 1) * 2) / 5.2 >= 30);
+  for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) assert.ok(level.nav.isWalkable(c, r), `corridor ${c},${r}`);
+  const [ac, ar, R] = def.hall.arena;
+  assert.equal(level.boss.c, ac);
+  assert.equal(level.boss.r, ar);
+  for (let r = Math.ceil(ar - R); r <= ar + R; r++) {
+    for (let c = Math.ceil(ac - R); c <= ac + R; c++) if ((c - ac) ** 2 + (r - ar) ** 2 <= (R - 0.5) ** 2) assert.ok(level.nav.isWalkable(c, r), `arena ${c},${r}`);
+  }
+  // The way out lies behind him, across the arena.
+  assert.ok(level.exit.c > ac);
 });

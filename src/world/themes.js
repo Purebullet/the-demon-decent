@@ -157,6 +157,28 @@ export const LOOKS = {
     ],
     pillars: ['crystal', 'pillar'],
   },
+  // The Sleeper's hall (floor 5): a vaulted hall of dark dressed stone,
+  // lit only by its candles (world/Hall.js places them, and its columns and
+  // banners: nothing else stands in it).
+  hall: {
+    rock: [0.55, 0.48, 0.5],
+    ground: [46, 40, 44],
+    veins: null,
+    fog: 0x0c0810,
+    haze: 1,
+    sky: 0x3a2a30,
+    earth: 0x060406,
+    hemi: 0.55,
+    glow: 0xffb050,
+    flame: 0xffa040,
+    ceiling: 9,
+    walls: { slab: 3, rock: 1 },
+    hang: 0.1,
+    rubble: 0.15,
+    density: 0,
+    decor: [],
+    pillars: [],
+  },
   // A jaw of stone: stalagmite teeth everywhere, stakes, red light.
   teeth: {
     rock: [0.6, 0.42, 0.42],

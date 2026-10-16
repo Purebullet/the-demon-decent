@@ -14,9 +14,9 @@ import { Effects } from '../world/Effects.js';
 import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
-import { Boss } from '../entities/Bosses.js';
+import { Boss, Sleeper } from '../entities/Bosses.js';
 import { Pickups } from '../entities/Pickups.js';
-import { rollWeapon, makeWeapon } from '../entities/Weapons.js';
+import { rollWeapon, makeWeapon, weaponMemory } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
@@ -37,13 +37,19 @@ const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019
 // sandbox or a plain web page (src/platform).
 
 const PLAYING = new Set(['surface', 'floor', 'sanctum']);
-// Floors that play "Blood in the Arena": the boss floors, and floor 5 (where
-// the first flame-horned brute waits).
-const BOSS_MUSIC = new Set([5]);
+// The boss floors play "Blood in the Arena", unless they have songs of
+// their own (SONG_FOR).
 // Gorvath (floor 10) is fought to the Deep's own music.
-const SONG_FOR = { 10: 'deep' };
+// (Floor 5, the Sleeper's hall: "Shadows in the Hall" down the corridor,
+// then "From Shadows to Thunder" once he is up: see _updateHall.)
+const SONG_FOR = { 5: 'hall', 10: 'deep' };
+// The Sleeper wakes this long after the arena's last candle catches (the
+// corridor's music fading away meanwhile).
+const WAKE_AFTER = 4.5;
+const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', gorvath: 'Warden of the tenth seal', azrakel: 'Lord of the last pit' };
 // How long after the blow that levels you up before the choice opens.
 const LEVEL_UP_DELAY = 0.7;
+const LEVEL_UP_ARM = 0.6;
 
 // How the 3D view is drawn, best first: how wide it renders (device pixels,
 // never past the screen's own) and how many samples smooth its edges. The
@@ -145,7 +151,7 @@ export class Game {
       .add('title', { enter: (g) => g._enterTitle(), update: (g, dt) => g._updateTitle(dt), exit: (g) => g.hud.show('title', false) })
       .add('surface', { enter: (g) => g._enterSurface(), update: (g, dt) => g._updateSurface(dt) })
       .add('floor', { enter: (g, p) => g._enterFloor(p), update: (g, dt) => g._updateFloor(dt), exit: (g) => g._exitFloor() })
-      .add('sanctum', { enter: (g, p) => g._enterSanctum(p), update: (g, dt) => g._updateSanctum(dt), exit: (g) => { g.hud.hideChoice(); g.uiMouse = false; } })
+      .add('sanctum', { enter: (g, p) => g._enterSanctum(p), update: (g, dt) => g._updateSanctum(dt), exit: (g) => { g.hud.hideChoice(); g._closeMenu(); } })
       .add('dead', { enter: (g) => g._enterEnd(false), update: (g, dt) => g._updateEnd(dt), exit: (g) => g.hud.show('death', false) })
       .add('victory', { enter: (g) => g._enterEnd(true), update: (g, dt) => g._updateEnd(dt), exit: (g) => g.hud.show('victory', false) });
 
@@ -553,7 +559,7 @@ export class Game {
   _enterFloor({ floor, arrival = false }) {
     const def = floorDef(floor);
     const inDeep = floor >= DEEP_FROM;
-    this.audio.music(SONG_FOR[floor] || (def.boss || BOSS_MUSIC.has(floor) ? 'boss' : inDeep ? 'deep' : 'drone'));
+    this.audio.music(SONG_FOR[floor] || (def.boss ? 'boss' : inDeep ? 'deep' : 'drone'));
     const run = this.run;
     // Each floor gives the spells their uses again.
     run.spellUses = {};
@@ -569,7 +575,10 @@ export class Game {
     const s = this._newScene({ fog: look.fog, density: def.fog * (look.haze || 1), background: look.fog });
     this.level = level;
     s.add(level.group);
-    s.add(new THREE.HemisphereLight(look.sky, look.earth, look.hemi));
+    this.hemi = new THREE.HemisphereLight(look.sky, look.earth, look.hemi);
+    s.add(this.hemi);
+    this.hallLit = 0;
+    this.wakeT = -1;
     // Nothing past what the dark lets you see is drawn at all.
     this.camera.far = level.sight + 16;
     this.camera.updateProjectionMatrix();
@@ -602,6 +611,7 @@ export class Game {
       pickups: this.pickups,
       props: level.props,
       spawnEnemy: (type, pos, emerge) => this._spawnEnemy(type, pos, emerge),
+      onBossEvent: (kind, b) => this._onBossEvent(kind, b),
     });
 
     this.guide = makeGuideArrow();
@@ -611,7 +621,10 @@ export class Game {
 
     for (const e of level.data.enemies) this._spawnEnemy(e.type, e);
     if (level.data.boss) {
-      const b = new Boss(level.data.boss.type, level.data.boss, def);
+      const B = level.data.boss;
+      const b = B.type === 'sleeper' ? new Sleeper(B.type, B, def) : new Boss(B.type, B, def);
+      // He sleeps facing the way you come in.
+      if (level.hall) b.yaw = Math.atan2(level.spawn.x - B.x, 0);
       this._addEnemy(b);
       s.add(b.light);
       this.boss = b;
@@ -756,6 +769,40 @@ export class Game {
     }
   }
 
+  // The Sleeper's hall: once the arena's candles are all lit, the arena
+  // brightens, the corridor's music fades and he wakes; when he is up and
+  // has spoken, the fight's music starts.
+  _updateHall(dt) {
+    const level = this.level;
+    const hall = level.hall;
+    if (hall.phase === 'lit' && this.wakeT < 0 && this.boss?.asleep) {
+      this.wakeT = WAKE_AFTER;
+      this.audio.fadeMusic(WAKE_AFTER - 0.5);
+    }
+    if (this.wakeT > 0) {
+      this.wakeT -= dt;
+      if (this.wakeT <= 0) this.boss?.wake(this.ctx);
+    }
+    // Lit: the murk lifts and the whole arena can be seen.
+    if (hall.litK !== this.hallLit) {
+      this.hallLit = hall.litK;
+      const k = hall.litK;
+      const look = level.look;
+      this.hemi.intensity = look.hemi * (1 + 4 * k);
+      this.renderer.toneMappingExposure = 1.2 + 0.2 * k;
+      this.fogBase = level.def.fog * (look.haze || 1) * (1 - 0.65 * k);
+      level.sight = level.baseSight + (60 - level.baseSight) * k;
+      this.camera.far = level.sight + 16;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  _onBossEvent(kind, b) {
+    if (kind !== 'fight') return;
+    this.audio.music('thunder');
+    if (b.bossKey === 'sleeper') this._hint('sleeper', 'Nothing staggers <b>Vorgrath</b>: keep clear of his axe, or block it');
+  }
+
   _onProc(id, P) {
     if (this.run) this.run.best.procs++;
     this._hint('proc', 'Relics wake on <b>perfect chains, counters and head hits</b>: fight in rhythm to set them off');
@@ -784,6 +831,8 @@ export class Game {
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
       this.pickups.addPotion(x + 1.2, z);
+      // The Sleeper's hall falls quiet for his last words.
+      if (this.level.hall) this.audio.fadeMusic(6);
     }
   }
 
@@ -852,9 +901,10 @@ export class Game {
     }
     if (this.boss && !this.bossAnnounced && this.boss.isEngaged()) {
       this.bossAnnounced = true;
-      this.hud.announce(this.boss.name, this.boss.bossKey === 'azrakel' ? 'Lord of the last pit' : 'Warden of the tenth seal');
+      this.hud.announce(this.boss.name, BOSS_TITLES[this.boss.bossKey] || '');
       this.audio.roar(this.boss.position);
     }
+    if (level.hall) this._updateHall(dt);
 
     if (level.isAtExit(p.position) && !this.busy && !p.dead) {
       const next = nextAfterFloor(this.run.floor, FLOOR_COUNT);
@@ -897,13 +947,19 @@ export class Game {
       p.press = null;
       p.blocking = false;
       this.hud.showLevelUp(this._levelUpInfo());
-      // Let the mouse go so the choices can be clicked.
-      this.uiMouse = true;
-      this.input.host.unlockPointer?.();
+      this._openMenu();
+      // A click meant as a blow must not pick a card: the cards wake only
+      // once the box has been up a moment and the button has been let go.
+      this.levelUpWait = LEVEL_UP_ARM;
+      this.levelUpHeld = true;
+      this.hud.setLevelArmed(false);
       this.audio.choose?.();
       return true;
     }
     this.input.consumeMouse();
+    this.levelUpWait = Math.max(0, this.levelUpWait - dt);
+    if (!this.input.mouseDown[0]) this.levelUpHeld = false;
+    this.hud.setLevelArmed(this.levelUpWait <= 0 && !this.levelUpHeld);
     for (let i = 0; i < STAT_IDS.length; i++) {
       if (!this.input.wasPressed(`Digit${i + 1}`) || !spendPoint(run, STAT_IDS[i])) continue;
       const S = LEVEL_STATS[STAT_IDS[i]];
@@ -915,11 +971,25 @@ export class Game {
       }
       this.levelUp = null;
       this.hud.hideLevelUp();
-      this.uiMouse = false;
-      this.input.requestLock();
+      this._closeMenu();
       return true;
     }
     return true;
+  }
+
+  // A menu over the game takes the mouse: with the pointer locked it moves
+  // a cursor of the game's own from near the top of the screen (clear of the
+  // choices, so a stray click picks nothing); without a lock, the page's.
+  _openMenu() {
+    this.uiMouse = true;
+    if (this.input.locked) this.input.menuCursor(this.hud.w / 2, this.hud.h * 0.14, this.hud.w, this.hud.h);
+  }
+
+  _closeMenu() {
+    if (!this.uiMouse) return;
+    this.uiMouse = false;
+    this.input.closeMenu();
+    this.input.requestLock();
   }
 
   _levelUpInfo() {
@@ -1107,9 +1177,7 @@ export class Game {
       else {
         this.choice = { node: focused, options };
         this.hud.showChoice(NODES[focused.key].title, options);
-        // Let the mouse go so the options can be clicked.
-        this.uiMouse = true;
-        this.input.host.unlockPointer?.();
+        this._openMenu();
       }
     }
     if (sc.atPortal(p.position) && !this.busy) {
@@ -1139,18 +1207,15 @@ export class Game {
   _closeChoice() {
     this.choice = null;
     this.hud.hideChoice();
-    if (this.uiMouse) {
-      this.uiMouse = false;
-      this.input.requestLock();
-    }
+    this._closeMenu();
   }
 
   // ------------------------------------------------------- death / victory ---
 
   _enterEnd(won) {
     const run = this.run;
-    const secs = Math.round((performance.now() - run.startTime) / 1000);
-    const time = `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
+    // The best weapon of this run turns up more often in the next.
+    if (run.bestWeapon) weaponMemory.favourite = run.bestWeapon.model;
     this.lastFloor = run.floor;
     // The deepest floor reached goes on the lot's weekly table.
     if (!run.dev) this.host.score(run.floor);
@@ -1175,7 +1240,7 @@ export class Game {
         ['blades', 'Counters', run.best?.counters || 0],
         ['shield', 'Parries', run.best?.parries || 0],
         ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
-        ['glass', 'Time', time],
+        ['blades', 'Best weapon', run.bestWeapon?.name || run.weapon?.name || '—', run.bestWeapon?.color],
       ],
       ready: false,
     });
@@ -1205,13 +1270,21 @@ export class Game {
     for (const t of this.input.taps) {
       const code = this.hud.buttonAt(t.x, t.y);
       if (!code) continue;
+      if (this.hud.panel === 'levelup' && !this.hud.levelArmed) {
+        this.input.claimTap?.();
+        continue;
+      }
       if (code === 'Mouse0') this.input.mouseClicked[0] = true;
       else this.input.pressed.add(code);
       this.input.claimTap?.();
     }
     if (this.input.pressed.size || this.input.mouseClicked[0]) this.audio.init();
     this.audio.update(rawDt);
-    if (this.paused && (this.input.mouseClicked[0] || this.input.taps.length)) this.input.requestLock();
+    // Play wants the pointer locked: a click wins it back (after a pause, or
+    // if a browser refused it).
+    const state = this.fsm.currentName;
+    const menu = this.paused || this.uiMouse || !!this.hud.panel || !PLAYING.has(state);
+    if ((this.paused || (!menu && !this.busy)) && (this.input.mouseClicked[0] || this.input.taps.length)) this.input.requestLock();
 
     if (!this.paused) {
       let wdt = dt;
@@ -1231,8 +1304,10 @@ export class Game {
       }
       this.hud.updateNumbers(dt);
     }
-    const own = !this.input.locked && !this.input.touch;
-    this.hud.setCursor(own, this.input.pointer.x, this.input.pointer.y);
+    // The sword cursor: over a menu only, never while you play.
+    const cur = this.input.cursor;
+    const own = menu && (!this.input.locked || cur === this.input.menu) && !this.input.touch;
+    this.hud.setCursor(own, cur.x, cur.y);
     if (own !== this.ownCursor) {
       this.ownCursor = own;
       this.host.setCursor?.(own);

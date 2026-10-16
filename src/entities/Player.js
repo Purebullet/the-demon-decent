@@ -268,6 +268,8 @@ export class Player {
 
   setWeapon(weapon) {
     this.run.weapon = weapon;
+    // The best blade the run has held, for the end of it.
+    if (!this.run.bestWeapon || weapon.damage > this.run.bestWeapon.damage) this.run.bestWeapon = weapon;
     this.weaponDef = WEAPON_TYPES[weapon.type];
     // Where this one's blade (or head) is, from its own model.
     const { blade, steel } = weaponReach(weapon);

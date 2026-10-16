@@ -35,6 +35,9 @@ const GLOW = { crystal: 1.25, fungus: 1.2, eggs: 1.1, obelisk: 1.4, brazier: 1.2
 // placed inside another's footprint (see free/claim).
 const FOOT = { skulls: 0.7, ribcage: 0.42, remains: 0.5, stakes: 0.42, altar: 0.55, statue: 0.28, obelisk: 0.25, crystal: 0.42, fungus: 0.45, eggs: 0.5, stalagmite: 0.35, cage: 0.3, chains: 0.15, idol: 0.38, anvil: 0.45, spikewall: 0.45, pyre: 0.45, obsidian: 0.4, basalt: 0.35 };
 // Rock-like props take the full rock tint; the rest a softer one.
+// Decor a blow breaks (Props._fragile): bones, skulls, stakes, eggs, fungus,
+// crystals, pyres and statues. Rock, iron and altars stand.
+const FRAGILE = new Set(['skulls', 'ribcage', 'remains', 'stakes', 'eggs', 'fungus', 'crystal', 'pyre', 'statue']);
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar', 'obsidian', 'basalt']);
 
 // A generated model's material made to sit in the cave: its painted colour
@@ -121,6 +124,7 @@ export class Dressing {
     this.taken = [];
     this.hung = [];
     this.solids = [];
+    this.fragile = [];
     this._findEdges();
     for (const b of this.d.braziers) this.claim(b.x, b.z, 1.1);
     this._shell();
@@ -326,7 +330,12 @@ export class Dressing {
     for (const [key, part] of byChunk) {
       const c = this.chunks.get(key);
       const inst = new THREE.InstancedMesh(geometry, material, part.length);
-      part.forEach((mm, k) => inst.setMatrixAt(k, mm));
+      part.forEach((mm, k) => {
+        inst.setMatrixAt(k, mm);
+        // Where it went, for a piece that can be broken out of the batch.
+        mm.inst = inst;
+        mm.index = k;
+      });
       inst.instanceMatrix.needsUpdate = true;
       inst.computeBoundingSphere();
       c.group.add(inst);
@@ -533,9 +542,12 @@ export class Dressing {
         if (!this.free(p.x, p.z, rad + 0.2)) continue;
         used.add(key);
         this.claim(p.x, p.z, rad);
-        this.solids.push({ x: p.x, z: p.z, r: rad * 0.85 });
+        const solid = { x: p.x, z: p.z, r: rad * 0.85 };
+        this.solids.push(solid);
         q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (r() - 0.5) * 0.3);
-        add(k.id, m.compose(p, q, s.setScalar(sc)).clone());
+        const mm = m.compose(p, q, s.setScalar(sc)).clone();
+        add(k.id, mm);
+        if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solid, x: p.x, z: p.z, r: rad, h: size * sc });
         if (GLOW[k.id]) this.glows.push({ x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc });
         continue;
       }
@@ -544,8 +556,11 @@ export class Dressing {
       p.set(t.x + dx * inset + dz * along, 0, t.z + dz * inset + dx * along);
       if (!this.free(p.x, p.z, rad + 0.15)) continue;
       this.claim(p.x, p.z, rad);
-      this.solids.push({ x: p.x, z: p.z, r: rad * 0.85 });
-      add(k.id, m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone());
+      const solid = { x: p.x, z: p.z, r: rad * 0.85 };
+      this.solids.push(solid);
+      const mm = m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone();
+      add(k.id, mm);
+      if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solid, x: p.x, z: p.z, r: rad, h: size * sc });
       if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
     }
     for (const [id, list] of buckets) this._instances(Assets.propGeometry(id).geometry, this.mat(id), list);

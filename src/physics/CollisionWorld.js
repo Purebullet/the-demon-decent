@@ -29,6 +29,13 @@ export class CollisionWorld {
     }
   }
 
+  removeStatic(c) {
+    for (const list of this.cells.values()) {
+      const i = list.indexOf(c);
+      if (i >= 0) list.splice(i, 1);
+    }
+  }
+
   _resolveStatic(pos, radius) {
     if (!this.cells.size) return false;
     const t = this.tileSize;

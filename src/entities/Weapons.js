@@ -148,9 +148,14 @@ export function rollRarity(floor, luck = 0) {
 // A weapon a demon drops (or a chest holds) on a given floor: any model but
 // the one you started with, its rarity rolled for the depth (`luck` tips the
 // odds further: chests, bosses).
+// The best weapon of the last run ended: the next runs turn it up more often.
+export const weaponMemory = { favourite: null };
+const FAVOURITE_ODDS = 0.35;
+
 export function rollWeapon(floor, luck = 0) {
   const ids = Object.keys(WEAPON_MODELS).filter((id) => !WEAPON_MODELS[id].starter);
-  const model = ids[Math.floor(Math.random() * ids.length)];
+  const fav = weaponMemory.favourite;
+  const model = fav && ids.includes(fav) && Math.random() < FAVOURITE_ODDS ? fav : ids[Math.floor(Math.random() * ids.length)];
   const rarity = rollRarity(floor, luck);
   const en = Object.keys(ENCHANTS);
   const enchant = Math.random() < RARITIES[rarity].enchant ? en[Math.floor(Math.random() * en.length)] : null;

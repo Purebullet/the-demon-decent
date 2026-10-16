@@ -512,6 +512,13 @@ export class Hud {
     this.dirty = true;
   }
 
+  // The level-up cards wake (light up and take a click) only when armed.
+  setLevelArmed(on) {
+    if (on === this.levelArmed) return;
+    this.levelArmed = on;
+    this.dirty = true;
+  }
+
   hideLevelUp() {
     this.levelInfo = null;
     if (this.panel === 'levelup') this.panel = null;
@@ -1892,9 +1899,10 @@ export class Hud {
     L.stats.forEach((S, k) => {
       const code = `Digit${k + 1}`;
       const full = S.have >= S.cap;
-      const hot = !full && this.hoverCode === code;
+      const hot = !full && this.levelArmed && this.hoverCode === code;
       g.save();
       if (full) g.globalAlpha = 0.45;
+      else if (!this.levelArmed) g.globalAlpha = 0.7;
       this._box(g, x, y, cw, ch, hot ? 'rgba(70,20,8,0.96)' : C.panel, hot ? S.color : C.edge);
       // A coloured seam and glow along the top, the stat's own.
       g.fillStyle = S.color;
@@ -2000,12 +2008,12 @@ export class Hud {
     const gw = pw - dw - 66;
     const tw = (gw - 24) / 3;
     const th = (ph - 52) / 2;
-    stats.forEach(([icon, label, value], k) => {
+    stats.forEach(([icon, label, value, color], k) => {
       const tx = gx + (k % 3) * (tw + 12);
       const tyy = py + 22 + Math.floor(k / 3) * (th + 8);
       g.save();
       g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
-      this._tile(g, tx, tyy, tw, th, icon, label, value, hue);
+      this._tile(g, tx, tyy, tw, th, icon, label, value, hue, color);
       g.restore();
     });
     g.restore();
@@ -2178,7 +2186,7 @@ export class Hud {
   }
 
   // One stone: its mark, the number, and what it counts.
-  _tile(g, x, y, w, h, icon, label, value, hue) {
+  _tile(g, x, y, w, h, icon, label, value, hue, color = null) {
     g.save();
     g.fillStyle = 'rgba(30,8,5,0.75)';
     g.fillRect(x, y, w, h);
@@ -2190,7 +2198,11 @@ export class Hud {
     g.restore();
     const s = Math.min(34, h * 0.5);
     this._glyph(g, icon, x + 14 + s / 2, y + h / 2, s, hue.accent);
-    this._text(g, String(value), x + 26 + s, y + h / 2 + 4, { size: 28, color: C.light, glow: 'rgba(120,20,0,0.7)' });
+    // A long value (a weapon's name) shrinks to fit its stone.
+    const text = String(value);
+    const room = w - (26 + s) - 10;
+    const size = Math.max(13, Math.min(28, (28 * room) / Math.max(1, this._measure(g, text, { size: 28 }))));
+    this._text(g, text, x + 26 + s, y + h / 2 + 4, { size, color: color || C.light, glow: 'rgba(120,20,0,0.7)' });
     this._label(g, label, x + 26 + s, y + h / 2 + 22, { size: 10, color: C.ash });
   }
 

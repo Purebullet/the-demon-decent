@@ -88,6 +88,17 @@ export const CHARACTERS = {
       { bone: 'HatEnd', at: [0.02, 0.95, -0.06], kind: 'horn', rate: 10 },
     ],
   },
+  sleeper: {
+    // Boss of floor 5, the Sleeper: the lot owner's own model (an ogre-demon,
+    // rigged by scripts/rig.mjs), asleep in the arena at the end of the candle
+    // hall. His axe is the prop `sleeperAxe`.
+    name: 'Vorgrath, the Sleeper',
+    model: 'assets/models/sleeper.glb',
+    height: 5.2,
+    look: "The lot owner's ogre-demon",
+    pose: BIPED,
+    fire: [],
+  },
   gorvath: {
     // Boss of floor 10: the brute, grown huge and burning.
     name: 'Gorvath, the Flame-Horned',
@@ -184,6 +195,14 @@ export const PROPS = {
   anvil: { model: 'assets/models/deep-anvil.glb', size: 1.2, maxTris: 2000, prompt: `Infernal blacksmith anvil on a scorched stone block, iron tongs and a half-forged jagged blade lying on it, ${LOOK}` },
   spikewall: { model: 'assets/models/deep-spikewall.glb', size: 2, maxTris: 2000, prompt: `Barricade of crossed rusted iron spikes and broken blades lashed to a charred wooden frame, ${LOOK}` },
   pyre: { model: 'assets/models/deep-pyre.glb', size: 1.4, maxTris: 1500, glow: true, prompt: `Low pile of charred logs and burned bones with glowing orange embers among them, ${LOOK}` },
+  // ---- The boss hall (floor 5): the candle corridor and the arena.
+  candlePedestal: { model: 'assets/models/hall-candle-pedestal.glb', size: 1.35, maxTris: 2000, prompt: `Waist-high carved black stone pedestal with a cluster of thick melted wax candles on top, unlit candles with blackened wicks, wax dripping down the stone, ${LOOK}` },
+  candelabra: { model: 'assets/models/hall-candelabra.glb', size: 2.4, maxTris: 2000, prompt: `Tall black iron gothic floor candelabrum, a twisted stem on three clawed feet holding five thick unlit wax candles in spiked cups, ${LOOK}` },
+  hallColumn: { model: 'assets/models/hall-column.glb', size: 9, maxTris: 2500, prompt: `Tall gothic cathedral column of dark carved stone, a ribbed shaft with carved demonic faces at its base and a flaring capital at the top, ${LOOK}` },
+  banner: { model: 'assets/models/hall-banner.glb', size: 4, maxTris: 1500, prompt: `Long tattered dark crimson banner hanging from a black iron crossbar, a torn demonic horned sigil stitched in faded gold, frayed ragged bottom edge, ${LOOK}` },
+  boneNest: { model: 'assets/models/hall-bone-nest.glb', size: 1.6, maxTris: 3000, prompt: `Huge low wide nest of bones, skulls and rusted chains heaped in a ring, where a giant demon sleeps, ${LOOK}` },
+  // The Sleeper's double-bitted axe (the lot owner's own model).
+  sleeperAxe: { model: 'assets/models/sleeper-axe.glb', size: 3.3, weapon: true },
   // Treasure at the dead ends, and things to smash.
   chest: { model: 'assets/models/chest.glb', size: 0.95, maxTris: 2500, prompt: `Ornate demonic treasure chest of dark charred wood bound with black iron bands, a horned skull on the lock plate, closed lid, ${LOOK}` },
   urn: { model: 'assets/models/urn.glb', size: 1.0, maxTris: 1200, prompt: `Tall cracked clay burial urn with a narrow neck, carved skull and rune motifs, dark terracotta glaze, ${LOOK}` },

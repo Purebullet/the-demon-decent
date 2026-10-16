@@ -202,6 +202,9 @@ function layout(def, floor, seed) {
       const spots = ch === 'o' ? roomTiles(R, 1) : roomTiles(R).filter(([c, rr]) => c === R.x || c === R.x + R.w - 1 || rr === R.y || rr === R.y + R.h - 1);
       if (!spots.length) continue;
       const [c, rr] = spots[Math.floor(r() * spots.length)];
+      // Never in the way of the exit's gate, nor where you arrive.
+      const sp = [start.x + 1, start.y + Math.floor(start.h / 2)];
+      if (Math.max(Math.abs(c - ex[0]), Math.abs(rr - ex[1])) <= 3 || Math.max(Math.abs(c - sp[0]), Math.abs(rr - sp[1])) <= 2) continue;
       if (pathTiles.has(rr * W + c) || nearDoor(c, rr)) continue;
       if (keepsConnected(c, rr, ch)) left--;
     }

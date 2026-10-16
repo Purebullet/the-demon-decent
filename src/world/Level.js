@@ -10,6 +10,7 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { lookFor } from './themes.js';
 import { Dressing } from './Dressing.js';
 import { Props } from './Props.js';
+import { Hall } from './Hall.js';
 import { disposeTree } from '../core/dispose.js';
 
 // Builds one cavern floor from its hand-authored map and runs its hazards.
@@ -41,8 +42,9 @@ export class Level {
     this.def = def;
     this.data = parseLevel(def);
     const d = this.data;
-    // Every floor gets two or three dead ends for its chests.
-    carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32(floorNumber * 4111));
+    // Every floor gets two or three dead ends for its chests (the Sleeper's
+    // hall has its own).
+    if (!def.hall) carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32(floorNumber * 4111));
     this.nav = d.nav;
     this.world = new CollisionWorld({ grid: { cols: d.cols, rows: d.rows, solid: d.solid }, tileSize: TILE });
     this.group = new THREE.Group();
@@ -63,9 +65,12 @@ export class Level {
     // unlit and the murk all but black, so nothing further is drawn (the
     // scenery's chunks, the demons, the camera's far plane).
     this.sight = Math.min(this.viewRange, def.light * 1.8);
+    this.baseSight = this.sight;
     this.group.add(this.dressing.group);
     // The scenery standing on the floor is solid.
     for (const c of this.dressing.solids) this.world.addStatic(c);
+    // The Sleeper's hall: its candles, columns and banners, and the arena.
+    this.hall = def.hall ? new Hall(this) : null;
     this._buildProps();
     this._buildHazards();
     this.props = new Props(this);
@@ -216,7 +221,7 @@ export class Level {
     const want = this.poolT > 0 && this.poolWant ? this.poolWant : null;
     if (!want) {
       this.poolT = 0.25;
-      const ranked = [...this.spots, exit].map((s) => ({ s, d: (s.pos.x - p.x) ** 2 + (s.pos.z - p.z) ** 2 - (s === exit ? this.portalT * 60 : 0) })).sort((a, b) => a.d - b.d);
+      const ranked = [...this.spots, exit].map((s) => ({ s, d: (s.pos.x - p.x) ** 2 + (s.pos.z - p.z) ** 2 - (s === exit ? this.portalT * 60 : 0) - (s.prio || 0) })).sort((a, b) => a.d - b.d);
       this.poolWant = ranked.slice(0, this.pool.length).map((r) => r.s);
     }
     this._assignPool(this.poolWant);
@@ -351,6 +356,7 @@ export class Level {
     const t = this.time;
     this.dressing.cull(ctx.player.position.x, ctx.player.position.z, this.sight);
     this.dressing.tick(t);
+    this.hall?.update(dt, ctx);
     this.props.update(dt, ctx);
     if (this.lavaMat) this.lavaMat.uniforms.uTime.value = t;
     this.portalMat.uniforms.uTime.value = t;

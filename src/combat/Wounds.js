@@ -85,6 +85,93 @@ const _l = new THREE.Vector3();
 const _e = new THREE.Euler();
 const _inv = new THREE.Matrix4();
 
+// Each vertex's heaviest bone (worked out once per mesh), and the matrix
+// that poses the mesh by each bone alone, as things stand now.
+const heaviest = new WeakMap();
+const _w = new THREE.Vector3();
+function roughPoser(mesh) {
+  const sk = mesh.skeleton;
+  if (!mesh.isSkinnedMesh || !sk) return null;
+  let bone = heaviest.get(mesh.geometry);
+  if (!bone) {
+    const si = mesh.geometry.attributes.skinIndex;
+    const sw = mesh.geometry.attributes.skinWeight;
+    bone = new Uint8Array(si.count);
+    for (let i = 0; i < si.count; i++) {
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
+      bone[i] = si.getComponent(i, best);
+    }
+    heaviest.set(mesh.geometry, bone);
+  }
+  const m = sk.bones.map((b, j) => new THREE.Matrix4().multiplyMatrices(mesh.bindMatrixInverse, b.matrixWorld).multiply(sk.boneInverses[j]).multiply(mesh.bindMatrix));
+  // Every vertex posed so, once per blow (shared by the two passes).
+  const pos = mesh.geometry.attributes.position;
+  const at = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) _w.fromBufferAttribute(pos, i).applyMatrix4(m[bone[i]]).toArray(at, i * 3);
+  return { bone, m, at };
+}
+
+// Where a ray from `o` along `d` first meets the body. A skinned body is
+// not raycast triangle by triangle (that poses every triangle: far too slow
+// on a big one); the vertex nearest the ray, nearest its start, is taken,
+// from the bodies as each bone alone poses them, then posed properly.
+const _ol = new THREE.Vector3();
+const _dl = new THREE.Vector3();
+function surfaceHit(meshes, o, d, far) {
+  let best = null;
+  for (const mesh of meshes) {
+    const rough = roughPoser(mesh);
+    mesh.userData.rough = rough;
+    if (!rough) {
+      ray.set(o, d);
+      ray.far = far;
+      const h = ray.intersectObject(mesh, false)[0];
+      if (h && (!best || h.distance < best.distance)) best = { point: h.point.clone(), object: mesh, distance: h.distance };
+      continue;
+    }
+    _inv.copy(mesh.matrixWorld).invert();
+    _ol.copy(o).applyMatrix4(_inv);
+    _dl.copy(o).add(d).applyMatrix4(_inv).sub(_ol);
+    const unit = _dl.length();
+    _dl.multiplyScalar(1 / unit);
+    const farL = far * unit;
+    const tol = 0.12 * unit;
+    const pos = mesh.geometry.attributes.position;
+    let bestI = -1;
+    let bestT = Infinity;
+    let minPerp = Infinity;
+    const perps = new Float32Array(pos.count);
+    const ts = new Float32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) {
+      _w.fromArray(rough.at, i * 3).sub(_ol);
+      const t = _w.dot(_dl);
+      ts[i] = t;
+      if (t < 0 || t > farL) {
+        perps[i] = Infinity;
+        continue;
+      }
+      const p2 = _w.lengthSq() - t * t;
+      perps[i] = p2;
+      if (p2 < minPerp) minPerp = p2;
+    }
+    // Close to the ray, the first along it: the surface it meets.
+    const limit = Math.max(minPerp * 4, tol * tol);
+    if (minPerp > (tol * 3) ** 2) continue;
+    for (let i = 0; i < pos.count; i++) {
+      if (perps[i] <= limit && ts[i] < bestT) {
+        bestT = ts[i];
+        bestI = i;
+      }
+    }
+    if (bestI < 0) continue;
+    mesh.getVertexPosition(bestI, _w).applyMatrix4(mesh.matrixWorld);
+    const distance = _w.distanceTo(o);
+    if (!best || distance < best.distance) best = { point: _w.clone(), object: mesh, distance };
+  }
+  return best;
+}
+
 // A decal over a skinned mesh's triangles as posed right now, in world
 // space. Only the triangles near the spot are cut, from their posed corners.
 function skinDecal(mesh, p, orientation, size) {
@@ -97,7 +184,16 @@ function skinDecal(mesh, p, orientation, size) {
   const r2 = reach * reach;
   const posed = new Float32Array(pos.count * 3);
   const near = new Uint8Array(pos.count);
+  // A big body (the Sleeper's is 31 000 vertices): each vertex is first
+  // posed cheaply by its heaviest bone alone, and only those that land
+  // anywhere near the blow are posed properly.
+  const rough = mesh.userData.rough;
+  const loose = (reach * 1.8 + 0.05) ** 2;
   for (let i = 0; i < pos.count; i++) {
+    if (rough) {
+      _v.fromArray(rough.at, i * 3);
+      if (_v.distanceToSquared(_l) > loose) continue;
+    }
     mesh.getVertexPosition(i, _v);
     posed[i * 3] = _v.x;
     posed[i * 3 + 1] = _v.y;
@@ -142,7 +238,7 @@ export class Wounds {
     ray.set(_o, _d.copy(_n).negate());
     ray.far = 2;
     model.root.updateMatrixWorld(true);
-    const hit = ray.intersectObjects(model.meshes, false)[0];
+    const hit = surfaceHit(model.meshes, _o, _d, 2);
     if (!hit) return;
     _p.copy(hit.point);
     // The surface faces out from the axis at that height.

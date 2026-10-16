@@ -359,6 +359,31 @@
       "id": 286,
       "source": "objects",
       "status": "done"
+    },
+    "candlePedestal": {
+      "id": 287,
+      "source": "objects",
+      "status": "done"
+    },
+    "candelabra": {
+      "id": 288,
+      "source": "objects",
+      "status": "done"
+    },
+    "hallColumn": {
+      "id": 289,
+      "source": "objects",
+      "status": "done"
+    },
+    "banner": {
+      "id": 290,
+      "source": "objects",
+      "status": "done"
+    },
+    "boneNest": {
+      "id": 291,
+      "source": "objects",
+      "status": "done"
     }
   }
 }

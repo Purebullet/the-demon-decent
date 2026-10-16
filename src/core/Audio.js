@@ -5,14 +5,26 @@
 //
 // Music: on the title and the surface "Infernal Crescendo"; on the first
 // floors the ambient drone; in the Deep (floors 6 on) "Inferno Allegro";
-// and "Blood in the Arena" on the boss floors. Each loops.
+// and "Blood in the Arena" on the boss floors. Each loops. Floor 5, the
+// Sleeper's hall: "Shadows in the Hall" down the candle corridor, then
+// "From Shadows to Thunder" for the fight, kept low under his voice (and
+// lower still while he speaks).
 
 import { SOUND_EXT } from './soundFormat.js';
 
 const DIR = 'assets/sounds/';
-const SONGS = { intro: 'assets/music/infernal-crescendo.mp3', boss: 'assets/music/blood-in-the-arena.mp3', deep: 'assets/music/inferno-allegro.mp3', drone: `${DIR}drone.wav` };
+const SONGS = {
+  intro: 'assets/music/infernal-crescendo.mp3',
+  boss: 'assets/music/blood-in-the-arena.mp3',
+  deep: 'assets/music/inferno-allegro.mp3',
+  hall: 'assets/music/shadows-in-the-hall.mp3',
+  thunder: 'assets/music/from-shadows-to-thunder.mp3',
+  drone: `${DIR}drone.wav`,
+};
 // (The songs are mastered a few dB quieter than the drone is played.)
-const MUSIC = { intro: 0.8, boss: 0.85, deep: 0.75, drone: 0.35 };
+const MUSIC = { intro: 0.8, boss: 0.85, deep: 0.75, hall: 0.75, thunder: 0.5, drone: 0.35 };
+// The music under a spoken line.
+const DUCK = 0.45;
 
 export class Audio {
   constructor(host) {
@@ -25,6 +37,8 @@ export class Audio {
     this.mode = 'intro';
     this.playing = null;
     this.fade = null;
+    this.duckT = 0;
+    this.duck = 1;
   }
 
   // Starts the music. Called when the game starts; browsers that hold sound
@@ -43,7 +57,8 @@ export class Audio {
     } else this._startMusic();
   }
 
-  // 'intro', 'boss', 'deep' or 'drone'. Asking for what is already playing leaves it be.
+  // 'intro', 'boss', 'deep', 'hall', 'thunder' or 'drone'. Asking for what
+  // is already playing leaves it be.
   music(mode) {
     if (mode === this.mode && (this.playing || !this.started)) return;
     this.mode = mode;
@@ -58,17 +73,31 @@ export class Audio {
   _startMusic() {
     this.fade = null;
     if (!this.started || this.muted) return;
-    this.host.music.play(this.host.asset(SONGS[this.mode]), { volume: MUSIC[this.mode], loop: true });
+    this.host.music.play(this.host.asset(SONGS[this.mode]), { volume: MUSIC[this.mode] * this.duck, loop: true });
     this.playing = this.mode;
   }
 
-  // Once a frame: a fade, while one runs.
+  // A spoken line (the boss's voice), `secs` long: played as it is, the
+  // music drawn down under it.
+  voice(path, secs) {
+    if (this.muted || !this.started) return;
+    this.host.sound.play(this.host.asset(path), { volume: 1, rate: 1 });
+    this.duckT = Math.max(this.duckT, secs);
+  }
+
+  // Once a frame: a fade, while one runs; the music ducked under a voice.
   update(dt) {
+    this.duckT = Math.max(0, this.duckT - dt);
+    const want = this.duckT > 0 ? DUCK : 1;
+    if (want !== this.duck) {
+      this.duck += Math.sign(want - this.duck) * Math.min(Math.abs(want - this.duck), dt * 1.5);
+      if (this.playing && !this.fade) this.host.music.volume?.(MUSIC[this.mode] * this.duck);
+    }
     const f = this.fade;
     if (!f) return;
     f.t += dt;
     const k = Math.max(0, 1 - f.t / f.secs);
-    this.host.music.volume?.(MUSIC[this.mode] * k * k);
+    this.host.music.volume?.(MUSIC[this.mode] * k * k * this.duck);
     if (k <= 0) {
       this.fade = null;
       this.host.music.stop();
@@ -162,7 +191,9 @@ export class Audio {
     if (counter) this.play('counter', { volume: 1, gap: 0.05 });
   }
   smash(kind) {
-    this.play(kind === 'urn' ? 'smash_clay' : 'smash_wood', { volume: 0.9, gap: 0.05, rate: (kind === 'coffin' ? 0.8 : 0.9) + Math.random() * 0.2 });
+    const wood = kind === 'barrel' || kind === 'crate' || kind === 'coffin' || kind === 'stakes' || kind === 'pyre';
+    const low = kind === 'coffin' || kind === 'statue' ? 0.75 : kind === 'skulls' || kind === 'crystal' ? 1.15 : 0.9;
+    this.play(wood ? 'smash_wood' : 'smash_clay', { volume: 0.9, gap: 0.05, rate: low + Math.random() * 0.2 });
   }
   chest() {
     this.play('chest', { volume: 0.9, gap: 0.3 });

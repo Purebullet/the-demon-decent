@@ -2,15 +2,51 @@ import * as THREE from 'three';
 import { Enemy } from './Enemy.js';
 import { angleDelta, rand } from '../core/rng.js';
 import { C, burst, ring } from '../world/Particles.js';
+import { StrikeVolume } from '../physics/Hitbox.js';
+import { Assets } from '../assets/AssetLibrary.js';
+import { sceneryMaterial } from '../world/Dressing.js';
+import { VOICE_LINES, VOICE_FPS } from './voiceLines.js';
 
-// Floor 10: Gorvath, the Flame-Horned (the horned brute, grown huge, its
-// horns ablaze). Floor 20: Azrakel, the Archfiend (the shadow fiend, grown
-// huge and blood-red, fire in its horns and heart).
+// Floor 5: Vorgrath, the Sleeper (Sleeper below). Floor 10: Gorvath, the
+// Flame-Horned (the horned brute, grown huge, its horns ablaze). Floor 20:
+// Azrakel, the Archfiend (the shadow fiend, grown huge and blood-red, fire in
+// its horns and heart).
 //
 // Bosses skip the attack-token system and pick from a phase-dependent move
 // list, never repeating a move three times in a row.
 
 export const BOSS_TYPES = {
+  // Huge, slow and patient: wide, slow arcs of a great axe, an overhead chop
+  // that cracks the floor, a stamp when you crowd him. Nothing staggers him
+  // (every blow is armoured: dodge it, block it, or be elsewhere). About two
+  // to three minutes of fighting.
+  sleeper: {
+    name: 'Vorgrath, the Sleeper',
+    asset: 'sleeper',
+    scale: 1,
+    hp: 2100,
+    dmg: 22,
+    speed: 2.0,
+    radius: 1.5,
+    poise: Infinity,
+    mass: 40,
+    role: 'boss',
+    guard: null,
+    cooldown: 1.15,
+    turnRate: 1.3,
+    stride: 1.2,
+    loot: { potion: 1, weapon: 1, spell: 1 },
+    summons: [],
+    attacks: [
+      // `arc`: the axe's path round him (radians from straight ahead, his
+      // right to his left) while the blow lands.
+      { name: 'sweep', windup: 1.05, strike: 0.6, recover: 1.15, dmg: 1, minRange: 0, maxRange: 5.8, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 3, armor: true },
+      { name: 'chop', windup: 1.15, strike: 0.32, recover: 1.35, dmg: 1.35, minRange: 2, maxRange: 6.5, volume: { c: [-0.6, 1.4, 3.4], h: [1.1, 1.6, 2.0] }, lunge: 1.2, knockback: 10, aoe: { at: [-0.6, 3.9], radius: 3.0, dmg: 0.55 }, weight: 2, armor: true },
+      { name: 'stomp', windup: 0.85, strike: 0.25, recover: 1.0, dmg: 0.6, minRange: 0, maxRange: 3.4, volume: null, aoe: { at: [0, 0], radius: 4.2, dmg: 0.6 }, weight: 1, armor: true },
+      // Behind him: he wheels round and sweeps (Sleeper._considerAttack).
+      { name: 'turn', windup: 0.6, strike: 0.6, recover: 1.0, dmg: 1, minRange: 0, maxRange: 9, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 0, armor: true, behind: true },
+    ],
+  },
   gorvath: {
     name: 'Gorvath, the Flame-Horned',
     asset: 'gorvath',
@@ -264,5 +300,318 @@ export class Boss extends Enemy {
   _updateDying(dt, ctx) {
     super._updateDying(dt, ctx);
     this.light.intensity *= Math.max(0, 1 - dt * 2);
+  }
+}
+
+// ------------------------------------------------------------- the Sleeper
+
+// Seconds of quiet between his lines, at the least.
+const VOICE_GAP = 3;
+// Getting up off his bones, before he speaks; settling after.
+const RISE = 3.2;
+const SETTLE = 1.3;
+// His death: struck to his knees; then, once his last words are spoken, down.
+const KNEEL = 1.6;
+const FALL = 1.8;
+const LIE = 7;
+
+const _v = new THREE.Vector3();
+
+// Vorgrath sleeps in the arena at the end of the candle hall until Game wakes
+// him (once its candles are lit): he gets up, speaks (the intro), and the
+// fight begins (ctx.onBossEvent('fight')). His recorded lines (voiceLines.js)
+// are each spoken once at most, never within VOICE_GAP of another: the
+// intro as he rises, "Defeat me" a while into the fight, "Clever" when you
+// get behind him (he wheels round with a sweep), and his death line on his
+// knees before he falls. His head tips back with the loudness of the line,
+// which opens his mouth.
+export class Sleeper extends Boss {
+  constructor(key, spawn, tuning) {
+    super(key, spawn, tuning);
+    this.state = 'sleeping';
+    this.pose = { name: 'sleep', u: 0, rate: 4 };
+    this.voice = { used: new Set(), freeAt: 0, line: null, t0: 0, queued: null };
+    this.talk = 0;
+    this.talkK = 0;
+    // His voice keeps to real time (not slowed by a hit's freeze), as the
+    // recording plays.
+    this.clock = 0;
+    this.behindT = 0;
+    this.fightT = 0;
+    this.light.intensity = 0;
+    // The axe's path: a box swung round him on a pivot.
+    this.arcPivot = new THREE.Object3D();
+    this.root.add(this.arcPivot);
+    this.arc = new StrikeVolume(this.arcPivot, new THREE.Vector3(0, 1.5, 3.3), new THREE.Vector3(1.4, 1.7, 2.3));
+    this._holdAxe();
+  }
+
+  // The axe in his right fist: its haft runs out of the fist the way his
+  // thumb points, its two blades across it, gripped near the butt.
+  _holdAxe() {
+    const hand = this.model.bones.find((b) => b.name === 'RightHand');
+    const axe = Assets.instanceProp('sleeperAxe');
+    if (!hand || !axe) return;
+    axe.traverse((o) => {
+      if (o.isMesh) o.material = sceneryMaterial(o.material, { tint: [1.1, 1.05, 1.05], glow: 0xff7a3a, strength: 0.55 });
+    });
+    this.root.updateMatrixWorld(true);
+    const holder = new THREE.Group();
+    holder.scale.setScalar(1 / hand.getWorldScale(_v).x);
+    holder.position.set(-0.075, -0.012, 0.02);
+    axe.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)));
+    holder.add(axe);
+    hand.add(holder);
+    this.axe = axe;
+  }
+
+  isEngaged() {
+    return this.alive && this.state !== 'sleeping' && this.state !== 'rising' && this.state !== 'dying';
+  }
+
+  get asleep() {
+    return this.state === 'sleeping' || this.state === 'rising';
+  }
+
+  // Game: the candles are lit. He gets up.
+  wake(ctx) {
+    if (this.state !== 'sleeping') return;
+    this.setState('rising');
+    this.pose = { name: 'rise', u: 0, rate: 6 };
+    ctx.audio?.roar(this.position);
+    ctx.shake?.(0.25);
+  }
+
+  update(dt, ctx) {
+    this.ctx = ctx;
+    this.clock += ctx.realDt ?? dt;
+    this._updateVoice(dt);
+    const p = ctx.player.position;
+    const toPlayer = Math.atan2(p.x - this.position.x, p.z - this.position.z);
+    this.distToPlayer = Math.hypot(p.x - this.position.x, p.z - this.position.z);
+    if (this.asleep) this.light.position.set(this.position.x + Math.sin(this.yaw) * 2.4, 3.2, this.position.z + Math.cos(this.yaw) * 2.4);
+    if (this.state === 'sleeping') {
+      this.stateT += dt;
+      this.pose.u = (this.stateT / 4) % 1;
+      this.root.rotation.y = this.yaw;
+      return;
+    }
+    if (this.state === 'rising') {
+      this._updateRise(dt, ctx, toPlayer);
+      this.root.rotation.y = this.yaw;
+      this.light.intensity = Math.min(6, this.stateT * 2);
+      return;
+    }
+    // Wheeling round on you: far quicker than he ever turns otherwise.
+    if (this.state === 'windup' && this.attack?.name === 'turn') this._turnToward(toPlayer, dt, 5.5);
+    super.update(dt, ctx);
+    if (this.alive) {
+      this.light.intensity = 6 + Math.sin(ctx.time * 2.3) * 1.2 + (this.phase - 1) * 2;
+      this.fightT += dt;
+      // A while into the fight, or once he is hurt: "Defeat me".
+      if (this.fightT > 22 || this.health < this.maxHealth * 0.65) this._say('defeat');
+    }
+  }
+
+  _updateRise(dt, ctx, toPlayer) {
+    const t = (this.stateT += dt);
+    const speak = VOICE_LINES.intro?.duration ?? 4;
+    let u;
+    if (t < RISE) u = 0.5 * (t / RISE);
+    else if (t < RISE + speak) {
+      // Up: he rears back, arms wide, and speaks.
+      this._say('intro', true);
+      u = 0.5 + 0.35 * ((t - RISE) / speak);
+    } else u = 0.85 + 0.15 * Math.min(1, (t - RISE - speak) / SETTLE);
+    this.pose.u = u;
+    if (t > RISE * 0.5) this._turnToward(toPlayer, dt, 0.9);
+    if (Math.abs(t - RISE * 0.45) < dt) {
+      ctx.shake?.(0.3);
+      burst(ctx.fx.alpha, _v.set(this.position.x, 0.4, this.position.z), { count: 40, speed: 3, color: C.smoke, colorEnd: C.smoke, size: 0.8, life: 1.4, gravity: -1 });
+    }
+    if (t >= RISE + speak + SETTLE) {
+      this.pose = null;
+      this.setState('chase');
+      this.cooldown = 0.8;
+      ctx.onBossEvent?.('fight', this);
+    }
+  }
+
+  // ---- His voice ----
+
+  // Speak a line if it has not been spoken and nothing was said in the last
+  // VOICE_GAP seconds (or `force`, the intro). Returns whether it was.
+  _say(id, force = false) {
+    const v = this.voice;
+    const line = VOICE_LINES[id];
+    if (!line || v.used.has(id)) return false;
+    const t = this.clock;
+    if (!force && (t < v.freeAt || v.line)) return false;
+    v.used.add(id);
+    v.line = line;
+    v.t0 = t;
+    v.freeAt = t + line.duration + VOICE_GAP;
+    this.ctx?.audio?.voice(line.file, line.duration);
+    return true;
+  }
+
+  // The head follows the loudness of what he is saying; a line waiting for
+  // its turn (his last words) is spoken as soon as it may be.
+  _updateVoice(dt) {
+    const v = this.voice;
+    if (v.queued && !v.line && this.clock >= v.freeAt) {
+      const id = v.queued;
+      v.queued = null;
+      this._say(id);
+    }
+    let loud = 0;
+    if (v.line) {
+      const k = (this.clock - v.t0) * VOICE_FPS;
+      const i = Math.floor(k);
+      if (i >= v.line.env.length) v.line = null;
+      else {
+        const a = +v.line.env[i];
+        const b = +(v.line.env[i + 1] ?? 0);
+        loud = (a + (b - a) * (k - i)) / 9;
+      }
+    }
+    this.talkK += (loud - this.talkK) * Math.min(1, dt * 16);
+    this.talk = this.talkK * 0.3 + (v.line ? 0.03 : 0);
+  }
+
+  // ---- Fighting ----
+
+  _considerAttack(dt, ctx, dist) {
+    const player = ctx.player;
+    if (player.dead) return;
+    const off = Math.abs(angleDelta(this.yaw, Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z)));
+    // Behind him: "Clever...", and he wheels round with the axe (whether
+    // or not he has got his breath back from his last blow).
+    if (off > 1.75 && dist < 8.5) {
+      this.behindT += dt;
+      if (this.behindT > 0.35) {
+        this.behindT = 0;
+        this._say('clever');
+        this._startAttack(this.type.attacks.find((a) => a.name === 'turn'), ctx, this.phase === 1 ? 1 : 0.85);
+        this.lastMoves.push('turn');
+        if (this.lastMoves.length > 2) this.lastMoves.shift();
+        return;
+      }
+    } else this.behindT = Math.max(0, this.behindT - dt);
+    if (this.cooldown > 0 || off > 0.55) return;
+    const moves = this.type.attacks.filter((a) => !a.behind && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
+    if (!moves.length) return;
+    let roll = Math.random() * moves.reduce((s, a) => s + (a.weight || 1), 0);
+    let pick = moves[0];
+    for (const a of moves) {
+      roll -= a.weight || 1;
+      if (roll <= 0) {
+        pick = a;
+        break;
+      }
+    }
+    this.lastMoves.push(pick.name);
+    if (this.lastMoves.length > 2) this.lastMoves.shift();
+    this._startAttack(pick, ctx, this.phase === 1 ? 1 : 0.82);
+  }
+
+  _startAttack(a, ctx, windupScale = 1, chained = false) {
+    super._startAttack(a, ctx, windupScale, chained);
+    // The reach of the sweep marked on the floor round him as it winds up.
+    if (a.arc) ctx.effects?.telegraph(this.position.x, this.position.z, 5.6, this.stateDur, null, 0xff6a20);
+    else if (a.name === 'stomp') ctx.effects?.telegraph(this.position.x, this.position.z, a.aoe.radius, this.stateDur, null, 0xff6a20);
+  }
+
+  _updateStrike(dt, ctx) {
+    const a = this.attack;
+    if (a?.arc) {
+      const k = Math.min(1, this.stateT / Math.max(1e-3, this.stateDur));
+      this.arcPivot.rotation.y = a.arc[0] + (a.arc[1] - a.arc[0]) * k;
+      this.root.updateMatrixWorld(true);
+      if (!this.hitPlayer && ctx.player.overlapsOBB(this.arc.update())) {
+        this.hitPlayer = true;
+        ctx.player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
+        if (this.state !== 'strike') return;
+      }
+      // Grit thrown up where the axe skims the floor.
+      if (Math.random() < dt * 30) {
+        const ang = this.yaw + this.arcPivot.rotation.y;
+        burst(ctx.fx.alpha, _v.set(this.position.x + Math.sin(ang) * 4.6, 0.3, this.position.z + Math.cos(ang) * 4.6), { count: 4, speed: 2, color: C.smoke, colorEnd: C.smoke, size: 0.5, life: 0.8, gravity: -1 });
+      }
+    }
+    super._updateStrike(dt, ctx);
+  }
+
+  // Phase two at half health: quicker to swing; nothing summoned.
+  _checkPhase(ctx) {
+    if (this.phase === 1 && this.health < this.maxHealth * 0.5) {
+      this.phase = 2;
+      ctx.announce?.('Vorgrath’s fury builds!');
+      ctx.shake?.(0.4);
+      ctx.audio?.roar(this.position);
+    }
+  }
+
+  // ---- Nothing staggers him ----
+
+  takeHit(amount, dir, knockback, stagger, ctx, opts) {
+    // Asleep or rising, the blade glances off him.
+    if (this.asleep) return 0;
+    return Enemy.prototype.takeHit.call(this, amount, dir, 0, 0, ctx, opts);
+  }
+
+  interrupt() {}
+
+  stumble() {}
+
+  freeze() {}
+
+  parried() {
+    this.flash = 0.6;
+  }
+
+  // His blows cannot be countered: there is no catching him in a wind-up.
+  isWindingUp() {
+    return false;
+  }
+
+  // ---- His death: to his knees, his last words, then down on his face ----
+
+  die(ctx) {
+    this.ctx = ctx;
+    super.die(ctx);
+    this.setState('dying', Infinity);
+    this.voice.queued = 'death';
+    this._updateVoice(0);
+    this.fallAt = null;
+    this.deathU = 0;
+  }
+
+  _updateDying(dt, ctx) {
+    for (const e of this.emitters) e.rate *= 1 - Math.min(1, dt * 3);
+    this.light.intensity *= Math.max(0, 1 - dt * 0.6);
+    const t = this.stateT;
+    const v = this.voice;
+    const spoken = v.used.has('death') && !v.line && !v.queued;
+    if (t < KNEEL) this.deathU = 0.25 * (t / KNEEL);
+    else if (this.fallAt === null) {
+      // Swaying on his knees while he speaks his last.
+      this.deathU = 0.485 + Math.sin((t - KNEEL) * 0.9 - Math.PI / 2) * 0.235;
+      if (spoken || !VOICE_LINES.death) this.fallAt = t;
+    }
+    if (this.fallAt !== null) {
+      const k = Math.min(1, (t - this.fallAt) / FALL);
+      this.deathU = 0.72 + 0.28 * k;
+      if (k >= 1 && !this.landed) {
+        this.landed = true;
+        ctx.shake?.(0.6);
+        ctx.audio?.slam(this.position);
+        burst(ctx.fx.alpha, _v.set(this.position.x + Math.sin(this.yaw) * 2.5, 0.4, this.position.z + Math.cos(this.yaw) * 2.5), { count: 60, speed: 4, color: C.smoke, colorEnd: C.smoke, size: 1, life: 1.6, gravity: -1 });
+      }
+      // Lies there, then sinks away.
+      const sink = Math.max(0, t - this.fallAt - FALL - LIE) / 2;
+      this.root.position.y = -sink * 2.5;
+      if (sink >= 1) this.removed = true;
+    }
   }
 }

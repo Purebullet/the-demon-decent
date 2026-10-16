@@ -252,7 +252,12 @@ export function buildGltfCharacter(id, rootScale = 1) {
     const attacking = e.state === 'windup' || e.state === 'strike' || e.state === 'recover';
     if (e.state === 'dying') {
       rate = 14;
-      set('death', e.stateT / 1.6) || set('hit', 1);
+      // (`deathU`: a death the creature paces itself, the Sleeper's.)
+      set('death', e.deathU ?? e.stateT / 1.6) || set('hit', 1);
+    } else if (e.pose && clips[e.pose.name]) {
+      // A clip the creature drives itself (asleep, rising): { name, u }.
+      rate = e.pose.rate ?? 6;
+      set(e.pose.name, e.pose.u);
     } else if (e.state === 'stagger') {
       rate = 16;
       // Stumbling: the legs stagger backwards under the hit pose.
@@ -445,11 +450,14 @@ export function buildGltfCharacter(id, rootScale = 1) {
     pose.rotation.x += spring.x * (mixer ? 0.35 : 1);
     pose.rotation.z = spring.z * (mixer ? 0.35 : 1);
     pose.rotation.y = spring.y * 0.5;
-    if (mixer && (applied.size || Math.abs(spring.x) + Math.abs(spring.y) + Math.abs(spring.z) > 1e-3)) {
+    // Speaking (`talk`, radians): the head tips back from the jaw, opening
+    // the mouth (the Sleeper's jaw is one with his chest).
+    const talk = e.talk || 0;
+    if (mixer && (applied.size || talk || Math.abs(spring.x) + Math.abs(spring.y) + Math.abs(spring.z) > 1e-3)) {
       root.updateMatrixWorld(true);
       turnBone(chest, spring.x * 0.9, spring.y * 0.8, spring.z * 0.9);
       const hk = 0.5 + spring.head * 1.2;
-      turnBone(head, spring.x * hk, 0, spring.z * hk);
+      turnBone(head, spring.x * hk - talk, 0, spring.z * hk);
     }
 
     if (anchors.length) pose.updateMatrixWorld(true);

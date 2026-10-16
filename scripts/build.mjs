@@ -32,11 +32,12 @@ const EXPERIENCE = {
   entry: 'main.js',
   name: 'The Demon Descent',
   description:
-    'A first-person dark-fantasy roguelike of rhythm and steel. Step into the pit and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and two demon lords. Time your strikes into Perfect Chains, counter their wind-ups, break their guards, and hunt cursed relics. One life, no armour; your deepest floor goes on the weekly table.',
+    'A first-person dark-fantasy roguelike of rhythm and steel. Step into the pit and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and three demon lords, the first asleep at the end of a candlelit hall. Time your strikes into Perfect Chains, counter their wind-ups, break their guards, and hunt cursed relics. One life, no armour; your deepest floor goes on the weekly table.',
   maxPlayers: 8,
   credits: [
     { work: 'Game, code, sound and stand-in models', by: 'made for this lot; sounds synthesized in code' },
-    { work: 'Music: "Infernal Crescendo" and "Blood in the Arena"', by: "provided by PureBullet, the lot's owner" },
+    { work: 'Music: "Infernal Crescendo", "Blood in the Arena", "Inferno Allegro", "Shadows in the Hall" and "From Shadows to Thunder"', by: "provided by PureBullet, the lot's owner" },
+    { work: "The Sleeper (floor 5's boss), his axe and his voice", by: "model, axe and recorded lines provided by PureBullet, the lot's owner; rigged, animated and voiced through a demon filter in code" },
   ],
 };
 
@@ -71,6 +72,9 @@ async function copyAssets(to) {
   // The songs, as they came.
   await mkdir(join(to, 'assets/music'), { recursive: true });
   for (const f of await readdir(join(root, 'assets/music'))) if (f.endsWith('.mp3')) await copyFile(join(root, 'assets/music', f), join(to, 'assets/music', f));
+  // The floor-5 boss's spoken lines (scripts/demon-voice.mjs).
+  await mkdir(join(to, 'assets/voice'), { recursive: true });
+  for (const f of await readdir(join(root, 'assets/voice'))) if (f.endsWith('.mp3')) await copyFile(join(root, 'assets/voice', f), join(to, 'assets/voice', f));
   return { models: models.length, sounds: s.count };
 }
 

@@ -179,6 +179,58 @@ export const RIGS = {
     attacks: { sweep: 'swipe', lash: 'lash', volley: 'cast', gust: 'burst', leap: 'leap', rain: 'cast' },
   },
 
+  // The floor-5 boss, the Sleeper: a vast, bloated ogre-demon (the user's own
+  // model, in a T-pose: `armDrop` lowers the arms in every clip). His jaw is
+  // one with his chest; the head (the skull above the mouth, hinged where
+  // the jaws meet) tips back to open the mouth as he speaks. An axe rides
+  // his right hand (added in the game: Bosses.js).
+  sleeper: {
+    slot: 'sleeper',
+    source: 'assets/source/sleeper.glb',
+    out: 'assets/models/sleeper.glb',
+    yaw: 0,
+    plan: 'biped',
+    armDrop: 1.15,
+    joints: {
+      Hips: [0, 0.31, 0],
+      Waist: [0, 0.47, 0.03],
+      Chest: [0, 0.62, 0],
+      Neck: [0, 0.72, 0],
+      Head: [0, 0.78, 0.03],
+      HeadTop: [0, 1.0, 0.06],
+      LeftShoulder: [0.1, 0.75, 0],
+      LeftArm: [0.28, 0.75, 0],
+      LeftForeArm: [0.48, 0.74, 0],
+      LeftHand: [0.64, 0.69, 0.02],
+      LeftHandTip: [0.82, 0.65, 0.05],
+      LeftUpLeg: [0.14, 0.31, 0],
+      LeftLeg: [0.18, 0.16, 0.03],
+      LeftFoot: [0.22, 0.06, 0],
+      LeftToe: [0.25, 0.01, 0.2],
+    },
+    snap: { LeftArm: 0.12, LeftForeArm: 0.1, LeftHand: 0.08, LeftLeg: 0.12, LeftFoot: 0.09 },
+    r: { Hips: 0.22, Waist: 0.3, Chest: 0.27, Neck: 0.12, Head: 0.4, LeftShoulder: 0.12, LeftArm: 0.08, LeftForeArm: 0.065, LeftHand: 0.055, LeftUpLeg: 0.11, LeftLeg: 0.09, LeftFoot: 0.07 },
+    limit: {
+      // Only the skull above the mouth: the jaw stays with the chest.
+      Head: { x: [-0.15, 0.15], y: [0.74], z: [-0.03] },
+      Chest: { y: [null, 0.82] },
+      LeftShoulder: { x: [0.06] },
+      LeftArm: { x: [0.22] },
+      LeftForeArm: { x: [0.38] },
+      LeftHand: { x: [0.56] },
+      LeftUpLeg: { x: [0.02], y: [null, 0.34] },
+      LeftLeg: { x: [0.02], y: [null, 0.24] },
+      LeftFoot: { y: [null, 0.1] },
+    },
+    walk: { stride: 0.32, knee: 0.55, crouch: 0.06, lean: 0.1, twist: 0.12, sway: 0.09, arm: 0.2, armOut: 0.1, elbow: 0.2 },
+    run: { stride: 0.42, knee: 0.75, crouch: 0.09, lean: 0.16, twist: 0.14, sway: 0.1, arm: 0.3, armOut: 0.12, elbow: 0.3 },
+    idle: { breath: 0.06, look: 0.12 },
+    death: 'forward',
+    deathMotion: 'kneelDeath',
+    clips: ['sleep', 'rise'],
+    attacks: { sweep: 'axeSweep', chop: 'axeChop', turn: 'axeSweep', stomp: 'stomp' },
+  },
+
   // Zoodle #206 "Demon Witch": the Pyre Witch, staff in her right hand.
   witch: {
     slot: 'witch',
