@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 import { makeCanvas } from '../world/Textures.js';
 
 // What a blow leaves on a demon's body, by weapon: a sword cuts a gash along
@@ -84,56 +83,157 @@ const _a = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _m = new THREE.Matrix4();
-const _v = new THREE.Vector3();
-const _l = new THREE.Vector3();
 const _e = new THREE.Euler();
 const _inv = new THREE.Matrix4();
 
-// Each vertex's heaviest bone (worked out once per mesh), and the matrix
-// that poses the mesh by each bone alone, as things stand now.
-const heaviest = new WeakMap();
+// A body, indexed once per model: each vertex's heaviest bone, the vertices
+// and triangles each bone holds, and how far its vertices lie from it. A
+// blow then only looks at the bones whose flesh reaches near it: a cut costs
+// the same on a 31 000-vertex boss as on a hound, and nothing is allocated
+// for it but the mark itself.
+const indexed = new WeakMap();
 const _w = new THREE.Vector3();
-function roughPoser(mesh) {
-  const sk = mesh.skeleton;
-  if (!mesh.isSkinnedMesh || !sk) return null;
-  let bone = heaviest.get(mesh.geometry);
-  if (!bone) {
-    const si = mesh.geometry.attributes.skinIndex;
-    const sw = mesh.geometry.attributes.skinWeight;
-    bone = new Uint8Array(si.count);
-    for (let i = 0; i < si.count; i++) {
+// Straight reads of an attribute's numbers (interleaved or not, packed into
+// integers or not), for the loops below.
+const RANGE = new Map([[Int8Array, 127], [Uint8Array, 255], [Int16Array, 32767], [Uint16Array, 65535], [Uint32Array, 4294967295]]);
+function reader(attr) {
+  const inter = !!attr.isInterleavedBufferAttribute;
+  const array = inter ? attr.data.array : attr.array;
+  return { array, stride: inter ? attr.data.stride : attr.itemSize, offset: inter ? attr.offset : 0, scale: attr.normalized ? 1 / (RANGE.get(array.constructor) || 1) : 1 };
+}
+function boneIndex(mesh) {
+  let c = indexed.get(mesh.geometry);
+  if (c) return c;
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const si = geo.attributes.skinIndex;
+  const sw = geo.attributes.skinWeight;
+  const n = pos.count;
+  // An unrigged body is all one piece, and never moves in its own space.
+  const sk = mesh.isSkinnedMesh && mesh.skeleton;
+  const nb = sk ? sk.bones.length : 1;
+  const bone = new Uint8Array(n);
+  const counts = new Uint32Array(nb);
+  for (let i = 0; i < n; i++) {
+    if (sk) {
       let best = 0;
       for (let k = 1; k < 4; k++) if (sw.getComponent(i, k) > sw.getComponent(i, best)) best = k;
       bone[i] = si.getComponent(i, best);
     }
-    heaviest.set(mesh.geometry, bone);
+    counts[bone[i]]++;
   }
-  const m = sk.bones.map((b, j) => new THREE.Matrix4().multiplyMatrices(mesh.bindMatrixInverse, b.matrixWorld).multiply(sk.boneInverses[j]).multiply(mesh.bindMatrix));
-  // Every vertex posed so, once per blow (shared by the two passes).
-  const pos = mesh.geometry.attributes.position;
-  const at = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) _w.fromBufferAttribute(pos, i).applyMatrix4(m[bone[i]]).toArray(at, i * 3);
-  return { bone, m, at };
+  const verts = Array.from(counts, (k) => new Uint32Array(k));
+  const fill = new Uint32Array(nb);
+  for (let i = 0; i < n; i++) verts[bone[i]][fill[bone[i]]++] = i;
+  // A triangle is listed under each bone among its corners.
+  const index = geo.index;
+  const triCount = (index ? index.count : n) / 3;
+  const lists = Array.from({ length: nb }, () => []);
+  for (let t = 0; t < triCount; t++) {
+    const a = bone[index ? index.getX(t * 3) : t * 3];
+    const b = bone[index ? index.getX(t * 3 + 1) : t * 3 + 1];
+    const d = bone[index ? index.getX(t * 3 + 2) : t * 3 + 2];
+    lists[a].push(t);
+    if (b !== a) lists[b].push(t);
+    if (d !== a && d !== b) lists[d].push(t);
+  }
+  const tris = lists.map((l) => Uint32Array.from(l));
+  // How far each bone's flesh lies from it (in its own space, as bound).
+  const radius = new Float32Array(nb);
+  if (sk) {
+    const toBone = sk.boneInverses.map((inv) => new THREE.Matrix4().multiplyMatrices(inv, mesh.bindMatrix));
+    for (let i = 0; i < n; i++) radius[bone[i]] = Math.max(radius[bone[i]], _w.fromBufferAttribute(pos, i).applyMatrix4(toBone[bone[i]]).length());
+  }
+  c = {
+    P: reader(pos),
+    SI: sk ? reader(si) : null,
+    SW: sk ? reader(sw) : null,
+    rigid: !sk,
+    bone,
+    verts,
+    tris,
+    radius,
+    mats: sk ? sk.bones.map(() => new THREE.Matrix4()) : [],
+    at: sk ? new Float32Array(n * 3) : Float32Array.from({ length: n * 3 }, (_, k) => pos.getComponent(Math.floor(k / 3), k % 3)),
+    posed: new Float32Array(n * 3),
+    posedMark: new Uint32Array(n),
+    matMark: new Uint32Array(nb),
+    near: new Uint8Array(n),
+    stamp: new Uint32Array(triCount),
+    mark: 0,
+    wanted: [],
+    touched: [],
+  };
+  indexed.set(geo, c);
+  return c;
+}
+
+// Builds the index of every skinned body under `root` ahead of time (while
+// a floor loads), so the first blow on each kind of demon costs no more than
+// any other.
+export function prepareWounds(root) {
+  root.traverse((o) => {
+    if (o.isSkinnedMesh && o.skeleton) boneIndex(o);
+  });
+}
+
+// Pose roughly (each vertex by its heaviest bone alone, into c.at, mesh
+// space) the flesh of the bones that reaches within r of the segment p-q
+// (world, matrices current); those bones are left in c.wanted.
+const _pq = new THREE.Vector3();
+function roughPose(mesh, c, p, q, r) {
+  c.wanted.length = 0;
+  if (c.rigid) {
+    c.wanted.push(0);
+    return;
+  }
+  const sk = mesh.skeleton;
+  const { array: pa, stride: ps, offset: po, scale: pk } = c.P;
+  const scale = mesh.matrixWorld.getMaxScaleOnAxis();
+  _pq.subVectors(q, p);
+  const len2 = _pq.lengthSq();
+  for (let b = 0; b < sk.bones.length; b++) {
+    const list = c.verts[b];
+    if (!list.length) continue;
+    _w.setFromMatrixPosition(sk.bones[b].matrixWorld).sub(p);
+    const t = len2 > 1e-12 ? Math.max(0, Math.min(1, _w.dot(_pq) / len2)) : 0;
+    const reach = c.radius[b] * scale + r;
+    if (_w.addScaledVector(_pq, -t).lengthSq() > reach * reach) continue;
+    c.wanted.push(b);
+    const m = c.mats[b].multiplyMatrices(mesh.bindMatrixInverse, sk.bones[b].matrixWorld).multiply(sk.boneInverses[b]).multiply(mesh.bindMatrix);
+    const at = c.at;
+    const e = m.elements;
+    for (let j = 0; j < list.length; j++) {
+      const i = list[j];
+      const x = pa[i * ps + po] * pk;
+      const y = pa[i * ps + po + 1] * pk;
+      const z = pa[i * ps + po + 2] * pk;
+      at[i * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      at[i * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      at[i * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+  }
 }
 
 // Where a ray from `o` along `d` first meets the body. A skinned body is
-// not raycast triangle by triangle (that poses every triangle: far too slow
-// on a big one); the vertex nearest the ray, nearest its start, is taken,
-// from the bodies as each bone alone poses them, then posed properly.
+// not raycast triangle by triangle (that poses every triangle); the vertex
+// nearest the ray, nearest its start, is taken from the flesh near the ray,
+// roughly posed, then posed properly.
 const _ol = new THREE.Vector3();
 const _dl = new THREE.Vector3();
+const _mid = new THREE.Vector3();
 function surfaceHit(meshes, o, d, far) {
   let best = null;
   for (const mesh of meshes) {
-    const rough = roughPoser(mesh);
-    mesh.userData.rough = rough;
-    if (!rough) {
+    if (!mesh.isSkinnedMesh || !mesh.skeleton) {
       ray.set(o, d);
       ray.far = far;
       const h = ray.intersectObject(mesh, false)[0];
       if (h && (!best || h.distance < best.distance)) best = { point: h.point.clone(), object: mesh, distance: h.distance };
       continue;
     }
+    const c = boneIndex(mesh);
+    roughPose(mesh, c, o, _mid.copy(o).addScaledVector(d, far), 0.4);
     _inv.copy(mesh.matrixWorld).invert();
     _ol.copy(o).applyMatrix4(_inv);
     _dl.copy(o).add(d).applyMatrix4(_inv).sub(_ol);
@@ -141,31 +241,36 @@ function surfaceHit(meshes, o, d, far) {
     _dl.multiplyScalar(1 / unit);
     const farL = far * unit;
     const tol = 0.12 * unit;
-    const pos = mesh.geometry.attributes.position;
+    const at = c.at;
+    // The closest any of it comes to the ray, then the first along the ray
+    // of what comes about that close.
+    let minPerp = Infinity;
+    for (let w = 0; w < c.wanted.length; w++) {
+      const list = c.verts[c.wanted[w]];
+      for (let j = 0; j < list.length; j++) {
+        const i = list[j];
+        _w.set(at[i * 3], at[i * 3 + 1], at[i * 3 + 2]).sub(_ol);
+        const t = _w.dot(_dl);
+        if (t < 0 || t > farL) continue;
+        const p2 = _w.lengthSq() - t * t;
+        if (p2 < minPerp) minPerp = p2;
+      }
+    }
+    if (minPerp > (tol * 3) ** 2) continue;
+    const limit = Math.max(minPerp * 4, tol * tol);
     let bestI = -1;
     let bestT = Infinity;
-    let minPerp = Infinity;
-    const perps = new Float32Array(pos.count);
-    const ts = new Float32Array(pos.count);
-    for (let i = 0; i < pos.count; i++) {
-      _w.fromArray(rough.at, i * 3).sub(_ol);
-      const t = _w.dot(_dl);
-      ts[i] = t;
-      if (t < 0 || t > farL) {
-        perps[i] = Infinity;
-        continue;
-      }
-      const p2 = _w.lengthSq() - t * t;
-      perps[i] = p2;
-      if (p2 < minPerp) minPerp = p2;
-    }
-    // Close to the ray, the first along it: the surface it meets.
-    const limit = Math.max(minPerp * 4, tol * tol);
-    if (minPerp > (tol * 3) ** 2) continue;
-    for (let i = 0; i < pos.count; i++) {
-      if (perps[i] <= limit && ts[i] < bestT) {
-        bestT = ts[i];
-        bestI = i;
+    for (let w = 0; w < c.wanted.length; w++) {
+      const list = c.verts[c.wanted[w]];
+      for (let j = 0; j < list.length; j++) {
+        const i = list[j];
+        _w.set(at[i * 3], at[i * 3 + 1], at[i * 3 + 2]).sub(_ol);
+        const t = _w.dot(_dl);
+        if (t < 0 || t > farL || t >= bestT) continue;
+        if (_w.lengthSq() - t * t <= limit) {
+          bestT = t;
+          bestI = i;
+        }
       }
     }
     if (bestI < 0) continue;
@@ -176,49 +281,196 @@ function surfaceHit(meshes, o, d, far) {
   return best;
 }
 
-// A decal over a skinned mesh's triangles as posed right now, in world
-// space. Only the triangles near the spot are cut, from their posed corners.
-function skinDecal(mesh, p, orientation, size) {
-  const pos = mesh.geometry.attributes.position;
-  const index = mesh.geometry.index;
+// A decal over a body's triangles as posed right now, put through `into`
+// (world space to the space it will ride in). Only the flesh inside the decal's own box (a long thin one for a
+// cut) is posed properly and only the triangles touching it are cut: the
+// projector's box, in the mesh's space, tested first on the rough pose with
+// a margin, then on the true one.
+const keep = [];
+const _projM = new THREE.Matrix4();
+const _proj = new THREE.Matrix4();
+const _toProj = new THREE.Matrix4();
+const _toOut = new THREE.Matrix4();
+function skinDecal(mesh, p, orientation, size, into) {
   mesh.updateMatrixWorld(true);
-  _l.copy(p);
-  mesh.worldToLocal(_l);
-  const reach = Math.max(size.x, size.y, size.z) * 0.8 / Math.max(1e-6, mesh.matrixWorld.getMaxScaleOnAxis());
-  const r2 = reach * reach;
-  const posed = new Float32Array(pos.count * 3);
-  const near = new Uint8Array(pos.count);
-  // A big body (the Sleeper's is 31 000 vertices): each vertex is first
-  // posed cheaply by its heaviest bone alone, and only those that land
-  // anywhere near the blow are posed properly.
-  const rough = mesh.userData.rough;
-  const loose = (reach * 1.8 + 0.05) ** 2;
-  for (let i = 0; i < pos.count; i++) {
-    if (rough) {
-      _v.fromArray(rough.at, i * 3);
-      if (_v.distanceToSquared(_l) > loose) continue;
+  const reachW = Math.max(size.x, size.y, size.z) * 0.6;
+  const c = boneIndex(mesh);
+  roughPose(mesh, c, p, p, reachW + 0.15);
+  // Mesh space to the projector's: x along the cut, y across it, z into the skin.
+  _projM.makeRotationFromEuler(orientation).setPosition(p);
+  _proj.copy(_projM).invert();
+  _toProj.multiplyMatrices(_proj, mesh.matrixWorld);
+  const hx = size.x / 2;
+  const hy = size.y / 2;
+  const hz = size.z / 2;
+  const e = _toProj.elements;
+  const inBox = (x, y, z, m) =>
+    Math.abs(e[0] * x + e[4] * y + e[8] * z + e[12]) <= hx + m &&
+    Math.abs(e[1] * x + e[5] * y + e[9] * z + e[13]) <= hy + m &&
+    Math.abs(e[2] * x + e[6] * y + e[10] * z + e[14]) <= hz + m;
+  const mark = (c.mark = (c.mark + 1) >>> 0 || 1);
+  const { at, posed, posedMark, near, touched, mats, matMark } = c;
+  // Posed properly: each bone's pull on the vertex by its weight, the bones'
+  // matrices worked out once per mark as they are first needed.
+  const sk = c.rigid ? null : mesh.skeleton;
+  const { array: pa, stride: ps, offset: po, scale: pk } = c.P;
+  const { array: ia, stride: is, offset: io } = c.SI || c.P;
+  const { array: wa, stride: ws, offset: wo, scale: wk } = c.SW || c.P;
+  const pose = (i) => {
+    if (posedMark[i] === mark) return;
+    posedMark[i] = mark;
+    const px = pa[i * ps + po] * pk;
+    const py = pa[i * ps + po + 1] * pk;
+    const pz = pa[i * ps + po + 2] * pk;
+    if (!sk) {
+      posed[i * 3] = px;
+      posed[i * 3 + 1] = py;
+      posed[i * 3 + 2] = pz;
+      return;
     }
-    mesh.getVertexPosition(i, _v);
-    posed[i * 3] = _v.x;
-    posed[i * 3 + 1] = _v.y;
-    posed[i * 3 + 2] = _v.z;
-    near[i] = _v.distanceToSquared(_l) < r2 ? 1 : 0;
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let k = 0; k < 4; k++) {
+      const w = wa[i * ws + wo + k] * wk;
+      if (!w) continue;
+      const b = ia[i * is + io + k];
+      if (matMark[b] !== mark) {
+        matMark[b] = mark;
+        mats[b].multiplyMatrices(mesh.bindMatrixInverse, sk.bones[b].matrixWorld).multiply(sk.boneInverses[b]).multiply(mesh.bindMatrix);
+      }
+      const m = mats[b].elements;
+      x += w * (m[0] * px + m[4] * py + m[8] * pz + m[12]);
+      y += w * (m[1] * px + m[5] * py + m[9] * pz + m[13]);
+      z += w * (m[2] * px + m[6] * py + m[10] * pz + m[14]);
+    }
+    posed[i * 3] = x;
+    posed[i * 3 + 1] = y;
+    posed[i * 3 + 2] = z;
+  };
+  touched.length = 0;
+  const wanted = c.wanted;
+  for (let w = 0; w < wanted.length; w++) {
+    const list = c.verts[wanted[w]];
+    for (let j = 0; j < list.length; j++) {
+      const i = list[j];
+      if (!inBox(at[i * 3], at[i * 3 + 1], at[i * 3 + 2], 0.1)) continue;
+      pose(i);
+      if (inBox(posed[i * 3], posed[i * 3 + 1], posed[i * 3 + 2], 0.02)) {
+        near[i] = 1;
+        touched.push(i);
+      }
+    }
   }
-  const keep = [];
-  const n = index ? index.count : pos.count;
-  for (let t = 0; t < n; t += 3) {
-    const a = index ? index.getX(t) : t;
-    const b = index ? index.getX(t + 1) : t + 1;
-    const c = index ? index.getX(t + 2) : t + 2;
-    if (!near[a] && !near[b] && !near[c]) continue;
-    for (const k of [a, b, c]) keep.push(posed[k * 3], posed[k * 3 + 1], posed[k * 3 + 2]);
+  const index = mesh.geometry.index;
+  keep.length = 0;
+  if (touched.length) {
+    for (let w = 0; w < wanted.length; w++) {
+      const tris = c.tris[wanted[w]];
+      for (let j = 0; j < tris.length; j++) {
+        const t = tris[j];
+        if (c.stamp[t] === mark) continue;
+        c.stamp[t] = mark;
+        const a = index ? index.getX(t * 3) : t * 3;
+        const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+        const d = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+        if (!near[a] && !near[b] && !near[d]) continue;
+        pose(a);
+        pose(b);
+        pose(d);
+        keep.push(posed[a * 3], posed[a * 3 + 1], posed[a * 3 + 2], posed[b * 3], posed[b * 3 + 1], posed[b * 3 + 2], posed[d * 3], posed[d * 3 + 1], posed[d * 3 + 2]);
+      }
+    }
   }
+  for (let j = 0; j < touched.length; j++) near[touched[j]] = 0;
   if (!keep.length) return null;
-  const local = new THREE.BufferGeometry();
-  local.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
-  const decal = new DecalGeometry({ geometry: local, matrixWorld: mesh.matrixWorld }, p, orientation, size);
-  local.dispose();
-  return decal.attributes.position.count ? decal : null;
+  const decal = cutMark(keep, _toProj, _toOut.multiplyMatrices(into, _projM), size);
+  return decal;
+}
+
+// The mark itself: each kept triangle taken into the projector's space,
+// clipped to its box (Sutherland-Hodgman, plane by plane), fanned back into
+// triangles with the box's face as the texture, and put through `toOut`.
+// Everything but the finished geometry is scratch kept between marks.
+const _pa = new Float64Array(3 * 12);
+const _pb = new Float64Array(3 * 12);
+let _outP = new Float32Array(3 * 3 * 256);
+let _outU = new Float32Array(2 * 3 * 256);
+function cutMark(tris, toProj, toOut, size) {
+  const e = toProj.elements;
+  const o = toOut.elements;
+  const half = [size.x / 2, size.y / 2, size.z / 2];
+  let n = 0;
+  for (let t = 0; t < tris.length; t += 9) {
+    let a = _pa;
+    let b = _pb;
+    for (let k = 0; k < 3; k++) {
+      const x = tris[t + k * 3];
+      const y = tris[t + k * 3 + 1];
+      const z = tris[t + k * 3 + 2];
+      a[k * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      a[k * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      a[k * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+    let m = 3;
+    for (let pl = 0; pl < 6 && m >= 3; pl++) {
+      const axis = pl >> 1;
+      const sign = pl & 1 ? -1 : 1;
+      const lim = half[axis];
+      let c = 0;
+      for (let i = 0; i < m; i++) {
+        const j = i + 1 === m ? 0 : i + 1;
+        const di = sign * a[i * 3 + axis] - lim;
+        const dj = sign * a[j * 3 + axis] - lim;
+        if (di <= 0) {
+          b[c * 3] = a[i * 3];
+          b[c * 3 + 1] = a[i * 3 + 1];
+          b[c * 3 + 2] = a[i * 3 + 2];
+          c++;
+        }
+        if (di <= 0 !== dj <= 0) {
+          const f = di / (di - dj);
+          b[c * 3] = a[i * 3] + (a[j * 3] - a[i * 3]) * f;
+          b[c * 3 + 1] = a[i * 3 + 1] + (a[j * 3 + 1] - a[i * 3 + 1]) * f;
+          b[c * 3 + 2] = a[i * 3 + 2] + (a[j * 3 + 2] - a[i * 3 + 2]) * f;
+          c++;
+        }
+      }
+      m = c;
+      const s2 = a;
+      a = b;
+      b = s2;
+    }
+    if (m < 3) continue;
+    const need = n + (m - 2) * 3;
+    if (need * 3 > _outP.length) {
+      const P = new Float32Array(need * 6);
+      P.set(_outP);
+      _outP = P;
+      const U = new Float32Array(need * 4);
+      U.set(_outU);
+      _outU = U;
+    }
+    for (let i = 1; i < m - 1; i++) {
+      for (let q = 0; q < 3; q++) {
+        const v = q ? i + q - 1 : 0;
+        const x = a[v * 3];
+        const y = a[v * 3 + 1];
+        const z = a[v * 3 + 2];
+        _outU[n * 2] = 0.5 + x / size.x;
+        _outU[n * 2 + 1] = 0.5 + y / size.y;
+        _outP[n * 3] = o[0] * x + o[4] * y + o[8] * z + o[12];
+        _outP[n * 3 + 1] = o[1] * x + o[5] * y + o[9] * z + o[13];
+        _outP[n * 3 + 2] = o[2] * x + o[6] * y + o[10] * z + o[14];
+        n++;
+      }
+    }
+  }
+  if (!n) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(_outP.slice(0, n * 3), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(_outU.slice(0, n * 2), 2));
+  return geometry;
 }
 
 export class Wounds {
@@ -264,20 +516,19 @@ export class Wounds {
     _y.crossVectors(n, _x).normalize();
     _m.makeBasis(_x, _y, n);
     _e.setFromRotationMatrix(_m);
-    const geometry = skinDecal(skin, p, _e, _s.set(size[0], size[1], 0.3));
-    if (!geometry) return;
-    // Riding the nearest bone (or the body itself on an unrigged one).
+    // Riding the nearest bone (or the body itself on an unrigged one), cut
+    // straight into its space (the body's matrices are current: see hit).
     let parent = model.root;
     let best = Infinity;
     for (const b of model.bones || []) {
-      const d = b.getWorldPosition(_b).distanceToSquared(p);
+      const d = _b.setFromMatrixPosition(b.matrixWorld).distanceToSquared(p);
       if (d < best) {
         best = d;
         parent = b;
       }
     }
-    parent.updateMatrixWorld(true);
-    geometry.applyMatrix4(_inv.copy(parent.matrixWorld).invert());
+    const geometry = skinDecal(skin, p, _e, _s.set(size[0], size[1], 0.3), _inv.copy(parent.matrixWorld).invert());
+    if (!geometry) return;
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, materials()[kind] || materials().sword);
     mesh.renderOrder = 2;
@@ -288,6 +539,31 @@ export class Wounds {
     this.marks.push(mesh);
     if (list.length > PER_BODY) this._drop(list.shift());
     if (this.marks.length > ALL) this._drop(this.marks[0]);
+  }
+
+  // Blows of every kind on bodies kept out of sight (while a floor loads),
+  // wiped away after: the code a blow runs is compiled before the first
+  // real one, which would otherwise stall the frame it lands in.
+  rehearse(bodies) {
+    const dir = new THREE.Vector3(0, 0, -1);
+    const contact = new THREE.Vector3();
+    for (const e of bodies) {
+      const hb = e.hurtboxes?.[0];
+      if (!hb) continue;
+      e.model.root.updateMatrixWorld(true);
+      hb.update();
+      for (const kind of ['sword', 'axe', 'mace']) {
+        for (const heavy of [false, true]) {
+          contact.copy(hb.obb.center);
+          contact.z += 0.2;
+          this.hit(e, kind, contact, dir, null, heavy);
+        }
+      }
+      for (const m of e.wounds || []) this._drop(m);
+      e.wounds = [];
+    }
+    for (const c of this.chunks) c.mesh.removeFromParent();
+    this.chunks.length = 0;
   }
 
   _drop(mesh) {

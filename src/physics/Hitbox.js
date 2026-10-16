@@ -92,7 +92,8 @@ export function contactPoint(seg, obb, out) {
 
 export function queryHurtboxes(obb, targets, hitSet, out = [], seg = null) {
   const reach = obb.boundingRadius();
-  for (const target of targets) {
+  for (let ti = 0; ti < targets.length; ti++) {
+    const target = targets[ti];
     if (!target.alive || hitSet.has(target)) continue;
     // Broad phase: bounding spheres.
     const r = reach + target.hitRadius;
@@ -101,7 +102,9 @@ export function queryHurtboxes(obb, targets, hitSet, out = [], seg = null) {
     if (dx * dx + dz * dz > r * r) continue;
 
     let best = null;
-    for (const hb of target.hurtboxes) {
+    const hbs = target.hurtboxes;
+    for (let k = 0; k < hbs.length; k++) {
+      const hb = hbs[k];
       if (obb.intersectsOBB(hb.obb) && (!best || hb.multiplier > best.multiplier)) best = hb;
     }
     if (best) {

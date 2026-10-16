@@ -212,6 +212,10 @@ export class Props {
   _smash(b, ctx, dir) {
     if (!b || !b.alive) return;
     b.alive = false;
+    if (this._live) {
+      const i = this._live.indexOf(b);
+      if (i >= 0) this._live.splice(i, 1);
+    }
     if (b.mm) {
       // Out of its batch.
       b.mm.inst.setMatrixAt(b.mm.index, GONE);
@@ -365,8 +369,13 @@ export class Props {
     }
   }
 
-  // Breakables still standing, for the blade to test against.
+  // Breakables still standing, for the blade to test against (the list
+  // kept as they break, not built anew every frame of a swing).
   get targets() {
-    return this.breakables.filter((b) => b.alive);
+    if (!this._live || this._liveN !== this.breakables.length) {
+      this._live = this.breakables.filter((b) => b.alive);
+      this._liveN = this.breakables.length;
+    }
+    return this._live;
   }
 }

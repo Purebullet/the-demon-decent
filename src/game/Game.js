@@ -27,7 +27,7 @@ import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
 import { disposeTree } from '../core/dispose.js';
-import { Wounds, woundMaterials } from '../combat/Wounds.js';
+import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
 
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
@@ -132,6 +132,7 @@ export class Game {
     this.devFloor = devFloor;
     this.time = 0;
     this.hitStopT = 0;
+    this.hitStopMax = 0;
     this.paused = false;
     this.busy = false;
 
@@ -359,7 +360,17 @@ export class Game {
     }
     if (this.level) {
       // Boss summons and burrowed ambushers arrive mid-fight.
-      for (const type of Object.keys(ENEMY_TYPES)) far(new Enemy(type, { x: 0, z: 0 }, this.level.def).root);
+      const bodies = Object.keys(ENEMY_TYPES).map((type) => new Enemy(type, { x: 0, z: 0 }, this.level.def));
+      for (const e of bodies) far(e.root);
+      // Where a blow lands on each kind of body, worked out now rather than
+      // on the first blow; and, once a session, a few blows struck on them
+      // here, so the first real one runs ready code.
+      for (const o of staged) prepareWounds(o);
+      if (this.boss) prepareWounds(this.boss.root);
+      if (this.wounds && !this.rehearsed) {
+        this.rehearsed = true;
+        this.wounds.rehearse(bodies);
+      }
     }
     return staged;
   }
@@ -423,7 +434,9 @@ export class Game {
       torchIntensity: 30,
       torchRange: 16,
       tuning: SURFACE_TUNING,
-      hitStop: (s) => (this.hitStopT = Math.max(this.hitStopT, s)),
+      hitStop: (s) => {
+        if (s > this.hitStopT) this.hitStopT = this.hitStopMax = s;
+      },
       shake: (a) => this.player.shake(a),
       flash: (color, intensity, dur) => this.player.flash(color, intensity * 6, dur),
       onDamage: (e, amount, crit, point, kind) => this.hud.damageNumber(point || e.position, amount, crit, kind),
@@ -661,7 +674,9 @@ export class Game {
   // Overlapping demons are pushed apart, the lighter one further, and kept
   // out of the rock.
   _separate(level) {
-    const list = this.enemies.filter((e) => e.alive && e.state !== 'burrowed' && !e.hidden && e.root.position.y < 1);
+    const list = (this._sepList ||= []);
+    list.length = 0;
+    for (const e of this.enemies) if (e.alive && e.state !== 'burrowed' && !e.hidden && e.root.position.y < 1) list.push(e);
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       for (let j = i + 1; j < list.length; j++) {
@@ -1274,7 +1289,7 @@ export class Game {
   // ----------------------------------------------------------------- loop ---
 
   _frame(rawDt) {
-    const dt = Math.min(0.05, rawDt);
+    const dt = Math.min(0.05, this._pace(rawDt));
     this._adaptQuality(rawDt);
     this.hud.touch = this.input.touch;
     // Taps on the on-screen buttons act as their keys.
@@ -1300,8 +1315,11 @@ export class Game {
     if (!this.paused) {
       let wdt = dt;
       if (this.hitStopT > 0) {
+        // The weight of a blow: time all but stops, then eases back up to
+        // speed over the second half (no jolt as it lets go).
+        const k = Math.min(1, (this.hitStopT / Math.max(1e-3, this.hitStopMax)) * 2);
+        wdt = dt * (1 - 0.88 * k * k * (3 - 2 * k));
         this.hitStopT -= dt;
-        wdt = dt * 0.12;
       }
       this.time += wdt;
       if (this.ctx) this.ctx.realDt = dt;
@@ -1336,6 +1354,25 @@ export class Game {
   // climb back up too. A rung that had to be left waits longer each time
   // before it is tried again. Slow machines also lose the ground mist, and
   // get sparser scenery from the next floor (`slow`).
+  // Frame times wobble around the display's refresh (timer noise, the host's
+  // own work), and stepping the world by the wobble makes steady motion
+  // judder. A frame that spanned about a whole number of refreshes is
+  // stepped by exactly that, the difference paid back a little each frame
+  // so the game's clock still keeps to the real one.
+  _pace(rawDt) {
+    const r = this.quality?.refresh;
+    if (!r || rawDt > 0.1) return rawDt;
+    const k = Math.round(rawDt / r);
+    if (k < 1 || k > 3 || Math.abs(rawDt - k * r) > r * 0.25) {
+      this.paceDebt = 0;
+      return rawDt;
+    }
+    this.paceDebt = (this.paceDebt || 0) + rawDt - k * r;
+    const pay = this.paceDebt * 0.1;
+    this.paceDebt -= pay;
+    return k * r + pay;
+  }
+
   _adaptQuality(rawDt) {
     // A hidden tab, or a floor being built: not a measure of anything.
     if (rawDt > 1 || this.busy || this.compiling) return;

@@ -9,6 +9,12 @@ const R = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
 const AR = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
 const tmp = new Vector3();
 const tmp2 = new Vector3();
+// Scratch for the tests (they run many times a frame mid-swing: nothing is
+// allocated in them).
+const AE = [0, 0, 0];
+const BE = [0, 0, 0];
+const T = [0, 0, 0];
+const H = [0, 0, 0];
 
 export class OBB {
   constructor() {
@@ -61,7 +67,10 @@ export class OBB {
   closestPoint(p, target) {
     tmp.subVectors(p, this.center);
     target.copy(this.center);
-    const h = [this.half.x, this.half.y, this.half.z];
+    const h = H;
+    h[0] = this.half.x;
+    h[1] = this.half.y;
+    h[2] = this.half.z;
     for (let i = 0; i < 3; i++) {
       let d = tmp.dot(this.axes[i]);
       if (d > h[i]) d = h[i];
@@ -87,20 +96,39 @@ export class OBB {
 
   intersectsOBB(b) {
     const a = this;
-    // Cheap sphere reject first.
-    const rr = a.boundingRadius() + b.boundingRadius();
-    if (a.center.distanceToSquared(b.center) > rr * rr) return false;
+    // Cheap sphere reject first. (Written out in full here and below: this
+    // runs many times a frame mid-swing, and every small call that returned
+    // a number would leave one behind for the collector.)
+    const ah = a.half;
+    const bh = b.half;
+    const rr = Math.sqrt(ah.x * ah.x + ah.y * ah.y + ah.z * ah.z) + Math.sqrt(bh.x * bh.x + bh.y * bh.y + bh.z * bh.z);
+    const dx = b.center.x - a.center.x;
+    const dy = b.center.y - a.center.y;
+    const dz = b.center.z - a.center.z;
+    if (dx * dx + dy * dy + dz * dz > rr * rr) return false;
 
-    const ae = [a.half.x, a.half.y, a.half.z];
-    const be = [b.half.x, b.half.y, b.half.z];
+    const ae = AE;
+    const be = BE;
+    ae[0] = a.half.x;
+    ae[1] = a.half.y;
+    ae[2] = a.half.z;
+    be[0] = b.half.x;
+    be[1] = b.half.y;
+    be[2] = b.half.z;
     for (let i = 0; i < 3; i++) {
+      const u = a.axes[i];
       for (let j = 0; j < 3; j++) {
-        R[i][j] = a.axes[i].dot(b.axes[j]);
-        AR[i][j] = Math.abs(R[i][j]) + EPS;
+        const v = b.axes[j];
+        const r = u.x * v.x + u.y * v.y + u.z * v.z;
+        R[i][j] = r;
+        AR[i][j] = Math.abs(r) + EPS;
       }
     }
-    tmp.subVectors(b.center, a.center);
-    const t = [tmp.dot(a.axes[0]), tmp.dot(a.axes[1]), tmp.dot(a.axes[2])];
+    const t = T;
+    for (let i = 0; i < 3; i++) {
+      const u = a.axes[i];
+      t[i] = dx * u.x + dy * u.y + dz * u.z;
+    }
     let ra;
     let rb;
 

@@ -29,6 +29,16 @@ import { WINDOW_EARLY, WINDOW_LATE, CHAIN_MAX } from '../combat/Rhythm.js';
 // keeps its size relative to the screen (about 1.5x at 1080p).
 
 const SERIF = "Georgia, 'Times New Roman', serif";
+// A rounded rectangle path (without relying on the canvas's own roundRect).
+function roundRect(g, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
 // One look for every panel and label: charred black-red panels with grain,
 // a dark iron frame lined in old blood with small horned corners, and text
 // that glows softly out of the dark rather than sitting crisp on top of it.
@@ -1444,12 +1454,40 @@ export class Hud {
       this.layout.boss = { x: bx + 1, y: 149, w: bw - 2, h: 12 };
     } else if (this.layout) this.layout.boss = null;
 
+    // The weapon card's width (it is drawn last, bottom right).
+    const unarmed = p?.armed === false;
+    const wd = unarmed ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
+    const def = WEAPON_TYPES[wd.type];
+    const R = unarmed ? null : RARITIES[wd.rarity];
+    const dmg = Math.round(wd.damage * damageMul(r));
+    const spd = swingSpeedMul(r);
+    const statLine = wd.damage ? `${R ? `${R.name} · ` : ''}${def.label} · ${def.style} · ${dmg} dmg${spd > 1.001 ? ` · +${Math.round((spd - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
+    g.font = `18px ${SERIF}`;
+    let need = g.measureText(wd.name).width;
+    g.font = `10px ${SERIF}`;
+    if ('letterSpacing' in g) g.letterSpacing = '1.5px';
+    need = Math.max(need, g.measureText(statLine).width);
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+    const ww = Math.max(260, need + 108);
+
     // ---- Bottom centre: skills, then health beneath ----
     const sz = 66;
     const gap = 22;
     const total = SLOTS.length * sz + (SLOTS.length - 1) * gap;
-    let sx = (w - total) / 2;
     const hy = h - pad - 26;
+    // The vial centred under the skills, the potions and their key to its
+    // left. On Project 0 its chat sits bottom left: all of it keeps to the
+    // right of that (and left of the weapon), the vial shortened if it must.
+    let hw = Math.min(520, w * 0.5);
+    let hx = (w - hw) / 2;
+    const lead = 52 + r.potionCap * 26;
+    const chat = this.host?.kind === 'p0' ? 430 / this.u : 0;
+    if (chat && hx - lead < chat + 10) {
+      hx = chat + 10 + lead;
+      hw = Math.max(200, Math.min(hw, w - pad - ww - 61 - hx));
+    }
+    const cx = hx + hw / 2;
+    let sx = cx - total / 2;
     const sy = hy - 30 - sz - (this.touch ? 80 : 0);
     for (const slot of SLOTS) {
       const lvl = r.spells[slot.id];
@@ -1489,13 +1527,11 @@ export class Hud {
 
     // Health: an iron-framed vial of blood centred under the skills; the
     // blood itself is drawn on the GPU (fill, chip, glow).
-    const hw = Math.min(520, w * 0.5);
-    const hx = (w - hw) / 2;
     L.vial = { x: hx, y: hy, w: hw, h: 26 };
     L.health = { x: hx + 5, y: hy + 5, w: hw - 10, h: 16 };
     // The layer the numbers ride on: the skills and the vial, 4:1.
     const tw = Math.max(hw + 40, total + 40, (hy + 30 - (sy - 6)) * 4);
-    L.top = { x: (w - tw) / 2, y: hy + 30 - tw / 4, w: tw, h: tw / 4 };
+    L.top = { x: cx - tw / 2, y: hy + 30 - tw / 4, w: tw, h: tw / 4 };
     // Experience: a thin gold seam under the vial, the level on a plate to
     // its right (lit while a point waits to be spent).
     const maxed = r.level >= MAX_LEVEL;
@@ -1541,7 +1577,7 @@ export class Hud {
     if (tags.length) {
       g.font = `12px ${SERIF}`;
       const widths = tags.map(([t]) => g.measureText(t).width + 18);
-      let tx = w / 2 - (widths.reduce((a, b) => a + b, 0) + (tags.length - 1) * 8) / 2;
+      let tx = cx - (widths.reduce((a, b) => a + b, 0) + (tags.length - 1) * 8) / 2;
       tags.forEach(([t, c], k) => {
         this._tag(g, t, tx, sy - 18, c);
         tx += widths[k] + 8;
@@ -1549,20 +1585,6 @@ export class Hud {
     }
 
     // Weapon, bottom right: its painted icon, name, kind and personality.
-    const unarmed = p?.armed === false;
-    const wd = unarmed ? { name: 'Unarmed', type: r.weapon.type, damage: 0, color: C.ash } : r.weapon;
-    const def = WEAPON_TYPES[wd.type];
-    const R = unarmed ? null : RARITIES[wd.rarity];
-    const dmg = Math.round(wd.damage * damageMul(r));
-    const spd = swingSpeedMul(r);
-    const statLine = wd.damage ? `${R ? `${R.name} · ` : ''}${def.label} · ${def.style} · ${dmg} dmg${spd > 1.001 ? ` · +${Math.round((spd - 1) * 100)}% speed` : ''}`.toUpperCase() : '';
-    g.font = `18px ${SERIF}`;
-    let need = g.measureText(wd.name).width;
-    g.font = `10px ${SERIF}`;
-    if ('letterSpacing' in g) g.letterSpacing = '1.5px';
-    need = Math.max(need, g.measureText(statLine).width);
-    if ('letterSpacing' in g) g.letterSpacing = '0px';
-    const ww = Math.max(260, need + 108);
     const wh = 78;
     const wx = w - pad - ww;
     const wy = h - pad - wh;
@@ -1741,67 +1763,231 @@ export class Hud {
         y += 17;
       });
     }
-    // Controls, in three columns: getting about, fighting, and the demon
-    // spells. Keys bold and bright, what they do quieter beside them; each
-    // column as wide as its words, and the whole panel shrunk to fit.
-    if (!this.touch && h > 420) {
-      const cols = [
-        { title: 'Move', rows: [['W A S D', 'move'], ['Mouse', 'aim'], ['Shift', 'sprint'], ['Space', 'shade step'], ['E', 'drink potion'], ['F', 'take / use']] },
-        {
-          title: 'Fight',
-          rows: [
-            ['Quick left click', 'light attack'],
-            ['Hold left click', 'heavy attack'],
-            ['Multiple hits', 'chain attack'],
-            ['Hit before it strikes', 'stagger it'],
-            ['Right click', 'block'],
-          ],
-        },
-        {
-          title: 'Demon spells',
-          rows: [
-            ...SPELL_IDS.map((id) => [SPELLS[id].label === 'SPACE' ? 'Space' : SPELLS[id].label, SPELLS[id].name]),
-            ['', 'Shade Step is yours from the start;'],
-            ['', 'find the others in chests and at'],
-            ['', 'the Magic Circle between floors'],
-          ],
-        },
-      ];
-      const KEY = { size: 14, weight: 'bold ' };
-      const WHAT = { size: 13 };
-      for (const col of cols) {
-        col.keyW = Math.max(...col.rows.map(([k]) => (k ? this._measure(g, k, KEY) : 0))) + 14;
-        col.w = col.keyW + Math.max(...col.rows.map(([, d]) => this._measure(g, d, WHAT)), this._measure(g, col.title.toUpperCase(), { size: 11, ls: 2 }) - col.keyW) + 32;
-      }
-      const pw = cols.reduce((a, c) => a + c.w, 0) + 12;
-      const rows = Math.max(...cols.map((c) => c.rows.length));
-      const ph = 34 + rows * 20 + 12;
-      let cy = Math.max(y + 20, h - 16 - ph);
-      const k = Math.max(0.55, Math.min(1, (w - 24) / pw, (h - 8 - cy) / ph));
-      if (cy + ph * k > h - 8) cy = h - 8 - ph * k;
-      g.save();
-      g.translate(w / 2 - (pw * k) / 2, cy);
-      g.scale(k, k);
-      this._box(g, 0, 0, pw, ph, 'rgba(10,2,2,0.72)', C.edge);
-      let cx = 22;
-      cols.forEach((col, n) => {
-        this._label(g, col.title, cx, 24, { size: 11, color: n === 2 ? C.ember : C.ash });
-        col.rows.forEach(([key, what], r) => {
-          const ry = 46 + r * 20;
-          if (key) {
-            this._text(g, key, cx, ry, { ...KEY, color: C.light });
-            this._text(g, what, cx + col.keyW, ry, { ...WHAT, color: C.ash });
-          } else this._text(g, what, cx, ry, { size: 11, color: C.ash });
-        });
-        cx += col.w;
-        // A rule between columns.
-        if (n < cols.length - 1) {
-          g.fillStyle = 'rgba(106,26,16,0.6)';
-          g.fillRect(cx - 14, 14, 1, ph - 28);
-        }
+    // Controls, in three columns (getting about, fighting, the demon
+    // spells), each drawn as what you press: keys as keycaps, the mouse with
+    // the button to use lit. On Project 0 the chat sits in the bottom left
+    // corner: the panel keeps to the right of it.
+    if (!this.touch && h > 420) this._paintControls(g, y);
+  }
+
+  _paintControls(g, top) {
+    const { vw: w, vh: h } = this;
+    const ROW = 31;
+    const WHAT = { size: 13 };
+    const cols = [
+      {
+        title: 'Move',
+        rows: [
+          [{ keys: ['W', 'A', 'S', 'D'] }, 'move'],
+          [{ mouse: 'move' }, 'aim'],
+          [{ keys: ['Shift'] }, 'sprint'],
+          [{ keys: ['Space'] }, 'shade step'],
+          [{ keys: ['E'] }, 'drink a potion'],
+          [{ keys: ['F'] }, 'take / use'],
+        ],
+      },
+      {
+        title: 'Fight',
+        rows: [
+          [{ mouse: 'left' }, 'light attack'],
+          [{ mouse: 'left', tag: 'HOLD' }, 'heavy attack'],
+          [{ mouse: 'left', tag: '×3' }, 'chain attack'],
+          [{ mouse: 'left', tag: '!' }, 'hit its wind-up: stagger'],
+          [{ mouse: 'right' }, 'block'],
+        ],
+      },
+      {
+        title: 'Demon spells',
+        rows: SPELL_IDS.map((id) => [{ keys: [SPELLS[id].label === 'SPACE' ? 'Space' : SPELLS[id].label] }, SPELLS[id].name]),
+        note: 'Shade Step is yours from the start; find the others in chests and at the Magic Circle between floors.',
+      },
+    ];
+    for (const col of cols) {
+      col.iconW = Math.max(...col.rows.map(([ic]) => this._controlIcon(g, ic, 0, 0, false)));
+      col.w = col.iconW + 12 + Math.max(...col.rows.map(([, d]) => this._measure(g, d, WHAT)), 0) + 30;
+      col.w = Math.max(col.w, this._measure(g, col.title.toUpperCase(), { size: 11, ls: 2 }) + 30);
+    }
+    const spells = cols[2];
+    spells.w = Math.max(spells.w, 200);
+    const pw = cols.reduce((a, c) => a + c.w, 0) + 14;
+    const ph = 38 + 6 * ROW + 10;
+    // Clear of Project 0's chat (its width in screen pixels), unless the
+    // screen is too narrow to keep it clear without shrinking the panel
+    // past reading.
+    const reserve = this.host?.kind === 'p0' ? 430 / this.u : 0;
+    let left = reserve + 10;
+    let room = w - left - 12;
+    if (room < pw * 0.62) {
+      left = 12;
+      room = w - 24;
+    }
+    let cy = Math.max(top + 18, h - 14 - ph);
+    const k = Math.max(0.5, Math.min(1, room / pw, (h - 8 - cy) / ph));
+    if (cy + ph * k > h - 8) cy = h - 8 - ph * k;
+    g.save();
+    g.translate(left + (room - pw * k) / 2, cy);
+    g.scale(k, k);
+    this._box(g, 0, 0, pw, ph, 'rgba(10,2,2,0.74)', C.edge);
+    let cx = 22;
+    cols.forEach((col, n) => {
+      this._label(g, col.title, cx, 24, { size: 11, color: n === 2 ? C.ember : C.ash });
+      col.rows.forEach(([icon, what], r) => {
+        const cyRow = 38 + r * ROW + ROW / 2;
+        this._controlIcon(g, icon, cx, cyRow, true);
+        this._text(g, what, cx + col.iconW + 12, cyRow, { ...WHAT, color: C.bone, base: 'middle' });
       });
+      if (col.note) {
+        const ny = 38 + col.rows.length * ROW + 12;
+        this._wrapLines(g, col.note, cx, ny, col.w - 30, 11, C.ash, 15);
+      }
+      cx += col.w;
+      if (n < cols.length - 1) {
+        g.fillStyle = 'rgba(106,26,16,0.6)';
+        g.fillRect(cx - 14, 14, 1, ph - 28);
+      }
+    });
+    g.restore();
+  }
+
+  // Wrapped lines of text, `lh` apart.
+  _wrapLines(g, text, x, y, maxW, size, color, lh) {
+    const words = text.split(' ');
+    let line = '';
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (this._measure(g, test, { size }) > maxW && line) {
+        this._text(g, line, x, y, { size, color });
+        y += lh;
+        line = word;
+      } else line = test;
+    }
+    if (line) this._text(g, line, x, y, { size, color });
+  }
+
+  // A control as you press it: { keys: [...] } a row of keycaps, or
+  // { mouse: 'left' | 'right' | 'move', tag } a mouse with that button lit
+  // (`tag`: HOLD, ×3, or ! for a demon's wind-up). Drawn centred on y from
+  // x; returns its width (with draw false, only measures).
+  _controlIcon(g, icon, x, y, draw) {
+    if (icon.keys) {
+      let cx = x;
+      icon.keys.forEach((label, i) => {
+        if (i) cx += 3;
+        cx += this._keycap(g, label, cx, y, draw);
+      });
+      return cx - x;
+    }
+    let width = this._mouseIcon(g, icon.mouse, x, y, draw);
+    if (icon.tag) {
+      const tagW = this._measure(g, icon.tag, { size: 10, weight: 'bold ', ls: 1 }) + 10;
+      if (draw) {
+        const tx = x + width + 5;
+        g.save();
+        g.fillStyle = icon.tag === '!' ? 'rgba(150,20,6,0.95)' : 'rgba(70,18,10,0.95)';
+        g.strokeStyle = icon.tag === '!' ? '#ff6a2a' : '#a8401c';
+        g.lineWidth = 1.5;
+        g.beginPath();
+        roundRect(g, tx, y - 8, tagW, 16, 8);
+        g.fill();
+        g.stroke();
+        g.restore();
+        this._text(g, icon.tag, tx + tagW / 2, y + 0.5, { size: 10, weight: 'bold ', ls: 1, color: icon.tag === '!' ? '#ffe0b0' : C.light, align: 'center', base: 'middle' });
+      }
+      width += 5 + tagW;
+    }
+    return width;
+  }
+
+  // A keycap: a dark key with a lit top face, its label on it.
+  _keycap(g, label, x, y, draw) {
+    const kh = 24;
+    const kw = Math.max(kh, this._measure(g, label, { size: 12, weight: 'bold ' }) + 16);
+    if (!draw) return kw;
+    const top = y - kh / 2;
+    g.save();
+    g.fillStyle = '#0c0403';
+    g.strokeStyle = '#5a1a10';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    roundRect(g, x, top, kw, kh, 5);
+    g.fill();
+    g.stroke();
+    const face = g.createLinearGradient(0, top, 0, top + kh);
+    face.addColorStop(0, '#4a1d16');
+    face.addColorStop(1, '#271009');
+    g.fillStyle = face;
+    g.strokeStyle = 'rgba(255,180,130,0.22)';
+    g.lineWidth = 1;
+    g.beginPath();
+    roundRect(g, x + 2.5, top + 1.5, kw - 5, kh - 6, 4);
+    g.fill();
+    g.stroke();
+    g.restore();
+    this._text(g, label, x + kw / 2, top + (kh - 4) / 2 + 0.5, { size: 12, weight: 'bold ', color: C.light, align: 'center', base: 'middle' });
+    return kw;
+  }
+
+  // A mouse: two buttons over the body, the one to press lit; for 'move',
+  // none lit and arrows either side.
+  _mouseIcon(g, which, x, y, draw) {
+    const mw = 18;
+    const mh = 26;
+    const pad = which === 'move' ? 11 : 0;
+    if (!draw) return mw + pad * 2;
+    const mx = x + pad;
+    const top = y - mh / 2;
+    g.save();
+    g.fillStyle = '#1a0806';
+    g.strokeStyle = '#7a2a18';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    roundRect(g, mx, top, mw, mh, 9);
+    g.fill();
+    g.stroke();
+    // The lit button.
+    if (which === 'left' || which === 'right') {
+      g.save();
+      g.beginPath();
+      roundRect(g, mx, top, mw, mh, 9);
+      g.clip();
+      const bx = which === 'left' ? mx : mx + mw / 2;
+      const lit = g.createLinearGradient(0, top, 0, top + mh * 0.45);
+      lit.addColorStop(0, '#ffb070');
+      lit.addColorStop(1, '#e8642a');
+      g.fillStyle = lit;
+      g.shadowColor = 'rgba(255,110,30,0.9)';
+      g.shadowBlur = 8;
+      g.fillRect(bx, top, mw / 2, mh * 0.42);
       g.restore();
     }
+    // The split between the buttons and the line under them, and the wheel.
+    g.strokeStyle = '#7a2a18';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(mx + mw / 2, top);
+    g.lineTo(mx + mw / 2, top + mh * 0.42);
+    g.moveTo(mx + 1, top + mh * 0.42);
+    g.lineTo(mx + mw - 1, top + mh * 0.42);
+    g.stroke();
+    g.fillStyle = which === 'move' ? '#a8401c' : '#3a1410';
+    g.beginPath();
+    roundRect(g, mx + mw / 2 - 1.5, top + 4, 3, 6, 1.5);
+    g.fill();
+    if (which === 'move') {
+      g.fillStyle = C.ember;
+      // Arrows either side of it: moved, not clicked.
+      for (const side of [-1, 1]) {
+        const tip = side < 0 ? x : x + pad * 2 + mw;
+        g.beginPath();
+        g.moveTo(tip, y);
+        g.lineTo(tip - side * 6, y - 4);
+        g.lineTo(tip - side * 6, y + 4);
+        g.closePath();
+        g.fill();
+      }
+    }
+    g.restore();
+    return mw + pad * 2;
   }
 
   // How wide `text` is drawn at these settings (letter spacing included).

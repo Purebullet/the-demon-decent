@@ -222,6 +222,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
   const clips = inst.clips;
   const mixer = rigged && Object.keys(clips).length ? new THREE.AnimationMixer(inst.model) : null;
   const layers = new Map();
+  const layerList = [];
   const layer = (name) => {
     if (!mixer || !clips[name]) return null;
     let l = layers.get(name);
@@ -232,14 +233,18 @@ export function buildGltfCharacter(id, rootScale = 1) {
       action.setEffectiveWeight(0);
       l = { action, weight: 0, target: 0, time: 0, duration: clips[name].duration };
       layers.set(name, l);
+      layerList.push(l);
     }
     return l;
   };
+  // Every clip's action made now, as the floor loads, not the first time a
+  // demon swings or dies mid-fight (each is a handful of allocations).
+  if (mixer) for (const name of Object.keys(clips)) layer(name);
   const TAU = Math.PI * 2;
   const frac = (v) => v - Math.floor(v);
 
   function drive(e, dt, t) {
-    for (const l of layers.values()) l.target = 0;
+    for (let i = 0; i < layerList.length; i++) layerList[i].target = 0;
     const set = (name, u, w = 1) => {
       const l = layer(name);
       if (!l) return false;
@@ -280,12 +285,14 @@ export function buildGltfCharacter(id, rootScale = 1) {
       set('idle', frac(t / (clips.idle?.duration || 3) + e.seed), Math.max(0, 1 - walk - run));
     }
     let total = 0;
-    for (const l of layers.values()) {
+    for (let i = 0; i < layerList.length; i++) {
+      const l = layerList[i];
       l.weight += (l.target - l.weight) * Math.min(1, dt * rate);
       if (l.weight < 0.002 && l.target === 0) l.weight = 0;
       total += l.weight;
     }
-    for (const l of layers.values()) {
+    for (let i = 0; i < layerList.length; i++) {
+      const l = layerList[i];
       const w = total > 0 ? l.weight / total : 0;
       l.action.enabled = w > 0;
       l.action.setEffectiveWeight(w);
