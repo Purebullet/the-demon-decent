@@ -308,8 +308,20 @@ const REAR = 2.2;
 const SETTLE = 0.5;
 // His death: struck to his knees; then, once his last words are spoken, down.
 const KNEEL = 1.1;
-const FALL = 1.8;
+const FALL = 0.85;
 const LIE = 7;
+// Hitting the floor: the whole hall shakes this long; the level he gave you
+// waits this long after it.
+const RUMBLE = 1.1;
+const LEVEL_UP_HOLD = 2;
+// "You truly think you can beat me?": a little under half his health.
+const DEFEAT_AT = 0.46;
+// His first grab of a fight: as soon as you are in reach of one (once he
+// has been up a while), and quicker, longer and wider than the rest;
+// once he has had you in his fist, grabs come less often.
+const FIRST_GRAB_AFTER = 5;
+const FIRST_GRAB = { windup: 0.3, lunge: 10, track: 4.5, maxRange: 7.5, first: true };
+const GRAB_WEIGHT_AFTER = 1.5;
 // Caught: held this long, then flung.
 const HOLD = 1.1;
 const FLING = 0.2;
@@ -325,7 +337,7 @@ const GRABS = 3;
 const MOUTH_SHUT = 0.42;
 const ROAR_TIME = 1.1;
 // How far it opens from shut (radians): a little as he speaks, more for a roar.
-const MOUTH_TALK = 0.13;
+const MOUTH_TALK = 0.2;
 const MOUTH_ROAR = 0.3;
 
 const _v = new THREE.Vector3();
@@ -452,7 +464,7 @@ export class Sleeper extends Boss {
       this.light.intensity = 6 + Math.sin(ctx.time * 2.3) * 1.2 + (this.phase - 1) * 2;
       this.fightT += dt;
       // A while into the fight, or once he is hurt: "Defeat me".
-      if (this.fightT > 22 || this.health < this.maxHealth * 0.65) this._say('defeat');
+      if (this.health < this.maxHealth * DEFEAT_AT) this._say('defeat');
     }
   }
 
@@ -503,10 +515,11 @@ export class Sleeper extends Boss {
   // its turn (his last words) is spoken as soon as it may be.
   _updateVoice(dt) {
     const v = this.voice;
-    if (v.queued && !v.line && this.clock >= v.freeAt) {
+    // (His last words wait only for him to finish what he is saying.)
+    if (v.queued && !v.line && (this.clock >= v.freeAt || v.queued === 'death')) {
       const id = v.queued;
       v.queued = null;
-      this._say(id);
+      this._say(id, id === 'death');
     }
     let loud = 0;
     if (v.line) {
@@ -547,6 +560,13 @@ export class Sleeper extends Boss {
         return;
       }
     } else this.behindT = Math.max(0, this.behindT - dt);
+    // Not had you in his fist yet: he reaches for you as soon as he can.
+    if (this.grabs === 0 && this.fightT > FIRST_GRAB_AFTER && this.cooldown <= 0 && dist <= FIRST_GRAB.maxRange && off < 1.0) {
+      this.lastMoves.push('grab');
+      if (this.lastMoves.length > 2) this.lastMoves.shift();
+      this._startAttack({ ...this.type.attacks.find((a) => a.name === 'grab'), ...FIRST_GRAB }, ctx, 1);
+      return;
+    }
     // Close in front of him: usually the kick, quick off the mark and sooner
     // than anything else (never twice running; whether he will is settled
     // once per opening, `kickPass`).
@@ -559,10 +579,11 @@ export class Sleeper extends Boss {
     if (this.cooldown > 0 || off > 0.55) return;
     const moves = this.type.attacks.filter((a) => !a.behind && !a.close && !(a.grab && this.grabs >= GRABS) && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
     if (!moves.length) return;
-    let roll = Math.random() * moves.reduce((s, a) => s + (a.weight || 1), 0);
+    const weight = (a) => (a.grab && this.grabs > 0 ? GRAB_WEIGHT_AFTER : a.weight || 1);
+    let roll = Math.random() * moves.reduce((s, a) => s + weight(a), 0);
     let pick = moves[0];
     for (const a of moves) {
-      roll -= a.weight || 1;
+      roll -= weight(a);
       if (roll <= 0) {
         pick = a;
         break;
@@ -586,9 +607,20 @@ export class Sleeper extends Boss {
     const a = this.attack;
     const player = ctx.player;
     if (a?.grab) {
-      // The hand closes on whoever is in it (a Shade Step slips it).
+      // The hand closes on whoever is in it (a Shade Step slips it); his
+      // first reaches further and wider.
       this.root.updateMatrixWorld(true);
-      if (!player.dead && !player.held && player.invuln <= 0 && player.overlapsOBB(this.grabVol.update())) {
+      const vol = this.grabVol;
+      if (a.first) {
+        vol.localCenter.set(0.5, 1.4, 3.6);
+        vol.localHalf.set(2.6, 2.2, 3.0);
+      }
+      const caught = !player.dead && !player.held && player.invuln <= 0 && player.overlapsOBB(vol.update());
+      if (a.first) {
+        vol.localCenter.set(0.5, 1.4, 3.2);
+        vol.localHalf.set(2.0, 1.8, 2.4);
+      }
+      if (caught) {
         this._seize(ctx);
         return;
       }
@@ -792,8 +824,9 @@ export class Sleeper extends Boss {
   }
 
   // His death is a scene: nothing else (a level gained) interrupts it.
+  // (And for a moment after he hits the floor.)
   dyingScene() {
-    return this.state === 'dying' && !this.landed;
+    return this.state === 'dying' && (!this.landed || this.stateT - this.landedAt < LEVEL_UP_HOLD);
   }
 
   // His blows cannot be countered: there is no catching him in a wind-up.
@@ -827,13 +860,25 @@ export class Sleeper extends Boss {
       if (spoken || !VOICE_LINES.death) this.fallAt = t;
     }
     if (this.fallAt !== null) {
+      // Down he goes, gathering speed like a felled tree.
       const k = Math.min(1, (t - this.fallAt) / FALL);
-      this.deathU = 0.72 + 0.28 * k;
+      this.deathU = 0.72 + 0.28 * k * k;
       if (k >= 1 && !this.landed) {
         this.landed = true;
-        ctx.shake?.(0.6);
+        this.landedAt = t;
+        this.rumbleT = RUMBLE;
+        ctx.audio?.play?.('boss_fall', { volume: 1, gap: 1 });
         ctx.audio?.bossImpact?.(this.position);
-        burst(ctx.fx.alpha, _v.set(this.position.x + Math.sin(this.yaw) * 2.5, 0.4, this.position.z + Math.cos(this.yaw) * 2.5), { count: 60, speed: 4, color: C.smoke, colorEnd: C.smoke, size: 1, life: 1.6, gravity: -1 });
+        const fx = this.position.x + Math.sin(this.yaw) * 2.5;
+        const fz = this.position.z + Math.cos(this.yaw) * 2.5;
+        ctx.effects?.quake?.(fx, fz, 3.5, 1);
+        burst(ctx.fx.alpha, _v.set(fx, 0.4, fz), { count: 90, speed: 5, color: C.smoke, colorEnd: C.smoke, size: 1.1, life: 1.8, gravity: -1 });
+      }
+      // The whole hall shakes with it, hard, for a good second.
+      if (this.rumbleT > 0) {
+        this.rumbleT = Math.max(0, this.rumbleT - (ctx.realDt ?? dt));
+        const want = 1.2 * Math.sqrt(this.rumbleT / RUMBLE);
+        if (ctx.player && ctx.player.shakeT < want) ctx.player.shakeT = want;
       }
       // Lies there, then sinks away.
       const sink = Math.max(0, t - this.fallAt - FALL - LIE) / 2;

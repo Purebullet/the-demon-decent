@@ -48,7 +48,7 @@ export const NODES = {
       { label: '+25 Max Health', apply: (r) => ((r.maxHealth += 25), (r.health += 25)) },
       run.potionCap < MAX_POTION_CAP
         ? { label: '+1 Potion Capacity (and two flasks filled)', apply: (r) => ((r.potionCap = Math.min(MAX_POTION_CAP, r.potionCap + 1)), (r.potions = Math.min(r.potionCap, r.potions + 2))) }
-        : { label: 'Fill every flask', apply: (r) => (r.potions = r.potionCap) },
+        : { label: 'Fill two flasks', apply: (r) => (r.potions = Math.min(r.potionCap, r.potions + 2)) },
     ],
   },
   circle: {

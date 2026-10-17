@@ -23,7 +23,7 @@ import { bloodMaterial } from './Shaders.js';
 // An iron portcullis waits up in the vault over the arena's mouth: step
 // through into the arena and it slams down behind you, and it is hauled up
 // again only once he is dead. Then a fountain of blood rises out of the
-// arena floor: drink from it (F), once, and every flask fills.
+// arena floor: drink from it (F), once, and two flasks fill.
 
 // The corridor's candles light this far ahead of you.
 const AHEAD = 10;
@@ -41,9 +41,11 @@ const COLUMN_STEP = 6;
 const GATE_DROP = 0.4;
 const GATE_LIFT = 3;
 const GATE_WAIT = 7;
-// The fountain rises this long after he falls, taking this long, this far
+// The fountain rises this long after he hits the floor, taking this long, this far
 // from the middle of the arena; drink within this reach.
-const FOUNTAIN_AFTER = 4;
+const FOUNTAIN_AFTER = 3;
+// What a drink from it fills.
+const FOUNTAIN_FLASKS = 2;
 const FOUNTAIN_RISE = 2.4;
 const FOUNTAIN_OUT = 7.5;
 const FOUNTAIN_REACH = 2.9;
@@ -574,6 +576,8 @@ export class Hall {
 
   _updateFountain(dt, ctx) {
     if (this.fountainT > 0) {
+      // (Counted from when he is down on the floor.)
+      if (this.boss && this.boss.dyingScene?.() && !this.boss.landed) return;
       this.fountainT -= dt;
       if (this.fountainT <= 0) this._raiseFountain(ctx);
       return;
@@ -614,16 +618,16 @@ export class Hall {
     if (f.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon && !ctx.pickups?.nearItem) this._drink(ctx);
   }
 
-  // Drunk from: every flask fills, once.
+  // Drunk from, once: two flasks fill.
   _drink(ctx) {
     const f = this.fountain;
     f.used = true;
     f.near = false;
     const run = ctx.player.run;
-    if (run) run.potions = run.potionCap;
+    if (run) run.potions = Math.min(run.potionCap, run.potions + FOUNTAIN_FLASKS);
     ctx.audio?.drink?.();
     ctx.audio?.relic?.();
-    ctx.toast?.('The blood fills every flask');
+    ctx.toast?.('The blood fills two flasks');
     burst(ctx.fx.alpha, new THREE.Vector3(f.x, 1.2, f.z), { count: 40, speed: 3.5, color: JET, colorEnd: JET_DARK, size: 0.16, life: 1, gravity: -12 });
   }
 

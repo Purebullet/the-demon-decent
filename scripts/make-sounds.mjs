@@ -443,6 +443,20 @@ const SOUNDS = {
     punch(o, 3.6);
     echo(o, { taps: [[0.17, 0.4], [0.33, 0.28], [0.52, 0.19], [0.76, 0.12], [1.05, 0.07]], lp: 1300, tail: 0.3 });
   },
+  // The Sleeper hitting the floor dead: the whole of him landing at once,
+  // a deep slam felt more than heard, stone cracking under him, debris
+  // pattering down, the hall booming it back.
+  boss_fall: (o) => {
+    noise(o, { type: 'highpass', freq: 1500, decay: 0.06, gain: 0.55 });
+    tone(o, { freq: 64, freqEnd: 18, attack: 0.002, decay: 1.6, gain: 1.0 });
+    tone(o, { freq: 38, freqEnd: 16, attack: 0.004, decay: 1.9, gain: 0.9 });
+    tone(o, { type: 'sawtooth', freq: 46, freqEnd: 22, attack: 0.002, decay: 0.9, gain: 0.4, lp: 140 });
+    noise(o, { type: 'lowpass', freq: 1600, freqEnd: 40, decay: 1.3, gain: 1.0 });
+    noise(o, { freq: 700, freqEnd: 180, q: 1.2, decay: 0.35, gain: 0.5 });
+    for (let k = 0; k < 16; k++) noise(o, { freq: 900 + rnd() * 2600, q: 3, decay: 0.04 + rnd() * 0.06, gain: 0.22, delay: 0.12 + rnd() * 1.1 });
+    punch(o, 3.2);
+    echo(o, { taps: [[0.21, 0.42], [0.42, 0.3], [0.68, 0.2], [0.98, 0.12], [1.35, 0.07]], lp: 900, tail: 0.35 });
+  },
   // The arena's portcullis: chains running out as it drops, then iron
   // slamming into stone, the bars ringing and rattling, the hall answering.
   gate_drop: (o) => {

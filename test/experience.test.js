@@ -60,7 +60,7 @@ test('levels come about once a floor: a few by the Sleeper, most by the last flo
   assert.equal(xpToNext(0), 60);
 });
 
-test('a run carries 3 potions, and the Blood Well raises that to 4 at most', async () => {
+test('a run carries 3 potions, the Blood Well raises that to 4 at most, then fills two', async () => {
   const { newRun, NODES, POTION_CAP, MAX_POTION_CAP } = await import('../src/game/Progression.js');
   const run = newRun();
   assert.equal(run.potionCap, 3);
@@ -70,9 +70,11 @@ test('a run carries 3 potions, and the Blood Well raises that to 4 at most', asy
   gift().apply(run);
   assert.equal(run.potionCap, 4);
   run.potions = 1;
-  assert.equal(gift().label, 'Fill every flask');
+  assert.equal(gift().label, 'Fill two flasks');
   gift().apply(run);
   assert.equal(run.potionCap, 4);
+  assert.equal(run.potions, 3);
+  gift().apply(run);
   assert.equal(run.potions, 4);
 });
 
