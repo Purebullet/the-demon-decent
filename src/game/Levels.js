@@ -1,6 +1,7 @@
 // Levels: every demon slain is experience, and each level gained is a perk:
 // a point in Attack, Defence or Agility, five at most in each, ten levels in
-// all, about one a floor. They come seldom and each one counts: the first
+// all, about one a floor. (Attack also lets a light blow stagger a demon,
+// which otherwise only a heavy one does: see lightStaggerChance.) They come seldom and each one counts: the first
 // floor's demons together make the first, the rest take longer and longer,
 // and each point is a blow a tenth harder, a tenth less hurt, or a twentieth
 // quicker. Bigger demons, elites and the lords below are worth more, and
@@ -12,7 +13,7 @@ export const STAT_CAP = 5;
 
 // What a point buys.
 export const LEVEL_STATS = {
-  attack: { name: 'Attack', per: 0.1, text: '+10% damage', color: '#ff7a3a' },
+  attack: { name: 'Attack', per: 0.1, text: '+10% damage, light blows may stagger', color: '#ff7a3a' },
   defence: { name: 'Defence', per: 0.08, text: '-8% damage taken', color: '#7ab0ff' },
   agility: { name: 'Agility', per: 0.05, text: '+5% attack speed', color: '#9aff7a' },
 };
@@ -69,6 +70,13 @@ export function spendPoint(run, id) {
 export const damageMul = (run) => run.dmgMul * (1 + LEVEL_STATS.attack.per * (run.stats?.attack || 0));
 export const swingSpeedMul = (run) => run.speedMul * (1 + LEVEL_STATS.agility.per * (run.stats?.agility || 0));
 export const takenMul = (run) => 1 - LEVEL_STATS.defence.per * (run.stats?.defence || 0);
+
+// Only a heavy blow staggers a demon for certain. A light one may: a mace's
+// sometimes (MACE_LIGHT_STAGGER), and anyone's the more points are in
+// Attack (ATTACK_STAGGER a point).
+export const MACE_LIGHT_STAGGER = 0.3;
+export const ATTACK_STAGGER = 0.05;
+export const lightStaggerChance = (run, weaponType) => (weaponType === 'mace' ? MACE_LIGHT_STAGGER : 0) + ATTACK_STAGGER * (run.stats?.attack || 0);
 
 // What a fallen run leaves the next: half its level (rounded down), kept
 // where its points had gone as nearly as halving allows (each stat halved,

@@ -205,7 +205,7 @@ export class Props {
       const w = Math.max(0.25, f.r);
       const hb = new Hurtbox(root, new THREE.Vector3(0, f.h / 2, 0), new THREE.Vector3(w, f.h / 2, w), { name: 'prop' });
       hb.update();
-      const b = { isProp: true, id: f.id, root, material: dressing.mat(f.id), height: Math.min(f.h, 2.5), solid: f.solid, mm: f.mm, alive: true, position: root.position, hitRadius: w + 0.25, hurtboxes: [hb] };
+      const b = { isProp: true, id: f.id, root, material: dressing.mat(f.id), height: Math.min(f.h, 2.5), solids: f.solids, mm: f.mm, alive: true, position: root.position, hitRadius: w + 0.25, hurtboxes: [hb] };
       b.smash = (ctx, dir) => this._smash(b, ctx, dir);
       this.breakables.push(b);
     }
@@ -223,7 +223,7 @@ export class Props {
       // Out of its batch.
       b.mm.inst.setMatrixAt(b.mm.index, GONE);
       b.mm.inst.instanceMatrix.needsUpdate = true;
-      this.level.world.removeStatic(b.solid);
+      for (const c of b.solids) this.level.world.removeStatic(c);
     } else {
       b.root.removeFromParent();
       const w = this.level.world.circles;

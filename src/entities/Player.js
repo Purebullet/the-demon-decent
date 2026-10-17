@@ -11,7 +11,7 @@ import { classifyPress, lightTiming, chainBonus, CHAIN_MAX, EXPOSED_DAMAGE } fro
 import { MOMENTUM_MAX, MOMENTUM_DECAY_AFTER, momentumDamage, STUMBLE, guardOutcome } from '../combat/Styles.js';
 import { relicPassive } from '../combat/Relics.js';
 import { ProcEngine } from '../combat/Procs.js';
-import { damageMul, swingSpeedMul, takenMul } from '../game/Levels.js';
+import { damageMul, swingSpeedMul, takenMul, lightStaggerChance } from '../game/Levels.js';
 import { SwingTrail, trailStyle } from '../combat/SwingTrail.js';
 
 // First-person demon hunter. WASD + mouse look.
@@ -130,6 +130,10 @@ const TORCH_ROT = new THREE.Euler(0.12, 0, -0.14);
 // burns on the rags held in the claw cage at the top.
 const TORCH_BASE = -0.42;
 const TORCH_RAGS = 0.9;
+
+// A heavy blow's weight against a demon's poise: enough to stagger any of
+// them (not a lord, whose poise has no bottom).
+const HEAVY_STAGGER = 1e6;
 
 export class Player {
   constructor(camera, viewRoot) {
@@ -1213,7 +1217,11 @@ export class Player {
       if (guard === 'crash') amount *= 0.6;
       if (this.flameT > 0) amount *= FLAME_DAMAGE;
       const force = (heavy ? 1 + s.power * 0.8 : 0.55) * (counter ? 1.5 : 1) * (w.type === 'mace' ? 1.3 : 1);
-      const dealt = e.takeHit(amount, dir, def.knockback * (heavy ? 1.8 : 1) * (counter ? 1.4 : 1), def.stagger * (heavy ? 2.5 : 1), ctx, { heavy, contact: h.point, sweep: s.travel, force });
+      // Only a heavy blow staggers a demon (any but a lord); a light one
+      // only by chance: a mace's sometimes, and anyone's with points in
+      // Attack (Levels.lightStaggerChance).
+      const staggers = heavy || Math.random() < lightStaggerChance(run, w.type);
+      const dealt = e.takeHit(amount, dir, def.knockback * (heavy ? 1.8 : 1) * (counter ? 1.4 : 1), heavy ? HEAVY_STAGGER : 0, ctx, { heavy, contact: h.point, sweep: s.travel, force });
       // The wound the weapon leaves: a cut, a hacked-out chunk, a dent.
       if (dealt > 0) ctx.wounds?.hit(e, w.type, h.point, dir, s.travel, heavy);
       total += dealt;
@@ -1225,11 +1233,14 @@ export class Player {
       if (e.alive) {
         const armored = e.armored?.() && !heavy;
         if (w.type === 'axe') e.applySunder?.(heavy ? 2 : 1, ctx);
-        if (w.type === 'mace' && guard !== 'crash' && (!e.isBoss || heavy) && !armored) e.stumble?.(ctx, heavy ? STUMBLE.heavy : STUMBLE.light, dir);
-        if (counter && e.state !== 'stagger' && (!e.isBoss || heavy) && !armored) e.interrupt?.(ctx, 0.9);
-        // Struck first: a blow already falling but not yet landed is knocked
-        // aside (not an armoured one, nor a boss's but by a heavy blow).
-        else if (e.state === 'strike' && !e.hitPlayer && (!e.isBoss || heavy) && !armored) e.interrupt?.(ctx, 0.45);
+        // (A lord reels from nothing short of a heavy blow.)
+        const reels = (!e.isBoss || heavy) && !armored && e.state !== 'stagger';
+        if (staggers && !heavy && reels && guard !== 'crash') e.stumble?.(ctx, STUMBLE.light, dir);
+        else if (staggers && w.type === 'mace' && reels && guard !== 'crash') e.stumble?.(ctx, STUMBLE.heavy, dir);
+        else if (staggers && counter && reels) e.interrupt?.(ctx, 0.9);
+        // Struck first by a staggering blow: one already falling but not yet
+        // landed is knocked aside.
+        else if (staggers && e.state === 'strike' && !e.hitPlayer && reels) e.interrupt?.(ctx, 0.45);
       }
 
       // Blood thrown along the blade's travel, sparks at the contact.

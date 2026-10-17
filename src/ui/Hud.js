@@ -1805,9 +1805,9 @@ export class Hud {
         title: 'Fight',
         rows: [
           [{ mouse: 'left' }, 'light attack'],
-          [{ mouse: 'left', tag: 'HOLD' }, 'heavy attack'],
+          [{ mouse: 'left', tag: 'HOLD' }, 'heavy attack: stagger'],
           [{ mouse: 'left', tag: '×3' }, 'chain attack'],
-          [{ mouse: 'left', tag: '!' }, 'hit its wind-up: stagger'],
+          [{ mouse: 'left', tag: '!' }, 'hit its wind-up: ×2 damage'],
           [{ mouse: 'right' }, 'block'],
         ],
       },

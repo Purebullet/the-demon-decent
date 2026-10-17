@@ -295,6 +295,7 @@ export function carveSecret(level, rand) {
   const x = (k.c + 0.5) * TILE;
   const z = (k.r + 0.5) * TILE;
   level.floorTiles.push({ c: k.c, r: k.r, x, z });
-  level.secret = { c: k.c, r: k.r, x, z, dir: k.dir };
+  // `passage`: the tiles of the way round it lies on (no demon waits there).
+  level.secret = { c: k.c, r: k.r, x, z, dir: k.dir, passage: other };
   return true;
 }

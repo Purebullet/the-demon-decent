@@ -324,6 +324,9 @@ const GRABS = 3;
 // and how long a roar holds it open.
 const MOUTH_SHUT = 0.42;
 const ROAR_TIME = 1.1;
+// How far it opens from shut (radians): a little as he speaks, more for a roar.
+const MOUTH_TALK = 0.13;
+const MOUTH_ROAR = 0.3;
 
 const _v = new THREE.Vector3();
 // Where his fist holds the haft: this far up it from the butt, as a share
@@ -521,8 +524,8 @@ export class Sleeper extends Boss {
     // onto the jaw to shut it (MOUTH_SHUT), and his words and roars lift it.
     this.roarT = Math.max(0, (this.roarT || 0) - dt);
     const roar = Math.sin(Math.min(1, this.roarT / ROAR_TIME) * Math.PI);
-    const open = Math.max(Math.min(1, this.talkK * 1.3), roar);
-    this.talk = -MOUTH_SHUT + (MOUTH_SHUT + 0.08) * open;
+    const words = Math.min(1, this.talkK * 1.3);
+    this.talk = -MOUTH_SHUT + Math.max(MOUTH_TALK * words, MOUTH_ROAR * roar);
   }
 
   // ---- Fighting ----

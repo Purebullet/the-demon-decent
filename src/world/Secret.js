@@ -91,10 +91,17 @@ export class Shrine {
           if (o.isMesh) o.material = mat;
         });
       altar.scale.multiplyScalar(0.85);
+      // Its front (and the bowl on top) turned to you as you come into the
+      // niche: the model's front is its side.
+      altar.rotation.y = Math.PI / 2;
       this.group.add(altar);
-      top = new THREE.Box3().setFromObject(altar).max.y;
-    }
-    level.world.circles.push({ x: this.x, z: this.z, r: 0.55 });
+      this.group.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(altar);
+      top = box.max.y;
+      // Solid all along it (the niche runs square to the map, so its box is
+      // a tight fit).
+      level.world.boxes.push({ minX: box.min.x + 0.05, minZ: box.min.z + 0.05, maxX: box.max.x - 0.05, maxZ: box.max.z - 0.05 });
+    } else level.world.circles.push({ x: this.x, z: this.z, r: 0.55 });
     // The fire over it: a soft violet glow round a pale core.
     const dot = softDotTexture();
     const sprite = (color, size, opacity) => {

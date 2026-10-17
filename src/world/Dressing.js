@@ -41,7 +41,31 @@ const FRAGILE = new Set(['skulls', 'ribcage', 'remains', 'stakes', 'eggs', 'fung
 // Props with a front: they are turned to face the open ground.
 const FACED = new Set(['statue', 'altar', 'throne', 'idol', 'gravestone', 'obelisk']);
 // Models whose front is not their +Z: the turn that brings it round.
-const FRONT = { statue: Math.PI / 2 };
+const FRONT = { statue: Math.PI / 2, altar: Math.PI / 2 };
+
+// A prop's footprint where it can be walked into (below head height): its
+// half-widths across its own x and z, in metres at scale 1, measured off its
+// mesh once.
+const SHAPES = new Map();
+function footprint(id) {
+  if (SHAPES.has(id)) return SHAPES.get(id);
+  const g = Assets.propGeometry(id)?.geometry;
+  let hx = 0;
+  let hz = 0;
+  if (g) {
+    const pos = g.attributes.position;
+    let top = 0;
+    for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) > Math.min(2.2, top * 0.9)) continue;
+      hx = Math.max(hx, Math.abs(pos.getX(i)));
+      hz = Math.max(hz, Math.abs(pos.getZ(i)));
+    }
+  }
+  const out = { x: hx, z: hz };
+  SHAPES.set(id, out);
+  return out;
+}
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar', 'obsidian', 'basalt']);
 
 // A generated model's material made to sit in the cave: its painted colour
@@ -156,6 +180,35 @@ export class Dressing {
 
   foot(id, scale = 1) {
     return Assets.props.get(id).entry.size * scale * (FOOT[id] ?? 0.32);
+  }
+
+  // How far a prop reaches from where it stands (its measured footprint, or
+  // the rule of thumb where it has none).
+  reach(id, scale = 1) {
+    const f = footprint(id);
+    return Math.max(this.foot(id, scale), Math.max(f.x, f.z) * scale * 0.9);
+  }
+
+  // What stops you walking into a prop: one circle for a roundish one; for a
+  // long one (a row of stakes, a ribcage, a spiked wall) a chain of circles
+  // along its length, as thick as it is.
+  solidsFor(id, x, z, yaw, scale) {
+    const f = footprint(id);
+    const hx = f.x * scale;
+    const hz = f.z * scale;
+    const long = Math.max(hx, hz);
+    const thick = Math.min(hx, hz);
+    if (!long || long < thick * 1.4) return [{ x, z, r: Math.max(this.foot(id, scale) * 0.85, long * 0.92) }];
+    const r = Math.max(0.3, thick * 0.95);
+    const [ax, az] = hz >= hx ? [Math.sin(yaw), Math.cos(yaw)] : [Math.cos(yaw), -Math.sin(yaw)];
+    const span = Math.max(0, long - r * 0.8);
+    const n = Math.max(1, Math.ceil(span / (r * 0.9)));
+    const out = [];
+    for (let i = -n; i <= n; i++) {
+      const t = (i / n) * span;
+      out.push({ x: x + ax * t, z: z + az * t, r });
+    }
+    return out;
   }
 
   // Themed material for a prop, made once per floor.
@@ -315,40 +368,96 @@ export class Dressing {
     const d = this.d;
     const nav = d.nav;
     const isRock = (c, r) => d.tiles[r]?.[c] === '#';
-    // Unlit black (fading into the fog with distance): it reads as deep
-    // shadow between the stones, never as a face of its own.
-    const material = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    // Through the gaps between the boulders: depth, and fog drifting in it.
+    // Deep in the rock a solid backing the very colour of the floor's
+    // distance haze (so a gap looks as if it runs on into the dark, and
+    // nothing beyond shows through); in front of it a sheet of soft, slowly
+    // billowing mist, added light, thicker toward the floor.
+    const deep = new THREE.MeshBasicMaterial({ color: this.look.fog ?? 0x0b0606 });
+    // Smoke-grey, a little warm.
+    const tint = new THREE.Color(0x6c5c5a).multiplyScalar(0.42);
+    const mist = new THREE.ShaderMaterial({
+      fog: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uColor: { value: tint }, uNoise: { value: null } }]),
+      vertexShader: /* glsl */ `
+        #include <fog_pars_vertex>
+        varying vec3 vWorld;
+        void main() {
+          vec4 wp = vec4(position, 1.0);
+          #ifdef USE_INSTANCING
+            wp = instanceMatrix * wp;
+          #endif
+          wp = modelMatrix * wp;
+          vWorld = wp.xyz;
+          vec4 mvPosition = viewMatrix * wp;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */ `
+        #include <fog_pars_fragment>
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform sampler2D uNoise;
+        varying vec3 vWorld;
+        float n2(vec2 p) { return texture2D(uNoise, p / 16.0).r; }
+        void main() {
+          float t = uTime * 0.12;
+          vec2 p = vec2(vWorld.x + vWorld.z, vWorld.y * 1.5) * 0.55;
+          float n = n2(p + vec2(t, -t * 0.7)) * 0.55 + n2(p * 2.1 + vec2(-t * 1.6, -t * 1.2)) * 0.3 + n2(p * 4.3 + vec2(t * 2.2, -t * 1.9)) * 0.15;
+          float billow = smoothstep(0.3, 0.9, n);
+          float low = 1.0 - smoothstep(0.0, 5.0, vWorld.y);
+          vec3 col = uColor * (0.12 + billow) * (0.4 + 0.7 * low);
+          // Fades away into the distance (added light: toward nothing).
+          #ifdef USE_FOG
+            col *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+          #endif
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    mist.uniforms.uNoise.value = mistNoise();
+    this.coreMat = mist;
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    // Well back behind the boulders' fronts.
-    const BACK = 0.65;
-    const list = [];
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
-    const p = new THREE.Vector3();
-    const seen = new Set();
-    // Every rock tile within reach of open ground (two tiles), so a block's
-    // neighbours behind it are there too.
-    for (const t of this.wallTiles) {
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) {
-          const c = t.c + dc;
-          const r = t.r + dr;
-          const key = r * d.cols + c;
-          if (seen.has(key) || !isRock(c, r) || nav.isWalkable(c, r)) continue;
-          seen.add(key);
-          // Each side: back from open ground, flush with rock.
-          const x0 = c * TILE + (nav.isWalkable(c - 1, r) ? BACK : 0);
-          const x1 = (c + 1) * TILE - (nav.isWalkable(c + 1, r) ? BACK : 0);
-          const z0 = r * TILE + (nav.isWalkable(c, r - 1) ? BACK : 0);
-          const z1 = (r + 1) * TILE - (nav.isWalkable(c, r + 1) ? BACK : 0);
-          p.set((x0 + x1) / 2, this.ceiling / 2, (z0 + z1) / 2);
-          s.set(x1 - x0, this.ceiling + 0.2, z1 - z0);
-          list.push(m.compose(p, q, s).clone());
+    // How far back from the rock's face each lies (less where a wall is thin,
+    // open on both sides, so that something of it is left).
+    const blocks = (BACK) => {
+      const back = (a, b) => (a && b ? Math.min(BACK, (TILE - 0.3) / 2) : a ? BACK : 0);
+      const list = [];
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const s = new THREE.Vector3();
+      const p = new THREE.Vector3();
+      const seen = new Set();
+      // Every rock tile within reach of open ground (two tiles), so a block's
+      // neighbours behind it are there too.
+      for (const t of this.wallTiles) {
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            const c = t.c + dc;
+            const r = t.r + dr;
+            const key = r * d.cols + c;
+            if (seen.has(key) || !isRock(c, r) || nav.isWalkable(c, r)) continue;
+            seen.add(key);
+            const W = nav.isWalkable(c - 1, r);
+            const E = nav.isWalkable(c + 1, r);
+            const N = nav.isWalkable(c, r - 1);
+            const S = nav.isWalkable(c, r + 1);
+            const x0 = c * TILE + back(W, E);
+            const x1 = (c + 1) * TILE - back(E, W);
+            const z0 = r * TILE + back(N, S);
+            const z1 = (r + 1) * TILE - back(S, N);
+            p.set((x0 + x1) / 2, this.ceiling / 2, (z0 + z1) / 2);
+            s.set(x1 - x0, this.ceiling + 0.2, z1 - z0);
+            list.push(m.compose(p, q, s).clone());
+          }
         }
       }
-    }
-    this._instances(geometry, material, list, null);
+      return list;
+    };
+    this._instances(geometry, deep, blocks(1.25), null);
+    this._instances(geometry, mist, blocks(0.7), null);
   }
 
   // The group for the chunk of the map around (x, z).
@@ -575,7 +684,7 @@ export class Dressing {
       const k = pickWeighted(r, kinds);
       const size = Assets.props.get(k.id).entry.size;
       const sc = k.scale[0] + r() * (k.scale[1] - k.scale[0]);
-      const rad = this.foot(k.id, sc);
+      const rad = this.reach(k.id, sc);
       const slot = slots.splice(Math.floor(r() * slots.length), 1)[0];
       const { t, dx, dz } = slot;
       const key = `${t.c},${t.r}`;
@@ -614,12 +723,13 @@ export class Dressing {
         if (!this.free(p.x, p.z, rad + 0.2)) continue;
         used.add(key);
         this.claim(p.x, p.z, rad);
-        const solid = { x: p.x, z: p.z, r: rad * 0.85 };
-        this.solids.push(solid);
-        q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (FRONT[k.id] || 0) + (r() - 0.5) * 0.3);
+        const yaw = Math.atan2(-dx, -dz) + (FRONT[k.id] || 0) + (r() - 0.5) * 0.3;
+        const solids = this.solidsFor(k.id, p.x, p.z, yaw, sc);
+        this.solids.push(...solids);
+        q.setFromAxisAngle(UP, yaw);
         const mm = m.compose(p, q, s.setScalar(sc)).clone();
         add(k.id, mm);
-        if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solid, x: p.x, z: p.z, r: rad, h: size * sc });
+        if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc });
         if (GLOW[k.id]) this.glows.push({ x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc });
         continue;
       }
@@ -628,11 +738,12 @@ export class Dressing {
       p.set(t.x + dx * inset + dz * along, 0, t.z + dz * inset + dx * along);
       if (!this.free(p.x, p.z, rad + 0.15)) continue;
       this.claim(p.x, p.z, rad);
-      const solid = { x: p.x, z: p.z, r: rad * 0.85 };
-      this.solids.push(solid);
-      const mm = m.compose(p, q.setFromAxisAngle(UP, r() * 6.28), s.setScalar(sc)).clone();
+      const yaw = r() * 6.28;
+      const solids = this.solidsFor(k.id, p.x, p.z, yaw, sc);
+      this.solids.push(...solids);
+      const mm = m.compose(p, q.setFromAxisAngle(UP, yaw), s.setScalar(sc)).clone();
       add(k.id, mm);
-      if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solid, x: p.x, z: p.z, r: rad, h: size * sc });
+      if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc });
       if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
     }
     for (const [id, list] of buckets) this._instances(Assets.propGeometry(id).geometry, this.mat(id), list);
@@ -753,6 +864,7 @@ export class Dressing {
 
   tick(t) {
     for (const m of this.mist || []) m.uniforms.uTime.value = t;
+    if (this.coreMat) this.coreMat.uniforms.uTime.value = t;
   }
 
   // Up to `n` glowing set pieces spread over the floor, for point lights.

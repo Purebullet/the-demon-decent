@@ -47,6 +47,31 @@ export class Level {
     if (!def.hall) carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32(floorNumber * 4111));
     // And, down the other way round its loop, a secret (world/Secret.js).
     if (!def.hall && !d.boss) carveSecret(d, mulberry32(floorNumber * 977));
+    // The way round to it is left quiet: a demon that would wait in that
+    // passage (or a step from it) waits out on the way instead, about as far
+    // from where you arrive.
+    if (d.secret) {
+      const quiet = new Set();
+      for (const i of d.secret.passage) {
+        const c = i % d.cols;
+        const r = (i - c) / d.cols;
+        for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) quiet.add((r + y) * d.cols + c + x);
+      }
+      const far = (t) => Math.hypot(t.x - d.spawn.x, t.z - d.spawn.z);
+      for (const e of d.enemies) {
+        if (!quiet.has(e.r * d.cols + e.c)) continue;
+        const want = far(e);
+        let best = null;
+        for (const t of d.floorTiles) {
+          if (quiet.has(t.r * d.cols + t.c) || far(t) < 3 * TILE) continue;
+          if (d.enemies.some((o) => o !== e && Math.hypot(o.x - t.x, o.z - t.z) < 2 * TILE)) continue;
+          if (!best || Math.abs(far(t) - want) < Math.abs(far(best) - want)) best = t;
+        }
+        if (best) Object.assign(e, { c: best.c, r: best.r, x: best.x, z: best.z });
+        else e.gone = true;
+      }
+      d.enemies = d.enemies.filter((e) => !e.gone);
+    }
     this.nav = d.nav;
     this.world = new CollisionWorld({ grid: { cols: d.cols, rows: d.rows, solid: d.solid }, tileSize: TILE });
     this.group = new THREE.Group();

@@ -51,6 +51,8 @@ const SONG_FOR = { 5: 'hall', 10: 'deep' };
 // the room: this long after the first of them (the corridor's music fading
 // away as he gets up).
 const WAKE_AT = 0.9;
+// The fall's torch goes out this far into it (of about 4.5 s).
+const TORCH_OUT = 2.25;
 const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', azrakel: 'Lord of the last pit' };
 // A finished descent's time goes on a table of its own, the quickest first
 // (the weekly table keeps the deepest floor).
@@ -199,8 +201,8 @@ export class Game {
     // Project 0's "How to play" box takes plain text: the keys are set in
     // Unicode bold so they stand out.
     host.hud(
-      `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Quick left click')} light attack · ${bold('Hold left click')} heavy attack · ` +
-        `${bold('Multiple hits')} chain attack · ${bold('Hit before it strikes')} stagger it · ${bold('Right click')} block · ${bold('Space')} shade step (the way you move) · ${bold('Shift')} sprint · ${bold('E')} potion · ${bold('F')} take/use\n` +
+      `${bold('WASD')} move · ${bold('Mouse')} aim · ${bold('Quick left click')} light attack · ${bold('Hold left click')} heavy attack (staggers) · ` +
+        `${bold('Multiple hits')} chain attack · ${bold('Hit before it strikes')} double damage · ${bold('Right click')} block · ${bold('Space')} shade step (the way you move) · ${bold('Shift')} sprint · ${bold('E')} potion · ${bold('F')} take/use\n` +
         `Demon spells, once found: ${bold('Q')} Hellfire Nova · ${bold('R')} Blood Siphon\n` +
         'One life: die and you start again.',
     );
@@ -585,6 +587,20 @@ export class Game {
       p.pitch = Math.max(-1.05, p.pitch - dt * 0.9);
       p.yaw += dt * 0.35;
       p.shake?.(0.04);
+      // Halfway down, the rushing air snuffs the torch: it gutters, goes
+      // out with a hiss and a puff of smoke, and the rest of the way is dark.
+      if (fall > TORCH_OUT && !this.torchOutT) {
+        this.torchOutT = 0.001;
+        this.audio.extinguish?.();
+      }
+      if (this.torchOutT) {
+        const t = (this.torchOutT += dt);
+        p.torchLit = Math.max(0, 1 - t / 0.55) * (0.55 + 0.45 * Math.abs(Math.sin(t * 37)));
+        if (t < 0.9 && p.fire?.group) {
+          const at = p.fire.group.getWorldPosition(new THREE.Vector3());
+          for (let i = 0; i < 3; i++) this.fx.alpha.emit({ x: at.x, y: at.y, z: at.z, vx: (Math.random() - 0.5) * 0.6, vy: 2 + Math.random() * 3, vz: (Math.random() - 0.5) * 0.6, life: 0.8, size: 0.12, sizeEnd: 0.5, color: C.smoke, colorEnd: C.smoke, alpha: 0.5, drag: 0.5 });
+        }
+      }
       p.update(dt, { ...ctx, combat: false, input: FROZEN_INPUT });
       this.surface.update(dt, this.fx);
       this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
@@ -597,6 +613,7 @@ export class Game {
     this.surface.update(dt, this.fx);
     if (this.surface.inPit(p.position) && !this.busy) {
       this.falling = 0.001;
+      this.torchOutT = 0;
       this.surface.falling(true);
       this.hud.announcement = null;
       this.hud.update(dt, p, this.run, { floorLabel: '', enemyLabel: '', best: this.best, prompt: '' });
