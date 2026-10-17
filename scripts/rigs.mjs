@@ -283,9 +283,16 @@ export const RIGS = {
       LeftArm: [0.28, 0.75, 0],
       LeftForeArm: [0.48, 0.74, 0],
       LeftHand: [0.64, 0.69, 0.02],
-      LeftHandTip: [0.82, 0.65, 0.05],
-      LeftFingers: [0.7, 0.688, 0.07],
+      // Each hand's own bone runs to the middle of its knuckles; its four
+      // fingers are one bone from there. His hands are not mirror images
+      // (the right one's fingers fan out further back), so each is placed
+      // for itself, measured off the mesh.
+      LeftHandTip: [0.75, 0.69, 0.085],
+      LeftFingers: [0.75, 0.69, 0.085],
       LeftFingerTip: [0.83, 0.655, 0.11],
+      RightHandTip: [-0.75, 0.672, -0.052],
+      RightFingers: [-0.75, 0.672, -0.052],
+      RightFingerTip: [-0.835, 0.652, -0.04],
       // Knees and ankles placed by hand (and mirrored as they are): centred
       // in their cross-section, the right ankle landed in the shin.
       LeftUpLeg: [0.14, 0.31, 0],
@@ -294,7 +301,7 @@ export const RIGS = {
       LeftToe: [0.25, 0.01, 0.2],
     },
     snap: { LeftArm: 0.12, LeftForeArm: 0.1, LeftHand: 0.08 },
-    r: { Hips: 0.22, Waist: 0.3, Chest: 0.27, Neck: 0.12, Head: 0.4, LeftShoulder: 0.12, LeftArm: 0.08, LeftForeArm: 0.065, LeftHand: 0.055, LeftFingers: 0.045, LeftUpLeg: 0.11, LeftLeg: 0.09, LeftFoot: 0.07 },
+    r: { Hips: 0.22, Waist: 0.3, Chest: 0.27, Neck: 0.12, Head: 0.4, LeftShoulder: 0.12, LeftArm: 0.08, LeftForeArm: 0.065, LeftHand: 0.07, LeftFingers: 0.085, LeftUpLeg: 0.11, LeftLeg: 0.09, LeftFoot: 0.07 },
     limit: {
       // Only the skull above the mouth: the jaw stays with the chest.
       Head: { x: [-0.15, 0.15], y: [0.74], z: [-0.03] },
@@ -307,9 +314,11 @@ export const RIGS = {
       Neck: { x: [-0.3, 0.3, 0.03] },
       LeftShoulder: { x: [0.06, 0.5] },
       LeftArm: { x: [0.22, 0.62] },
-      LeftForeArm: { x: [0.38] },
-      LeftHand: { x: [0.56, 0.72] },
-      LeftFingers: { x: [0.69] },
+      // The forearm ends at the wrist (the palm is the hand's, all four
+      // fingers the fingers').
+      LeftForeArm: { x: [0.38, 0.7] },
+      LeftHand: { x: [0.56, 0.77] },
+      LeftFingers: { x: [0.745, null, 0.008] },
       LeftUpLeg: { x: [0.02], y: [null, 0.34] },
       LeftLeg: { x: [0.02], y: [null, 0.24] },
       LeftFoot: { y: [null, 0.1] },

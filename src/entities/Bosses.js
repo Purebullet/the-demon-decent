@@ -302,7 +302,7 @@ const VOICE_GAP = 3;
 const RISE = 3.2;
 const SETTLE = 1.3;
 // His death: struck to his knees; then, once his last words are spoken, down.
-const KNEEL = 1.6;
+const KNEEL = 1.1;
 const FALL = 1.8;
 const LIE = 7;
 // Caught: held this long, then flung.
@@ -321,7 +321,7 @@ const ROAR_TIME = 1.1;
 const _v = new THREE.Vector3();
 // Where his fist holds the haft: this far up it from the butt, as a share
 // of its length.
-const AXE_GRIP = 0.11;
+const AXE_GRIP = 0.15;
 
 // Vorgrath sleeps in the arena at the end of the candle hall until Game wakes
 // him (once its candles are lit): he gets up, speaks (the intro), and the
@@ -373,8 +373,9 @@ export class Sleeper extends Boss {
     this.root.updateMatrixWorld(true);
     const holder = new THREE.Group();
     holder.scale.setScalar(1 / hand.getWorldScale(_v).x);
-    // In the hook of his curled fingers, under the palm.
-    holder.position.set(-0.03, -0.06, 0.05);
+    // In the hook of his four curled fingers, under the palm by the
+    // knuckles (hand-local, his height being 1).
+    holder.position.set(-0.08, -0.045, -0.025);
     // Turned so its bigger blade leads (faces the way he swings). The prop
     // stands on its butt, so it is slid down through the fist: the pommel
     // shows below it and he holds the handle a little above the end.

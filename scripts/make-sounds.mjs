@@ -126,6 +126,38 @@ function punch(o, drive = 2.2) {
   for (let i = 0; i < o.length; i++) o[i] = Math.tanh(o[i] * drive) / t;
 }
 
+// A great stone hall answering: the sound so far comes back off the walls
+// and the dome, each return later, fainter and duller (`taps`: [delay s,
+// gain]), over a soft diffuse tail.
+function echo(o, { taps, lp = 1400, tail = 0.2 }) {
+  let end = o.length;
+  while (end > 1 && Math.abs(o[end - 1]) < 1e-4) end--;
+  const dry = o.slice(0, end);
+  taps.forEach(([delay, gain], k) => {
+    const at = Math.round(delay * RATE);
+    // One pole low-pass, duller with each return.
+    const a = Math.exp((-2 * Math.PI * lp) / (k + 1) / RATE);
+    let y = 0;
+    for (let i = 0; i < dry.length && at + i < o.length; i++) {
+      y = (1 - a) * dry[i] + a * y;
+      o[at + i] += y * gain;
+    }
+  });
+  // Diffuse tail: a few combs at prime-ish delays.
+  for (const [ms, fb] of [[37, 0.72], [43, 0.7], [53, 0.68], [61, 0.66]]) {
+    const d = Math.round((ms / 1000) * RATE);
+    const buf = new Float32Array(o.length);
+    let y = 0;
+    for (let i = 0; i < o.length; i++) {
+      const x = i < dry.length ? dry[i] : 0;
+      const v = x + (i >= d ? buf[i - d] * fb : 0);
+      y = 0.6 * v + 0.4 * y;
+      buf[i] = y;
+      o[i] += y * tail * 0.25;
+    }
+  }
+}
+
 // The ring of steel as the blade turns through its cut.
 function shing(o, { delay = 0.05, gain = 0.05, f = 2900 } = {}) {
   tone(o, { type: 'triangle', freq: f, freqEnd: f * 0.985, attack: 0.004, decay: 0.24, gain, delay });
@@ -400,11 +432,16 @@ const SOUNDS = {
   },
   // The Sleeper: a footfall like a felled tree; the axe biting the floor;
   // the giant axe's swing; his roar.
+  // A footfall: a hard knock on the stone, the weight landing behind it,
+  // and the hall throwing it back.
   boss_step: (o) => {
-    tone(o, { freq: 58, freqEnd: 24, attack: 0.003, decay: 0.75, gain: 1.0 });
-    noise(o, { type: 'lowpass', freq: 600, freqEnd: 40, decay: 0.6, gain: 0.8 });
-    noise(o, { freq: 1300, freqEnd: 300, q: 1.2, decay: 0.12, gain: 0.35 });
-    punch(o, 2.6);
+    noise(o, { type: 'highpass', freq: 1800, decay: 0.025, gain: 0.5 });
+    noise(o, { freq: 1600, freqEnd: 350, q: 1.4, decay: 0.07, gain: 0.45 });
+    tone(o, { freq: 110, freqEnd: 34, attack: 0.001, decay: 0.28, gain: 1.0 });
+    tone(o, { freq: 54, freqEnd: 24, attack: 0.002, decay: 0.85, gain: 0.95 });
+    noise(o, { type: 'lowpass', freq: 900, freqEnd: 45, decay: 0.5, gain: 0.85 });
+    punch(o, 3.6);
+    echo(o, { taps: [[0.17, 0.4], [0.33, 0.28], [0.52, 0.19], [0.76, 0.12], [1.05, 0.07]], lp: 1300, tail: 0.3 });
   },
   boss_impact: (o) => {
     noise(o, { type: 'highpass', freq: 2500, decay: 0.05, gain: 0.6 });

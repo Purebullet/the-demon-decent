@@ -1104,13 +1104,26 @@ function kneelDeath(u) {
   };
   return keyed(u, [
     [0, null],
-    [0.08, (p) => {
+    [0.06, (p) => {
       C(p, 'Waist', -0.3, 0, 0.1);
       C(p, 'Chest', -0.3, 0, 0);
       C(p, 'Head', -0.45, 0.2, 0);
       B(p, 'Arm', 0.3, 0, 0.6);
       B(p, 'ForeArm', -0.4, 0, 0);
     }],
+    // His legs give: he sags into a squat, feet flat on the floor...
+    [0.15, (p) => {
+      T(p, 'Hips', 0, -0.1, 0.02);
+      B(p, 'UpLeg', -1.0, 0, 0.15);
+      B(p, 'Leg', 1.75, 0, 0);
+      B(p, 'Foot', -0.75, 0, 0);
+      C(p, 'Waist', 0.35, 0, 0.05);
+      C(p, 'Chest', 0.15, 0, 0);
+      C(p, 'Head', -0.3, 0, 0);
+      B(p, 'Arm', 0.2, 0, 0.3);
+      B(p, 'ForeArm', -0.4, 0, 0);
+    }, 'in'],
+    // ...and the knees go straight down to it.
     [0.25, (p) => kneel(p, 0)],
     [0.45, (p) => kneel(p, 1)],
     [0.62, (p) => kneel(p, -1)],

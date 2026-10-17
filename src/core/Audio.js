@@ -280,7 +280,7 @@ export class Audio {
   }
   // The Sleeper's own: footfalls, the axe in the floor, its swing, his roar.
   bossStep(pos) {
-    this.play('boss_step', { pos, volume: 0.95, rate: 0.92 + Math.random() * 0.12, gap: 0.12 });
+    this.play('boss_step', { pos, volume: 1, rate: 0.94 + Math.random() * 0.1, gap: 0.12 });
   }
   bossImpact(pos) {
     this.play('boss_impact', { pos, volume: 1, gap: 0.2 });
