@@ -47,9 +47,10 @@ const PLAYING = new Set(['surface', 'floor', 'sanctum']);
 // (Floor 5, the Sleeper's hall: "Shadows in the Hall" down the corridor,
 // then "From Shadows to Thunder" once he is up: see _updateHall.)
 const SONG_FOR = { 5: 'hall', 10: 'deep' };
-// The Sleeper wakes this long after the arena's last candle catches (the
-// corridor's music fading away meanwhile).
-const WAKE_AFTER = 4.5;
+// The Sleeper wakes while the arena's candles are still catching, round
+// the room: this long after the first of them (the corridor's music fading
+// away as he gets up).
+const WAKE_AT = 0.9;
 const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', azrakel: 'Lord of the last pit' };
 // A finished descent's time goes on a table of its own, the quickest first
 // (the weekly table keeps the deepest floor).
@@ -696,6 +697,7 @@ export class Game {
       this._addEnemy(b);
       s.add(b.light);
       this.boss = b;
+      if (level.hall) level.hall.boss = b;
     }
     for (const p of level.data.potions) this.pickups.addPotion(p.x, p.z);
     for (const w of level.data.weapons) this.pickups.addWeapon(w.x, w.z, rollWeapon(floor, 0.6));
@@ -858,13 +860,10 @@ export class Game {
   _updateHall(dt) {
     const level = this.level;
     const hall = level.hall;
-    if (hall.phase === 'lit' && this.wakeT < 0 && this.boss?.asleep) {
-      this.wakeT = WAKE_AFTER;
-      this.audio.fadeMusic(WAKE_AFTER - 0.5);
-    }
-    if (this.wakeT > 0) {
-      this.wakeT -= dt;
-      if (this.wakeT <= 0) this.boss?.wake(this.ctx);
+    if (hall.domino >= WAKE_AT && this.wakeT < 0 && this.boss?.asleep) {
+      this.wakeT = 0;
+      this.audio.fadeMusic(1.5);
+      this.boss.wake(this.ctx);
     }
     // Lit: the murk lifts and the whole arena can be seen.
     if (hall.litK !== this.hallLit) {
@@ -912,8 +911,12 @@ export class Game {
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
       this.pickups.addPotion(x + 1.2, z);
-      // The Sleeper's hall falls quiet for his last words.
-      if (this.level.hall) this.audio.fadeMusic(6);
+      // The Sleeper's hall falls quiet for his last words; its gate goes up
+      // and its fountain of blood rises.
+      if (this.level.hall) {
+        this.audio.fadeMusic(6);
+        this.level.hall.onBossDown(x, z);
+      }
     }
   }
 
@@ -1007,7 +1010,7 @@ export class Game {
     this._updateGuide(dt);
     if (intro) return;
 
-    let prompt = this.pickups.weaponPrompt(this.run) || level.props.prompt();
+    let prompt = this.pickups.weaponPrompt(this.run) || level.props.prompt() || level.hall?.prompt();
     if (!prompt && level.exitOpen && !p.dead) prompt = 'The portal is open — descend';
     this.hud.update(dt, p, this.run, {
       floorLabel: `Floor ${this.run.floor} / ${FLOOR_COUNT} — ${level.def.name}`,

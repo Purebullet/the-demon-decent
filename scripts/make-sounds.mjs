@@ -443,6 +443,41 @@ const SOUNDS = {
     punch(o, 3.6);
     echo(o, { taps: [[0.17, 0.4], [0.33, 0.28], [0.52, 0.19], [0.76, 0.12], [1.05, 0.07]], lp: 1300, tail: 0.3 });
   },
+  // The arena's portcullis: chains running out as it drops, then iron
+  // slamming into stone, the bars ringing and rattling, the hall answering.
+  gate_drop: (o) => {
+    for (let k = 0; k < 14; k++) noise(o, { freq: 2400 + rnd() * 2600, q: 6, decay: 0.03, gain: 0.28, delay: k * 0.027 });
+    swish(o, { dur: 0.42, f0: 160, f1: 800, f2: 260, peak: 0.75, q: 1.4, gain: 0.6, low: 1.2, edge: 0.05 });
+  },
+  gate_slam: (o) => {
+    noise(o, { type: 'highpass', freq: 2200, decay: 0.04, gain: 0.7 });
+    for (const [f, g, d] of [[181, 0.32, 1.1], [433, 0.24, 0.9], [911, 0.17, 0.7], [1307, 0.11, 0.5], [2213, 0.07, 0.35]]) tone(o, { type: 'triangle', freq: f, freqEnd: f * 0.99, attack: 0.001, decay: d, gain: g });
+    tone(o, { freq: 72, freqEnd: 28, attack: 0.002, decay: 0.7, gain: 1.0 });
+    noise(o, { type: 'lowpass', freq: 1200, freqEnd: 60, decay: 0.5, gain: 0.8 });
+    for (let k = 0; k < 9; k++) noise(o, { freq: 3000 + rnd() * 3000, q: 8, decay: 0.025, gain: 0.2, delay: 0.08 + rnd() * 0.55 });
+    punch(o, 2.8);
+    echo(o, { taps: [[0.19, 0.38], [0.37, 0.26], [0.6, 0.16], [0.88, 0.09]], lp: 1600, tail: 0.3 });
+  },
+  // Hauled back up: the windlass groaning and the chain clattering on.
+  gate_lift: (o) => {
+    tone(o, { type: 'sawtooth', freq: 47, freqEnd: 43, attack: 0.3, decay: 2.3, gain: 0.25, lp: 220 });
+    noise(o, { freq: 320, freqEnd: 260, q: 2, attack: 0.3, decay: 2.2, gain: 0.22 });
+    for (let k = 0; k < 58; k++) noise(o, { freq: 2000 + rnd() * 3000, q: 7, decay: 0.02 + rnd() * 0.02, gain: 0.1 + rnd() * 0.1, delay: k * 0.042 + rnd() * 0.01 });
+  },
+  // The blood fountain: stone grinding up out of the floor, then the blood
+  // bursting up out of it.
+  fountain_rise: (o) => {
+    tone(o, { freq: 38, freqEnd: 52, attack: 0.4, decay: 2.0, gain: 0.7 });
+    noise(o, { type: 'lowpass', freq: 380, freqEnd: 240, attack: 0.3, decay: 2.1, gain: 0.7 });
+    for (let k = 0; k < 26; k++) noise(o, { freq: 600 + rnd() * 1400, q: 3, decay: 0.05 + rnd() * 0.08, gain: 0.18, delay: rnd() * 2.2 });
+    punch(o, 1.8);
+  },
+  fountain_burst: (o) => {
+    noise(o, { freq: 500, freqEnd: 1800, q: 0.8, attack: 0.03, decay: 0.6, gain: 0.5 });
+    tone(o, { freq: 80, freqEnd: 40, attack: 0.005, decay: 0.4, gain: 0.6 });
+    for (let k = 0; k < 7; k++) squelch(o, { delay: 0.05 + k * 0.11 + rnd() * 0.05, dur: 0.18 + rnd() * 0.1, gain: 0.35, freq: 500 + rnd() * 700 });
+    noise(o, { freq: 1200, q: 0.7, attack: 0.2, decay: 1.4, gain: 0.25, delay: 0.3 });
+  },
   boss_impact: (o) => {
     noise(o, { type: 'highpass', freq: 2500, decay: 0.05, gain: 0.6 });
     tone(o, { freq: 62, freqEnd: 21, attack: 0.002, decay: 1.3, gain: 1.0 });

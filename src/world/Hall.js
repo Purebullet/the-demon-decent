@@ -5,6 +5,7 @@ import { rockTextures } from './Textures.js';
 import { Assets } from '../assets/AssetLibrary.js';
 import { C, burst } from './Particles.js';
 import { angleDelta } from '../core/rng.js';
+import { bloodMaterial } from './Shaders.js';
 
 // The Sleeper's hall (floor 5, `def.hall`): a long corridor of dressed stone,
 // candle pedestals down both sides that light as you come up to them, stone
@@ -18,6 +19,11 @@ import { angleDelta } from '../core/rng.js';
 //
 // Every candle flame is one instance of two instanced quads (the flame and
 // its halo): two draws for the lot, however many burn.
+//
+// An iron portcullis waits up in the vault over the arena's mouth: step
+// through into the arena and it slams down behind you, and it is hauled up
+// again only once he is dead. Then a fountain of blood rises out of the
+// arena floor: drink from it (F), once, and every flask fills.
 
 // The corridor's candles light this far ahead of you.
 const AHEAD = 10;
@@ -31,6 +37,18 @@ const THRONE_SCALE = 2;
 const THRONE_BACK = 1.0;
 const THRONE_SINK = -1.25;
 const COLUMN_STEP = 6;
+// The gate drops this fast; is hauled up this slowly, this long after he dies.
+const GATE_DROP = 0.4;
+const GATE_LIFT = 3;
+const GATE_WAIT = 7;
+// The fountain rises this long after he falls, taking this long, this far
+// from the middle of the arena; drink within this reach.
+const FOUNTAIN_AFTER = 4;
+const FOUNTAIN_RISE = 2.4;
+const FOUNTAIN_OUT = 7.5;
+const FOUNTAIN_REACH = 2.9;
+const JET = new THREE.Color(0.62, 0.02, 0.03);
+const JET_DARK = new THREE.Color(0.2, 0.0, 0.0);
 
 const flameGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.42, 0);
 const haloGeo = new THREE.PlaneGeometry(1, 1);
@@ -138,6 +156,7 @@ export class Hall {
     this._arena();
     this._roof();
     this._buildFlames();
+    this._gate();
   }
 
   // Instanced scenery (the dressing's chunked batches), solid where it stands.
@@ -411,9 +430,212 @@ export class Hall {
     this.level._spot({ color: 0xffa050, base, distance, decay: 1.6, x: top.x, y: top.y + 0.4, z: top.z, seed: top.seed });
   }
 
+  // ---- The gate ----
+
+  // An iron portcullis across the corridor at the arena's mouth, its bars
+  // reaching up into the vault, kept out of sight up there until it drops.
+  _gate() {
+    const half = (this.south - this.north) / 2;
+    // The corridor's vault (see _roof).
+    const vault = half + 0.6;
+    const top = this.ceiling;
+    const zc = (this.north + this.south) / 2;
+    this.gateX = this.centre.x - Math.sqrt(Math.max(0, this.radius ** 2 - half ** 2)) - 0.8;
+    const parts = [];
+    const n = Math.round((2 * half) / 0.5);
+    for (let k = 0; k <= n; k++) {
+      const z = -half + (k / n) * 2 * half;
+      const h = top + Math.sqrt(Math.max(0, vault ** 2 - z * z)) - 0.2;
+      parts.push(new THREE.CylinderGeometry(0.08, 0.08, h - 0.3, 6).translate(0, 0.3 + (h - 0.3) / 2, z));
+      // A spike at the foot of every bar.
+      parts.push(new THREE.ConeGeometry(0.12, 0.42, 6).rotateX(Math.PI).translate(0, 0.21, z));
+    }
+    for (let y = 0.9; y < top + vault - 0.5; y += 1.2) {
+      const w = y <= top ? half : Math.sqrt(Math.max(0, vault ** 2 - (y - top) ** 2)) - 0.15;
+      if (w > 0.3) parts.push(new THREE.BoxGeometry(0.18, 0.16, 2 * w).translate(0, y, 0));
+    }
+    const mesh = new THREE.Mesh(mergeGeometries(parts.map((g) => g.toNonIndexed())), new THREE.MeshLambertMaterial({ color: 0x161214 }));
+    for (const g of parts) g.dispose();
+    mesh.position.set(this.gateX, 0, zc);
+    mesh.visible = false;
+    this.level.group.add(mesh);
+    this.gate = { mesh, state: 'open', t: 0, wait: GATE_WAIT, lift: top + vault + 0.6, box: { minX: this.gateX - 0.25, maxX: this.gateX + 0.25, minZ: this.north - 1, maxZ: this.south + 1 } };
+  }
+
+  _updateGate(dt, ctx) {
+    const g = this.gate;
+    const p = ctx.player.position;
+    const b = this.boss;
+    const at = (y) => new THREE.Vector3(this.gateX, y, (this.north + this.south) / 2);
+    // Through into the arena (and him in it too, alive): down it comes.
+    if (g.state === 'open' && !this.bossDown && this.domino >= 0 && p.x > this.gateX + 2.2 && (!b || b.position.x > this.gateX + b.radius + 0.6)) {
+      g.state = 'closing';
+      g.t = 0;
+      g.mesh.visible = true;
+      this.level.world.boxes.push(g.box);
+      ctx.audio?.play?.('gate_drop', { pos: at(4), volume: 0.9, gap: 0.5 });
+    }
+    if (g.state === 'closing') {
+      g.t += dt;
+      const k = Math.min(1, g.t / GATE_DROP);
+      g.mesh.position.y = g.lift * (1 - k * k);
+      if (k >= 1) {
+        g.state = 'shut';
+        ctx.audio?.play?.('gate_slam', { pos: at(0.5), volume: 1, gap: 0.5 });
+        ctx.shake?.(Math.max(0.2, 0.6 - Math.abs(p.x - this.gateX) * 0.02));
+        for (let z = this.north + 0.5; z < this.south; z += 1.2) {
+          burst(ctx.fx.alpha, new THREE.Vector3(this.gateX, 0.3, z), { count: 8, speed: 2.2, color: C.smoke, colorEnd: C.smoke, size: 0.6, life: 1.3, gravity: -1 });
+          burst(ctx.fx.add, new THREE.Vector3(this.gateX, 0.1, z), { count: 4, speed: 4, color: C.spark, colorEnd: C.fireEdge, size: 0.06, life: 0.4 });
+        }
+      }
+    } else if (g.state === 'shut' && this.bossDown) {
+      g.wait -= dt;
+      if (g.wait <= 0) {
+        g.state = 'opening';
+        g.t = 0;
+        const i = this.level.world.boxes.indexOf(g.box);
+        if (i >= 0) this.level.world.boxes.splice(i, 1);
+        ctx.audio?.play?.('gate_lift', { pos: at(2), volume: 0.9, gap: 1 });
+      }
+    } else if (g.state === 'opening') {
+      g.t += dt;
+      const k = Math.min(1, g.t / GATE_LIFT);
+      g.mesh.position.y = g.lift * k * k * (3 - 2 * k);
+      if (k >= 1) {
+        g.state = 'raised';
+        g.mesh.visible = false;
+      }
+    }
+  }
+
+  // ---- After him: the blood fountain ----
+
+  // Game: he is dead (where he fell).
+  onBossDown(x, z) {
+    this.bossDown = true;
+    this.fallenAt = { x, z };
+    this.fountainT = FOUNTAIN_AFTER;
+  }
+
+  // Where it rises: out in the arena, well away from where he fell (his
+  // loot), from you, from the throne, the way in and the way out.
+  _fountainSpot(ctx) {
+    const c = this.centre;
+    const exit = this.level.data.exit;
+    const toExit = Math.atan2(exit.x - c.x, exit.z - c.z);
+    const p = ctx.player.position;
+    let best = null;
+    let score = -Infinity;
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      if (Math.abs(angleDelta(a, this.entry)) < 0.5 || Math.abs(angleDelta(a, toExit)) < 0.5) continue;
+      const x = c.x + Math.sin(a) * FOUNTAIN_OUT;
+      const z = c.z + Math.cos(a) * FOUNTAIN_OUT;
+      const f = this.fallenAt || c;
+      const s = Math.min(Math.hypot(x - f.x, z - f.z), 9) * 2 + Math.min(Math.hypot(x - p.x, z - p.z), 6);
+      if (s > score) [best, score] = [{ x, z }, s];
+    }
+    return best;
+  }
+
+  _raiseFountain(ctx) {
+    const { x, z } = this._fountainSpot(ctx);
+    const group = new THREE.Group();
+    group.position.set(x, -2.2, z);
+    const well = Assets.instanceProp('well');
+    this.fountainMat = bloodMaterial();
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(1.0, 48), this.fountainMat);
+    pool.rotation.x = -Math.PI / 2;
+    if (well) {
+      group.add(well);
+      pool.position.y = 0.72;
+      pool.scale.setScalar(0.9);
+    } else {
+      const stone = new THREE.MeshLambertMaterial({ color: 0x3a3230 });
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.28, 12, 40).rotateX(-Math.PI / 2).translate(0, 0.75, 0), stone);
+      const wall = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.25, 0.75, 40, 1, true).translate(0, 0.37, 0), stone);
+      group.add(rim, wall);
+      pool.position.y = 0.62;
+    }
+    group.add(pool);
+    // The gush itself: a column of blood welling up out of the middle (the
+    // drops thrown off it are particles).
+    const gushMat = new THREE.MeshLambertMaterial({ color: 0x8a0508, emissive: 0x4a0004, transparent: true, opacity: 0.93 });
+    const gush = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.3, 1, 12, 1, true).translate(0, 0.5, 0), gushMat);
+    gush.position.y = pool.position.y;
+    gush.scale.set(1, 0.01, 1);
+    group.add(gush);
+    this.level.group.add(group);
+    this.fountain = { x, z, group, pool, gush, top: pool.position.y, t: 0, risen: false, used: false, near: false, jet: 0 };
+    ctx.effects?.quake?.(x, z, 2.4, 0.8);
+    ctx.shake?.(0.35);
+    ctx.audio?.play?.('fountain_rise', { pos: new THREE.Vector3(x, 0.5, z), volume: 1, gap: 1 });
+  }
+
+  _updateFountain(dt, ctx) {
+    if (this.fountainT > 0) {
+      this.fountainT -= dt;
+      if (this.fountainT <= 0) this._raiseFountain(ctx);
+      return;
+    }
+    const f = this.fountain;
+    if (!f) return;
+    this.fountainMat.uniforms.uTime.value = this.time;
+    if (!f.risen) {
+      f.t += dt;
+      const k = Math.min(1, f.t / FOUNTAIN_RISE);
+      f.group.position.y = -2.2 * (1 - k * k * (3 - 2 * k)) + Math.sin(f.t * 40) * 0.02 * (1 - k);
+      if (Math.random() < dt * 14) burst(ctx.fx.alpha, new THREE.Vector3(f.x + (Math.random() - 0.5) * 3, 0.2, f.z + (Math.random() - 0.5) * 3), { count: 3, speed: 1.6, color: C.smoke, colorEnd: C.smoke, size: 0.7, life: 1.2, gravity: -1 });
+      if (k >= 1) {
+        f.risen = true;
+        f.group.position.y = 0;
+        this.level.world.addStatic({ x: f.x, z: f.z, r: 1.35 });
+        this.level._spot({ color: 0xff2a1a, base: 9, distance: 9, decay: 1.6, x: f.x, y: 2.2, z: f.z, seed: 3.1 });
+        ctx.audio?.play?.('fountain_burst', { pos: new THREE.Vector3(f.x, 1, f.z), volume: 1, gap: 1 });
+      }
+      return;
+    }
+    // The jet: strong until you drink, then it sinks to a trickle.
+    const strength = f.used ? Math.max(0, 1 - f.jet) : 1;
+    if (f.used) f.jet = Math.min(1, f.jet + dt / 2.5);
+    // The column pulses as it gushes.
+    const gushH = (0.3 + 2.6 * strength) * (0.9 + 0.1 * Math.sin(this.time * 9) + 0.06 * Math.sin(this.time * 23));
+    f.gush.scale.set(0.6 + 0.4 * strength, Math.max(0.01, gushH), 0.6 + 0.4 * strength);
+    const ps = ctx.fx.alpha;
+    const top = f.top + gushH;
+    f.acc = (f.acc || 0) + 90 * dt * (0.15 + 0.85 * strength);
+    for (; f.acc >= 1; f.acc--) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 0.4 + Math.random() * 1.1;
+      ps.emit({ x: f.x, y: top, z: f.z, vx: Math.sin(a) * s, vy: 1 + Math.random() * 2.5 * strength, vz: Math.cos(a) * s, life: 1.0, size: 0.28, sizeEnd: 0.12, color: JET, colorEnd: JET_DARK, gravity: -12, drag: 0.1 });
+    }
+    const p = ctx.player.position;
+    f.near = !f.used && !ctx.player.dead && Math.hypot(p.x - f.x, p.z - f.z) < FOUNTAIN_REACH;
+    if (f.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon && !ctx.pickups?.nearItem) this._drink(ctx);
+  }
+
+  // Drunk from: every flask fills, once.
+  _drink(ctx) {
+    const f = this.fountain;
+    f.used = true;
+    f.near = false;
+    const run = ctx.player.run;
+    if (run) run.potions = run.potionCap;
+    ctx.audio?.drink?.();
+    ctx.audio?.relic?.();
+    ctx.toast?.('The blood fills every flask');
+    burst(ctx.fx.alpha, new THREE.Vector3(f.x, 1.2, f.z), { count: 40, speed: 3.5, color: JET, colorEnd: JET_DARK, size: 0.16, life: 1, gravity: -12 });
+  }
+
+  prompt() {
+    return this.fountain?.near ? '<b>F</b> drink from the blood fountain' : null;
+  }
+
   update(dt, ctx) {
     this.time += dt;
     this.uniforms.uTime.value = this.time;
+    this._updateGate(dt, ctx);
+    this._updateFountain(dt, ctx);
     const p = ctx.player.position;
     // Down the corridor: the candles ahead light as you come.
     for (const g of this.pedestals) if (!g.lit && p.x > g.x - AHEAD) this._light(g, ctx);

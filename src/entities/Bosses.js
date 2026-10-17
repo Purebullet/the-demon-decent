@@ -27,7 +27,7 @@ export const BOSS_TYPES = {
     asset: 'sleeper',
     scale: 1,
     hp: 2625,
-    dmg: 22,
+    dmg: 25,
     speed: 2.0,
     radius: 1.5,
     poise: Infinity,
@@ -44,20 +44,22 @@ export const BOSS_TYPES = {
     attacks: [
       // `arc`: the axe's path round him (radians from straight ahead, his
       // right to his left) while the blow lands.
-      { name: 'sweep', windup: 0.95, strike: 0.54, recover: 1.04, dmg: 1, minRange: 0, maxRange: 5.8, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 3, armor: true },
-      // `fury`: what changes in his second phase (a stamp straight after).
-      { name: 'chop', windup: 1.04, strike: 0.29, recover: 1.22, dmg: 1.35, minRange: 2, maxRange: 6.5, volume: { c: [-0.6, 1.4, 3.4], h: [1.1, 1.6, 2.0] }, lunge: 1.2, knockback: 10, aoe: { at: [-0.6, 3.9], radius: 3.0, dmg: 0.55 }, weight: 2, armor: true, fury: { combo: { next: 'stomp', chance: 0.6, windup: 0.55 } } },
-      { name: 'stomp', windup: 0.77, strike: 0.23, recover: 0.9, dmg: 0.6, minRange: 0, maxRange: 3.4, volume: null, aoe: { at: [0, 0], radius: 4.2, dmg: 0.6 }, weight: 1, armor: true },
-      // Right under his nose: a quick, low punt (Sleeper._considerAttack).
-      { name: 'kick', windup: 0.3, strike: 0.18, recover: 0.75, dmg: 0.75, minRange: 0, maxRange: 3.4, volume: { c: [-0.35, 0.8, 2.5], h: [1.0, 0.9, 1.5] }, knockback: 16, weight: 0, armor: true, close: true },
-      // Quicker than his axe: the left hand lunges (see Sleeper: held, tossed,
-      // swatted).
-      { name: 'grab', windup: 0.38, strike: 0.38, recover: 0.9, dmg: 0.25, minRange: 0, maxRange: 5.4, volume: null, lunge: 3.8, grab: true, weight: 2, armor: true },
+      { name: 'sweep', windup: 0.95, strike: 0.54, recover: 0.88, dmg: 1, minRange: 0, maxRange: 5.8, volume: null, arc: [-1.95, 1.95], knockback: 14, weight: 3, armor: true },
+      // Often stamps straight after; `fury`: more often in his second phase.
+      { name: 'chop', windup: 1.04, strike: 0.29, recover: 1.04, dmg: 1.35, minRange: 2, maxRange: 6.5, volume: { c: [-0.6, 1.4, 3.4], h: [1.1, 1.6, 2.0] }, lunge: 1.2, knockback: 10, aoe: { at: [-0.6, 3.9], radius: 3.0, dmg: 0.55 }, weight: 2, armor: true, combo: { next: 'stomp', chance: 0.4, windup: 0.55 }, fury: { combo: { next: 'stomp', chance: 0.75, windup: 0.5 } } },
+      { name: 'stomp', windup: 0.77, strike: 0.23, recover: 0.77, dmg: 0.6, minRange: 0, maxRange: 3.4, volume: null, aoe: { at: [0, 0], radius: 4.2, dmg: 0.6 }, weight: 1, armor: true },
+      // In front of him and close: a quick, low punt that turns after you as
+      // it winds up (Sleeper._considerAttack). `track`: how fast (rad/s) he
+      // turns after you through the blow, for all his axe stays put.
+      { name: 'kick', windup: 0.3, strike: 0.18, recover: 0.64, dmg: 0.75, minRange: 0, maxRange: 4.3, volume: { c: [-0.3, 0.8, 2.9], h: [1.3, 0.9, 1.9] }, knockback: 16, weight: 0, armor: true, close: true, track: 1.8 },
+      // Quicker than his axe, and his hand goes where you go: the left hand
+      // lunges after you (see Sleeper: held, tossed, swatted).
+      { name: 'grab', windup: 0.38, strike: 0.38, recover: 0.77, dmg: 0.25, minRange: 0, maxRange: 6, volume: null, lunge: 7.5, grab: true, weight: 3, armor: true, track: 2.6 },
       // Only after a grab: the axe across whatever he threw up, which it
       // meets as the axe comes round in front of him (SWAT_AT of the strike).
-      { name: 'swat', windup: 0.11, strike: 0.36, recover: 1.0, dmg: 1.1, minRange: 0, maxRange: 99, volume: null, arc: [-1.95, 1.95], swat: true, knockback: 18, weight: 0, armor: true, behind: true },
+      { name: 'swat', windup: 0.11, strike: 0.36, recover: 0.85, dmg: 1.1, minRange: 0, maxRange: 99, volume: null, arc: [-1.95, 1.95], swat: true, knockback: 18, weight: 0, armor: true, behind: true },
       // Behind him: one full turn with the axe held out (Sleeper._considerAttack).
-      { name: 'spin', windup: 0.29, strike: 0.68, recover: 0.9, dmg: 0.9, minRange: 0, maxRange: 9, volume: null, spin: true, knockback: 14, weight: 0, armor: true, behind: true },
+      { name: 'spin', windup: 0.29, strike: 0.68, recover: 0.77, dmg: 0.9, minRange: 0, maxRange: 9, volume: null, spin: true, knockback: 14, weight: 0, armor: true, behind: true },
     ],
   },
   // The last lord (floor 10), quick and hard to touch (see Archfiend.js):
@@ -298,9 +300,12 @@ export class Boss extends Enemy {
 
 // Seconds of quiet between his lines, at the least.
 const VOICE_GAP = 3;
-// Getting up off his bones, before he speaks; settling after.
-const RISE = 3.2;
-const SETTLE = 1.3;
+// Getting up off his throne (quickly: he is up while the candles are still
+// catching round the hall), rearing back as he starts to speak, settling;
+// then the fight is on, his words still going.
+const RISE = 1.5;
+const REAR = 2.2;
+const SETTLE = 0.5;
 // His death: struck to his knees; then, once his last words are spoken, down.
 const KNEEL = 1.1;
 const FALL = 1.8;
@@ -311,8 +316,10 @@ const FLING = 0.2;
 // The swat meets you this far through its strike (the axe in front of him).
 const SWAT_AT = 0.4;
 // His quick kick: you this close and this nearly straight in front of him.
-const KICK_RANGE = 3.3;
-const KICK_CONE = 0.38;
+const KICK_RANGE = 4.3;
+const KICK_CONE = 0.6;
+// He catches you at most this many times a fight.
+const GRABS = 3;
 // How far forward the skull tips onto his jaw to close his mouth (radians),
 // and how long a roar holds it open.
 const MOUTH_SHUT = 0.42;
@@ -350,8 +357,8 @@ export class Sleeper extends Boss {
     this.arcPivot = new THREE.Object3D();
     this.root.add(this.arcPivot);
     this.arc = new StrikeVolume(this.arcPivot, new THREE.Vector3(0, 1.5, 3.3), new THREE.Vector3(1.4, 1.7, 2.3));
-    this.grabVol = new StrikeVolume(this.root, new THREE.Vector3(0.7, 1.4, 2.8), new THREE.Vector3(1.7, 1.7, 2.0));
-    // He catches you at most twice a fight.
+    this.grabVol = new StrikeVolume(this.root, new THREE.Vector3(0.5, 1.4, 3.2), new THREE.Vector3(2.0, 1.8, 2.4));
+    // How often he has caught you (at most GRABS a fight).
     this.grabs = 0;
     this.leftHand = this.model.bones.find((b) => b.name === 'LeftHand') || this.root;
     this._holdAxe();
@@ -431,6 +438,13 @@ export class Sleeper extends Boss {
       return;
     }
     super.update(dt, ctx);
+    // A blow that follows you (`track`: his grab, his kick) turns after you
+    // as it winds up and lands.
+    const a = this.attack;
+    if (this.alive && a?.track && (this.state === 'windup' || this.state === 'strike')) {
+      this._turnToward(toPlayer, dt, a.track);
+      this.root.rotation.y = this.yaw;
+    }
     if (this.alive) {
       this.light.intensity = 6 + Math.sin(ctx.time * 2.3) * 1.2 + (this.phase - 1) * 2;
       this.fightT += dt;
@@ -441,11 +455,11 @@ export class Sleeper extends Boss {
 
   _updateRise(dt, ctx, toPlayer) {
     const t = (this.stateT += dt);
-    const speak = VOICE_LINES.intro?.duration ?? 4;
+    const speak = REAR;
     let u;
     if (t < RISE) u = 0.5 * (t / RISE);
     else if (t < RISE + speak) {
-      // Up: he rears back, arms wide, and speaks.
+      // Up: he rears back, arms wide, and starts to speak.
       this._say('intro', true);
       u = 0.5 + 0.35 * ((t - RISE) / speak);
     } else u = 0.85 + 0.15 * Math.min(1, (t - RISE - speak) / SETTLE);
@@ -530,16 +544,17 @@ export class Sleeper extends Boss {
         return;
       }
     } else this.behindT = Math.max(0, this.behindT - dt);
-    // Right under his nose: the kick, quick off the mark and sooner than
-    // anything else (never twice running).
-    if (dist < KICK_RANGE && off < KICK_CONE && this.cooldown < 0.45 && this.lastMoves.at(-1) !== 'kick') {
+    // Close in front of him: usually the kick, quick off the mark and sooner
+    // than anything else (never twice running; whether he will is settled
+    // once per opening, `kickPass`).
+    if (dist < KICK_RANGE && off < KICK_CONE && this.cooldown < 0.7 && this.lastMoves.at(-1) !== 'kick' && !this.kickPass) {
       this.lastMoves.push('kick');
       if (this.lastMoves.length > 2) this.lastMoves.shift();
       this._startAttack(this.type.attacks.find((a) => a.name === 'kick'), ctx, this.phase === 1 ? 1 : 0.85);
       return;
     }
     if (this.cooldown > 0 || off > 0.55) return;
-    const moves = this.type.attacks.filter((a) => !a.behind && !a.close && !(a.grab && this.grabs >= 2) && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
+    const moves = this.type.attacks.filter((a) => !a.behind && !a.close && !(a.grab && this.grabs >= GRABS) && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
     if (!moves.length) return;
     let roll = Math.random() * moves.reduce((s, a) => s + (a.weight || 1), 0);
     let pick = moves[0];
@@ -558,6 +573,7 @@ export class Sleeper extends Boss {
 
   _startAttack(a, ctx, windupScale = 1, chained = false) {
     super._startAttack(a, ctx, windupScale, chained);
+    this.kickPass = Math.random() < 0.3;
     // The reach of the sweep marked on the floor round him as it winds up.
     if ((a.arc && !a.swat) || a.spin) ctx.effects?.telegraph(this.position.x, this.position.z, 5.6, this.stateDur, null, 0xff6a20);
     else if (a.name === 'stomp') ctx.effects?.telegraph(this.position.x, this.position.z, a.aoe.radius, this.stateDur, null, 0xff6a20);
