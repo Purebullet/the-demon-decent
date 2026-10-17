@@ -196,3 +196,105 @@ export function exitFacing(level) {
   }
   return face;
 }
+
+// A secret in the floor's second passage. The main way through is the
+// shortest walk from the spawn to the exit; where the map loops, blocking it
+// somewhere (three tiles square: wider than any passage) turns the walk the
+// other way round, and the longest stretch of another way not shared with
+// the main one is the second passage.
+// Halfway down it a niche one tile deep is cut into the rock (rock on every
+// side but its mouth), and `level.secret` = { c, r, x, z, dir } records it
+// (`dir`: from the niche out into the passage). False if the floor has no
+// loop, or nowhere along it to cut.
+export function carveSecret(level, rand) {
+  const { cols, rows, tiles, solid, nav, spawn, exit } = level;
+  if (!spawn || !exit) return false;
+  const DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const idx = (c, r) => r * cols + c;
+  const at = (c, r) => (c < 0 || r < 0 || c >= cols || r >= rows ? '#' : tiles[r][c]);
+  const open = (i) => nav.walkable[i] === 1;
+  let closed = new Set();
+  const route = () => {
+    const parent = new Int32Array(cols * rows).fill(-2);
+    const from = idx(spawn.c, spawn.r);
+    const to = idx(exit.c, exit.r);
+    parent[from] = -1;
+    const q = [from];
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h];
+      if (i === to) break;
+      const c = i % cols;
+      const r = (i - c) / cols;
+      for (const [dc, dr] of DIRS) {
+        const j = idx(c + dc, r + dr);
+        if (open(j) && !closed.has(j) && parent[j] === -2) {
+          parent[j] = i;
+          q.push(j);
+        }
+      }
+    }
+    if (parent[to] === -2) return null;
+    const path = [];
+    for (let i = to; i !== -1; i = parent[i]) path.push(i);
+    return path.reverse();
+  };
+  const main = route();
+  if (!main) return false;
+  const onMain = new Set(main);
+  const ends = new Set([main[0], main[main.length - 1]]);
+  let other = [];
+  for (const i of main.slice(3, -3)) {
+    const c = i % cols;
+    const r = (i - c) / cols;
+    closed = new Set();
+    for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) if (!ends.has(idx(c + x, r + y))) closed.add(idx(c + x, r + y));
+    const alt = route();
+    if (!alt) continue;
+    const off = alt.filter((j) => !onMain.has(j));
+    if (off.length > other.length) other = off;
+  }
+  if (other.length < 6) return false;
+  // Along its middle stretch, the rock beside it.
+  const rock = (c, r) => c > 0 && r > 0 && c < cols - 1 && r < rows - 1 && at(c, r) === '#';
+  const cands = [];
+  other.forEach((i, k) => {
+    const c = i % cols;
+    const r = (i - c) / cols;
+    if (at(c, r) !== '.') return;
+    const mid = 1 - Math.abs(k / (other.length - 1) - 0.5) * 2;
+    if (mid < 0.35) return;
+    for (const [dc, dr] of DIRS) {
+      const nc = c + dc;
+      const nr = r + dr;
+      // Rock all round the niche but its mouth: beside it, behind it, and
+      // at the corners behind it.
+      const ok = [
+        [nc, nr],
+        [nc + dc, nr + dr],
+        [nc + dr, nr + dc],
+        [nc - dr, nr - dc],
+        [nc + dc + dr, nr + dr + dc],
+        [nc + dc - dr, nr + dr - dc],
+      ].every(([cc, rr]) => rock(cc, rr));
+      if (ok) cands.push({ c: nc, r: nr, dir: [-dc, -dr], score: mid + rand() * 0.3 });
+    }
+  });
+  if (!cands.length) return false;
+  cands.sort((a, b) => b.score - a.score);
+  const k = cands[0];
+  const i = idx(k.c, k.r);
+  solid[i] = 0;
+  nav.walkable[i] = 1;
+  nav.cost[i] = 1;
+  tiles[k.r] = tiles[k.r].slice(0, k.c) + '.' + tiles[k.r].slice(k.c + 1);
+  const x = (k.c + 0.5) * TILE;
+  const z = (k.r + 0.5) * TILE;
+  level.floorTiles.push({ c: k.c, r: k.r, x, z });
+  level.secret = { c: k.c, r: k.r, x, z, dir: k.dir };
+  return true;
+}

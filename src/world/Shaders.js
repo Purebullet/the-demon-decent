@@ -165,7 +165,8 @@ export function abyssMaterial() {
   );
 }
 
-// A living flame: a camera-facing quad (any orientation of the mesh) whose
+// A living flame: a quad turned to face the eye about the upright only (any
+// orientation of the mesh; looking up or down never tips it over) whose
 // teardrop shape is torn upward by scrolling noise, white-hot at the root,
 // orange, then red at the licking tips. Additive, no depth write. `uSeed`
 // keeps neighbouring flames out of step; `uIntensity` brightens or dims it.
@@ -179,10 +180,13 @@ export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
       varying vec2 vUv;
       void main() {
         vUv = uv;
-        // Billboard: the quad's corners laid out in view space around its centre.
+        // Billboard: the quad's corners laid out round its centre, across
+        // the view and straight up.
         vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
         vec2 scale = vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
-        gl_Position = projectionMatrix * (centre + vec4(position.xy * scale, 0.0, 0.0));
+        vec3 right = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0]) + vec3(1e-5, 0.0, 0.0));
+        vec3 off = right * position.x * scale.x + vec3(0.0, position.y * scale.y, 0.0);
+        gl_Position = projectionMatrix * (centre + viewMatrix * vec4(off, 0.0));
       }`,
     fragmentShader: /* glsl */ `
       uniform float uTime;

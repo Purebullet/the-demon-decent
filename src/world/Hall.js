@@ -26,6 +26,10 @@ const AHEAD = 10;
 const EARLY = 7;
 const DOMINO = 2.2;
 const PEDESTAL_STEP = 3;
+// His throne: how big, how far behind where he sits, how deep it is sunk.
+const THRONE_SCALE = 2;
+const THRONE_BACK = 1.0;
+const THRONE_SINK = -1.25;
 const COLUMN_STEP = 6;
 
 const flameGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.42, 0);
@@ -47,7 +51,17 @@ const VERT = /* glsl */ `
     vec4 c = modelViewMatrix * vec4(aPos, 1.0);
     float s = aSize * (uHalo > 0.5 ? 5.0 : 1.0) * (0.3 + 0.7 * min(aLit, 1.3));
     if (aLit <= 0.001) s = 0.0;
-    gl_Position = projectionMatrix * (c + vec4(position.x * s * (uHalo > 0.5 ? 1.0 : 0.62), position.y * s, 0.0, 0.0));
+    if (uHalo > 0.5) {
+      // The glow faces the eye.
+      gl_Position = projectionMatrix * (c + vec4(position.xy * s, 0.0, 0.0));
+    } else {
+      // A flame stands up from its wick: it turns to face you about the
+      // upright only, so looking up or down never tips it over.
+      vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+      right = normalize(vec3(right.x, 0.0, right.z) + vec3(1e-5, 0.0, 0.0));
+      vec3 off = right * position.x * s * 0.62 + vec3(0.0, position.y * s, 0.0);
+      gl_Position = projectionMatrix * (c + viewMatrix * vec4(off, 0.0));
+    }
   }`;
 
 const FLAME_FRAG = /* glsl */ `
@@ -159,18 +173,19 @@ export class Hall {
     const banners = [];
     const open = (x, z) => !this.solid(Math.floor(x / TILE), Math.floor(z / TILE));
     const P = Assets.props.get('candlePedestal')?.entry.size ?? 1.35;
-    // The pedestal's candles: a tall one in the middle, two shorter beside it.
     // Measured off the model (its wick tops, at its 1.35 m): one tall
     // candle in the middle, six short ones round it.
     const k = P / 1.35;
+    // (In the space of its instanced geometry, the wicks found as the
+    // peaks of the mesh: Assets.propGeometry.)
     const tips = [
-      [0.002, 1.35, 0.003, 0.3],
-      [-0.053, 1.056, -0.2, 0.17],
-      [-0.117, 1.035, 0.144, 0.17],
-      [0.114, 1.026, -0.185, 0.17],
-      [0.115, 1.023, 0.124, 0.17],
-      [-0.051, 1.013, 0.173, 0.17],
-      [-0.207, 1.008, 0.046, 0.17],
+      [-0.002, 1.35, -0.003, 0.3],
+      [0.053, 1.056, 0.2, 0.17],
+      [0.117, 1.035, -0.144, 0.17],
+      [-0.114, 1.026, 0.185, 0.17],
+      [-0.115, 1.023, -0.124, 0.17],
+      [0.051, 1.013, -0.173, 0.17],
+      [0.207, 1.008, -0.046, 0.17],
     ].map(([x, y, z, s]) => [x * k, y * k - 0.025, z * k, s]);
     for (let x = this.x0 + 1.5 * TILE; x < this.x1 - TILE; x += PEDESTAL_STEP * TILE) {
       for (const [z, wall] of [
@@ -220,11 +235,11 @@ export class Hall {
     // the four on its arms.
     const ka = A / 2.4;
     const tips = [
-      [-0.038, 2.4, -0.003, 0.32],
-      [0.273, 2.095, -0.295, 0.25],
-      [-0.258, 2.087, -0.287, 0.25],
-      [-0.267, 2.086, 0.3, 0.25],
-      [0.262, 2.02, 0.267, 0.25],
+      [0.038, 2.4, 0.003, 0.32],
+      [-0.273, 2.095, 0.295, 0.25],
+      [0.258, 2.087, 0.287, 0.25],
+      [0.267, 2.086, -0.3, 0.25],
+      [-0.262, 2.02, -0.267, 0.25],
     ].map(([x, y, z, s]) => [x * ka, y * ka - 0.03, z * ka, s]);
     const ring = this.radius - 2.2;
     const n = Math.round((Math.PI * 2 * ring) / 4.3);
@@ -264,9 +279,19 @@ export class Hall {
     }
     this._put('hallColumn', columns);
     this._put('banner', banners);
-    // His bed: a nest of bones in the middle.
-    d._place('boneNest', c.x, c.z, { scale: 0.85, yaw: this.entry, stretchY: 0.45 });
-    d.claim(c.x, c.z, 3);
+    // His throne in the middle, facing the way in (as he does: Game), set a
+    // little behind where he sits and sunk into the floor to its seat, so his
+    // short legs reach the ground as he slouches back in it. It stops you
+    // along its back (clear of where he sits, so nothing shoves him off it).
+    const face = Math.atan2(this.level.data.spawn.x - c.x, 0);
+    const fx = Math.sin(face);
+    const fz = Math.cos(face);
+    const tx = c.x - fx * THRONE_BACK;
+    const tz = c.z - fz * THRONE_BACK;
+    d._place('throne', tx, tz, { scale: THRONE_SCALE, yaw: face + Math.PI / 2, y: THRONE_SINK });
+    for (const side of [-1, 0, 1]) world.addStatic({ x: tx - fx * 1.7 + fz * side * 1.9, z: tz - fz * 1.7 - fx * side * 1.9, r: 1.05 });
+    d.claim(c.x, c.z, 4);
+    this.throne = { x: tx, z: tz, face };
   }
 
   // Overhead: a barrel vault down the corridor with an arch over each pair

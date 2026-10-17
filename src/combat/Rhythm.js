@@ -24,9 +24,10 @@
 // a blow landing (hit-stop) holds the blade but not the beat, so a press on
 // the rhythm is judged the same whether the last swing struck or missed.
 
-// The window, in seconds either side of the moment the arc completes.
-export const WINDOW_EARLY = 0.07;
-export const WINDOW_LATE = 0.12;
+// The window, in seconds either side of the moment the arc completes: it
+// opens as the arc (and the ring) fills, a hair early for the eye's sake.
+export const WINDOW_EARLY = 0.02;
+export const WINDOW_LATE = 0.16;
 export const CHAIN_MAX = 5;
 
 // Light swings run at 75% of a weapon's base timings (a quarter faster).

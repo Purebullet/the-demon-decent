@@ -208,15 +208,21 @@ function segDist(p, a, b) {
   return _ap.addScaledVector(_ab, -t).length();
 }
 
-function inLimit(l, p) {
-  if (!l) return true;
+// How far inside a bone's limits a point lies: 1 well inside, 0 outside,
+// and with `soft` > 0 a blend over that distance either side of each bound
+// (no hard seam where a bone's reach ends).
+function inLimit(l, p, soft = 0) {
+  if (!l) return 1;
+  let k = 1;
+  const ramp = (d) => (soft > 0 ? Math.max(0, Math.min(1, (d + soft) / (2 * soft))) : d >= 0 ? 1 : 0);
   for (const [axis, i] of [['x', 0], ['y', 1], ['z', 2]]) {
     const r = l[axis];
     if (!r) continue;
     const v = p.getComponent(i);
-    if ((r[0] !== undefined && r[0] !== null && v < r[0]) || (r[1] !== undefined && r[1] !== null && v > r[1])) return false;
+    if (r[0] !== undefined && r[0] !== null) k *= ramp(v - r[0]);
+    if (r[1] !== undefined && r[1] !== null) k *= ramp(r[1] - v);
   }
-  return true;
+  return k * k * (3 - 2 * k);
 }
 
 // Parts that must never be joined by skin: a hand resting on a thigh was
@@ -238,10 +244,11 @@ function skinWeights(def, skel, welded, mesh) {
     const p = welded.points[i];
     let total = 0;
     for (const b of deform) {
-      if (!inLimit(b.limit, p)) continue;
+      const lim = inLimit(b.limit, p, def.limitSoft?.bones.test(b.name) ? def.limitSoft.r : 0);
+      if (lim <= 0) continue;
       allowed[i * nb + b.index] = 1;
       const s = segDist(p, b.seg[0], b.seg[1]) / b.r + 0.05;
-      const w = 1 / s ** 6;
+      const w = lim / s ** 6;
       W[i * nb + b.index] = w;
       total += w;
     }

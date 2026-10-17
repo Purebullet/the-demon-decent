@@ -354,6 +354,8 @@ export class Game {
       t.group.removeFromParent();
       far(t.group);
       this.effects.fireball(new THREE.Vector3(0, -500, 0), new THREE.Vector3(1, 0, 0), 0, 0);
+      // A blow on the floor (its crater, cracks, chunks), out of sight.
+      this.effects.quake(0, 0, 3, 1, { y: -500 });
       const fb = this.effects.projectiles.pop();
       fb.mesh.removeFromParent();
       far(fb.mesh);

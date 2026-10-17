@@ -30,10 +30,10 @@ test('mashing spoils the window: a fumbled swing never chains perfectly', () => 
 
 test('a blow landing (hit-stop) holds the blade, not the beat', () => {
   const done = 0.35;
-  // The blade was frozen for 60 ms of the 300 that passed: on the rhythm,
+  // The blade was frozen for 60 ms of the 350 that passed: on the rhythm,
   // the press is as perfect as if the swing had missed.
-  assert.equal(classifyPress(swing(0.24, { rt: 0.3 })), 'perfect');
-  assert.equal(classifyPress(swing(0.24)), 'mash');
+  assert.equal(classifyPress(swing(0.29, { rt: 0.35 })), 'perfect');
+  assert.equal(classifyPress(swing(0.29)), 'mash');
   // And the window closes by the blade's own time, so the freeze never
   // shortens it.
   assert.equal(classifyPress(swing(done + WINDOW_LATE - 0.01, { rt: done + WINDOW_LATE + 0.05 })), 'perfect');
@@ -49,7 +49,7 @@ test('the ring shows exactly what a press would be', () => {
 });
 
 test('a wider window (Grim Metronome) catches presses the plain one misses', () => {
-  const t = 0.35 - WINDOW_EARLY - 0.02;
+  const t = 0.35 - WINDOW_EARLY * 1.3;
   assert.equal(classifyPress(swing(t)), 'mash');
   assert.equal(classifyPress(swing(t), 1.45), 'perfect');
 });

@@ -36,6 +36,8 @@ export const BOSS_TYPES = {
     guard: null,
     cooldown: 1.15,
     turnRate: 1.3,
+    // Once a blow starts it goes where he aimed it: no turning after you.
+    lockOnAttack: true,
     stride: 1.2,
     loot: { potion: 1, weapon: 1, spell: 1 },
     summons: [],
@@ -47,7 +49,7 @@ export const BOSS_TYPES = {
       { name: 'stomp', windup: 0.85, strike: 0.25, recover: 1.0, dmg: 0.6, minRange: 0, maxRange: 3.4, volume: null, aoe: { at: [0, 0], radius: 4.2, dmg: 0.6 }, weight: 1, armor: true },
       // Quicker than his axe: the left hand lunges (see Sleeper: held, tossed,
       // swatted).
-      { name: 'grab', windup: 0.42, strike: 0.38, recover: 1.0, dmg: 0.25, minRange: 0, maxRange: 4.6, volume: null, lunge: 3.2, grab: true, weight: 2, armor: true },
+      { name: 'grab', windup: 0.42, strike: 0.42, recover: 1.0, dmg: 0.25, minRange: 0, maxRange: 5.4, volume: null, lunge: 3.8, grab: true, weight: 2, armor: true },
       // Only after a grab: the axe across whatever he threw up.
       { name: 'swat', windup: 0.28, strike: 0.4, recover: 1.1, dmg: 1.1, minRange: 0, maxRange: 99, volume: null, arc: [-1.95, 1.95], swat: true, knockback: 18, weight: 0, armor: true, behind: true },
       // Behind him: one full turn with the axe held out (Sleeper._considerAttack).
@@ -327,6 +329,10 @@ const LIE = 7;
 // Caught: held this long, then flung.
 const HOLD = 1.1;
 const FLING = 0.32;
+// How far forward the skull tips onto his jaw to close his mouth (radians),
+// and how long a roar holds it open.
+const MOUTH_SHUT = 0.42;
+const ROAR_TIME = 1.1;
 
 const _v = new THREE.Vector3();
 
@@ -357,7 +363,9 @@ export class Sleeper extends Boss {
     this.arcPivot = new THREE.Object3D();
     this.root.add(this.arcPivot);
     this.arc = new StrikeVolume(this.arcPivot, new THREE.Vector3(0, 1.5, 3.3), new THREE.Vector3(1.4, 1.7, 2.3));
-    this.grabVol = new StrikeVolume(this.root, new THREE.Vector3(0.9, 1.4, 2.6), new THREE.Vector3(1.3, 1.5, 1.6));
+    this.grabVol = new StrikeVolume(this.root, new THREE.Vector3(0.7, 1.4, 2.8), new THREE.Vector3(1.7, 1.7, 2.0));
+    // He catches you at most twice a fight.
+    this.grabs = 0;
     this.leftHand = this.model.bones.find((b) => b.name === 'LeftHand') || this.root;
     this._holdAxe();
   }
@@ -400,6 +408,7 @@ export class Sleeper extends Boss {
     this.setState('rising');
     this.pose = { name: 'rise', u: 0, rate: 6 };
     ctx.audio?.roar(this.position);
+    this.roarT = ROAR_TIME;
     ctx.shake?.(0.25);
   }
 
@@ -501,7 +510,12 @@ export class Sleeper extends Boss {
       }
     }
     this.talkK += (loud - this.talkK) * Math.min(1, dt * 16);
-    this.talk = this.talkK * 0.3 + (v.line ? 0.03 : 0);
+    // His mouth is carved wide open; at rest the skull is tipped forward
+    // onto the jaw to shut it (MOUTH_SHUT), and his words and roars lift it.
+    this.roarT = Math.max(0, (this.roarT || 0) - dt);
+    const roar = Math.sin(Math.min(1, this.roarT / ROAR_TIME) * Math.PI);
+    const open = Math.max(Math.min(1, this.talkK * 1.3), roar);
+    this.talk = -MOUTH_SHUT + (MOUTH_SHUT + 0.08) * open;
   }
 
   // ---- Fighting ----
@@ -524,7 +538,7 @@ export class Sleeper extends Boss {
       }
     } else this.behindT = Math.max(0, this.behindT - dt);
     if (this.cooldown > 0 || off > 0.55) return;
-    const moves = this.type.attacks.filter((a) => !a.behind && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
+    const moves = this.type.attacks.filter((a) => !a.behind && !(a.grab && this.grabs >= 2) && dist >= a.minRange && dist <= a.maxRange && !(this.lastMoves.length >= 2 && this.lastMoves.every((m) => m === a.name)));
     if (!moves.length) return;
     let roll = Math.random() * moves.reduce((s, a) => s + (a.weight || 1), 0);
     let pick = moves[0];
@@ -593,17 +607,63 @@ export class Sleeper extends Boss {
     super._updateStrike(dt, ctx);
   }
 
+  // His axe or his foot coming down: the floor caves in round it, cracks run
+  // out glowing, chunks fly, dust rolls (world/Quake.js), and the hall
+  // shakes the harder the nearer you are.
+  _impact(ctx, aoe) {
+    const s = Math.sin(this.yaw);
+    const c = Math.cos(this.yaw);
+    const x = this.position.x + s * aoe.at[1] + c * aoe.at[0];
+    const z = this.position.z + c * aoe.at[1] - s * aoe.at[0];
+    ctx.effects?.quake(x, z, aoe.radius, 1);
+    ctx.audio?.slam(_v.set(x, 0.2, z));
+    const p = ctx.player;
+    const d = Math.hypot(p.position.x - x, p.position.z - z);
+    ctx.shake?.(Math.max(0.15, 0.95 - d * 0.06));
+    if (d < aoe.radius + p.radius && !this.hitPlayer) p.takeDamage(this.damage * aoe.dmg, _v, 4, ctx);
+  }
+
+  postUpdate(dt, ctx, time) {
+    super.postUpdate(dt, ctx, time);
+    this._feet(ctx);
+  }
+
+  // Each footfall (a foot coming down from a stride, read off his skeleton):
+  // the floor gives a little under it and the ground shakes.
+  _feet(ctx) {
+    if (!this.alive || this.asleep || this.state === 'holding' || this.state === 'flinging') return;
+    const H = (this.model.height || 4.5) * (this.type.scale || 1);
+    this.feet ||= ['LeftFoot', 'RightFoot'].map((n) => ({ bone: this.model.bones.find((b) => b.name === n), up: false, rest: null }));
+    for (const f of this.feet) {
+      if (!f.bone) continue;
+      f.bone.getWorldPosition(_v);
+      const y = _v.y - this.root.position.y;
+      if (f.rest === null || y < f.rest) f.rest = y;
+      if (y > f.rest + H * 0.035) f.up = true;
+      else if (f.up && y < f.rest + H * 0.012) {
+        f.up = false;
+        const p = ctx.player.position;
+        const d = Math.hypot(p.x - _v.x, p.z - _v.z);
+        ctx.effects?.quake(_v.x, _v.z, 1.5, 0.22);
+        ctx.shake?.(Math.max(0, 0.22 - d * 0.012));
+        ctx.audio?.play?.('slam', { pos: _v.clone().setY(0.2), volume: 0.4, rate: 0.6 + Math.random() * 0.1, gap: 0.15 });
+      }
+    }
+  }
+
   // ---- His grab ----
 
   // Caught: the player is held up in his left fist before his face.
   _seize(ctx) {
     const p = ctx.player;
     p.seize(this);
+    this.grabs++;
     this.setState('holding', HOLD);
     this.pose = { name: 'toss', u: 0, rate: 10 };
     this.squeezed = false;
     ctx.shake?.(0.35);
     ctx.audio?.roar(this.position);
+    this.roarT = ROAR_TIME;
     ctx.onCombat?.('grabbed');
   }
 
@@ -658,6 +718,7 @@ export class Sleeper extends Boss {
       ctx.announce?.('Vorgrath’s fury builds!');
       ctx.shake?.(0.4);
       ctx.audio?.roar(this.position);
+      this.roarT = ROAR_TIME;
     }
   }
 

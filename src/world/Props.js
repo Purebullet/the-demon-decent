@@ -7,6 +7,7 @@ import { C, burst } from './Particles.js';
 import { rollWeapon } from '../entities/Weapons.js';
 import { rollRelic } from '../combat/Relics.js';
 import { mulberry32 } from '../core/rng.js';
+import { Shrine } from './Secret.js';
 
 // Things on a cavern floor you can do something with:
 //
@@ -62,13 +63,15 @@ export class Props {
     if (Assets.hasProp('chest')) this._chests();
     this._breakables();
     this._fragile();
+    const s = level.data.secret;
+    this.shrine = s ? new Shrine(level, s) : null;
   }
 
   // Tiles that already hold something the map placed.
   _occupied() {
     const d = this.level.data;
     this.busy = new Set();
-    for (const t of [d.spawn, d.exit, d.boss, ...d.enemies, ...d.potions, ...d.weapons, ...d.lava, ...d.spikes, ...d.vents].filter(Boolean)) {
+    for (const t of [d.spawn, d.exit, d.boss, d.secret, ...d.enemies, ...d.potions, ...d.weapons, ...d.lava, ...d.spikes, ...d.vents].filter(Boolean)) {
       const c = t.c ?? Math.floor(t.x / TILE);
       const r = t.r ?? Math.floor(t.z / TILE);
       this.busy.add(r * d.cols + c);
@@ -306,6 +309,7 @@ export class Props {
 
   // The prompt to show, if a closed chest is within reach.
   prompt() {
+    if (this.shrine?.near) return '<b>F</b> touch the whispering shrine';
     return this.nearChest ? '<b>F</b> open the chest' : null;
   }
 
@@ -333,6 +337,13 @@ export class Props {
       if (d < best) {
         best = d;
         this.nearChest = c;
+      }
+    }
+    if (this.shrine) {
+      this.shrine.update(dt, ctx);
+      if (this.shrine.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon) {
+        this.shrine.use(ctx);
+        ctx.input.pressed.delete('KeyF');
       }
     }
     if (this.nearChest && !ctx.player.dead && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon) {

@@ -256,7 +256,7 @@ export class Enemy {
         break;
       case 'windup': {
         // Track the player while telegraphing; deep floors track harder.
-        this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.8 * this.tuning.speed);
+        if (!this.type.lockOnAttack) this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.8 * this.tuning.speed);
         this.moveBlend = Math.max(0, this.moveBlend - dt * 6);
         if (this.stateT >= this.stateDur) this._beginStrike(ctx);
         break;

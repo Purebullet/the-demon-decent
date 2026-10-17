@@ -69,8 +69,8 @@ const FLAME_TIME = 12;
 const FLAME_DAMAGE = 1.25;
 const FLAME_LIGHT = 1.45;
 // Heavy attack: a press held longer than HOLD draws back; full power after CHARGE_FULL.
-const HOLD = 0.2;
-const CHARGE_FULL = 0.75;
+const HOLD = 0.28;
+const CHARGE_FULL = 0.9;
 const HEAVY_ARC = prepareArc({ from: [0.35, 0.93, -0.05], to: [-0.6, -0.72, -0.55] });
 // Drawn back: raised high on the right, blade straight up and a little back.
 const CHARGE_DIR = new THREE.Vector3(0.35, 0.93, -0.05).normalize();
@@ -736,7 +736,7 @@ export class Player {
       arc: HEAVY_ARC,
       heavy: true,
       power,
-      W: 0.07,
+      W: 0.12,
       A: (def.active * 1.25) / sp,
       R: (def.recover * 1.25) / sp,
       perfect: false,

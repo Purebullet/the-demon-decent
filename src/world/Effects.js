@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { C, burst, ring, spawnFlame } from './Particles.js';
+import { Quakes } from './Quake.js';
 
 // Ground telegraphs, delayed fire strikes, and projectiles. Everything that
 // can hurt the player here is announced first: a ring that fills up before
@@ -19,9 +20,16 @@ export class Effects {
     this.items = [];
     this.projectiles = [];
     this.tasks = [];
+    this.quakes = new Quakes(scene, fx);
+  }
+
+  // A heavy blow on the floor (world/Quake.js).
+  quake(x, z, radius, power = 1, opts) {
+    this.quakes.hit(x, z, radius, power, opts);
   }
 
   clear() {
+    this.quakes.clear();
     for (const t of this.items) this.scene.remove(t.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     this.items.length = 0;
@@ -146,6 +154,7 @@ export class Effects {
   }
 
   update(dt, ctx) {
+    this.quakes.update(dt);
     for (let i = this.tasks.length - 1; i >= 0; i--) {
       const t = this.tasks[i];
       t.t += dt;

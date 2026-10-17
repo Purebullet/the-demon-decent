@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TILE } from './LevelData.js';
-import { parseLevel, carveAlcoves, exitFacing } from './levelParser.js';
+import { parseLevel, carveAlcoves, carveSecret, exitFacing } from './levelParser.js';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { runeCircleTexture } from './Textures.js';
 import { lavaMaterial, portalMaterial, gateVeilMaterial, makeFlame } from './Shaders.js';
@@ -45,6 +45,8 @@ export class Level {
     // Every floor gets two or three dead ends for its chests (the Sleeper's
     // hall has its own).
     if (!def.hall) carveAlcoves(d, d.floorTiles.length > 160 ? 3 : 2, mulberry32(floorNumber * 4111));
+    // And, down the other way round its loop, a secret (world/Secret.js).
+    if (!def.hall && !d.boss) carveSecret(d, mulberry32(floorNumber * 977));
     this.nav = d.nav;
     this.world = new CollisionWorld({ grid: { cols: d.cols, rows: d.rows, solid: d.solid }, tileSize: TILE });
     this.group = new THREE.Group();

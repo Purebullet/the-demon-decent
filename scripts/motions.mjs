@@ -51,12 +51,16 @@ function make(fn) {
 }
 
 // Key poses at times 0..1, eased between. `fn` writes a pose (null = rest).
+// Keys [t, pose, ease]: the way into a key eases smoothly, or with 'in'
+// gathers speed all the way to it (a blow landing), or with 'out' arrives
+// fast and slows (a follow-through settling).
 function keyed(u, keys) {
   let i = 0;
   while (i < keys.length - 2 && u > keys[i + 1][0]) i++;
   const [t0, f0] = keys[i];
-  const [t1, f1] = keys[i + 1];
-  const k = smooth(clamp((u - t0) / Math.max(1e-6, t1 - t0)));
+  const [t1, f1, ease] = keys[i + 1];
+  const r = clamp((u - t0) / Math.max(1e-6, t1 - t0));
+  const k = ease === 'in' ? r * r * r : ease === 'out' ? 1 - (1 - r) ** 3 : smooth(r);
   return blend(make(f0), make(f1), k);
 }
 
@@ -466,66 +470,79 @@ const AXE_ATTACKS = {
   axeSweep: (u) =>
     keyed(u, [
       [0, null],
-      [W * 0.8, (p) => {
-        C(p, 'Waist', 0.05, -0.5, 0);
-        C(p, 'Chest', -0.08, -0.6, 0);
-        C(p, 'Head', 0, 0.5, 0);
-        R(p, 'Shoulder', 0, 0.2, 0.15);
-        R(p, 'Arm', -0.15, 0.8, 0.85);
-        R(p, 'ForeArm', -0.45, 0, 0);
-        R(p, 'Hand', 0, 0, 0.2);
-        L(p, 'Arm', -0.5, -0.2, 0.5);
-        L(p, 'ForeArm', -0.6, 0, 0);
-        B(p, 'UpLeg', -0.25, 0, 0);
-        B(p, 'Leg', 0.45, 0, 0);
-        T(p, 'Hips', 0, 0, -0.03);
-      }],
-      [W, (p) => {
-        C(p, 'Waist', 0.05, -0.55, 0);
-        C(p, 'Chest', -0.1, -0.65, 0);
-        C(p, 'Head', 0, 0.55, 0);
-        R(p, 'Shoulder', 0, 0.22, 0.15);
-        R(p, 'Arm', -0.15, 0.85, 0.9);
+      // Hauling back: the weight sinks, the axe goes round behind him.
+      [0.18, (p) => {
+        C(p, 'Waist', 0, -0.18, 0);
+        C(p, 'Chest', -0.04, -0.22, 0);
+        C(p, 'Head', 0, 0.2, 0);
+        R(p, 'Arm', -0.1, 0.5, 0.6);
         R(p, 'ForeArm', -0.5, 0, 0);
-        R(p, 'Hand', 0, 0, 0.2);
-        L(p, 'Arm', -0.5, -0.2, 0.55);
-        L(p, 'ForeArm', -0.6, 0, 0);
-        B(p, 'UpLeg', -0.28, 0, 0);
-        B(p, 'Leg', 0.5, 0, 0);
-        T(p, 'Hips', 0, 0, -0.03);
-      }],
-      [(W + S) / 2, (p) => {
-        C(p, 'Waist', 0.15, 0.05, 0);
-        C(p, 'Chest', 0.08, 0.1, 0);
-        R(p, 'Arm', -0.3, -0.1, 0.95);
-        R(p, 'ForeArm', -0.15, 0, 0);
-        L(p, 'Arm', -0.3, 0, 0.4);
-        B(p, 'UpLeg', -0.3, 0, 0);
-        B(p, 'Leg', 0.5, 0, 0);
-        T(p, 'Hips', 0, 0, 0.03);
-      }],
-      [S, (p) => {
-        C(p, 'Waist', 0.2, 0.65, 0);
-        C(p, 'Chest', 0.12, 0.8, 0);
-        C(p, 'Head', 0, -0.45, 0);
-        R(p, 'Shoulder', 0, -0.25, 0.05);
-        R(p, 'Arm', -0.3, -0.85, 0.85);
-        R(p, 'ForeArm', -0.2, 0, 0);
-        R(p, 'Hand', 0, 0, -0.15);
-        L(p, 'Arm', 0.3, 0, 0.45);
-        B(p, 'UpLeg', -0.3, 0, 0);
-        B(p, 'Leg', 0.5, 0, 0);
-        T(p, 'Hips', 0, 0, 0.05);
-      }],
-      [0.8, (p) => {
-        C(p, 'Waist', 0.15, 0.5, 0);
-        C(p, 'Chest', 0.1, 0.6, 0);
-        R(p, 'Shoulder', 0, -0.2, 0);
-        R(p, 'Arm', -0.3, -0.7, 0.65);
-        R(p, 'ForeArm', -0.3, 0, 0);
+        L(p, 'Arm', -0.05, 0, 0.3);
         B(p, 'UpLeg', -0.2, 0, 0);
         B(p, 'Leg', 0.35, 0, 0);
-        T(p, 'Hips', 0, 0, 0.04);
+        T(p, 'Hips', 0, -0.03, 0);
+      }],
+      // Coiled to the full: the axe far round to his right, the free arm out.
+      [W * 0.85, (p) => {
+        C(p, 'Waist', 0.05, -0.32, 0);
+        C(p, 'Chest', -0.06, -0.38, 0);
+        C(p, 'Head', 0, 0.38, 0);
+        R(p, 'Arm', -0.15, 0.9, 0.85);
+        R(p, 'ForeArm', -0.55, 0, 0);
+        R(p, 'Hand', 0, 0, 0.2);
+        L(p, 'Arm', -0.15, -0.1, 0.5);
+        L(p, 'ForeArm', -0.45, 0, 0);
+        B(p, 'UpLeg', -0.32, 0, 0);
+        B(p, 'Leg', 0.58, 0, 0);
+        T(p, 'Hips', 0, -0.07, -0.02);
+      }],
+      // Held there a beat, straining.
+      [W, (p) => {
+        C(p, 'Waist', 0.05, -0.35, 0);
+        C(p, 'Chest', -0.08, -0.41, 0);
+        C(p, 'Head', 0, 0.4, 0);
+        R(p, 'Arm', -0.15, 0.95, 0.88);
+        R(p, 'ForeArm', -0.55, 0, 0);
+        R(p, 'Hand', 0, 0, 0.22);
+        L(p, 'Arm', -0.15, -0.1, 0.52);
+        L(p, 'ForeArm', -0.45, 0, 0);
+        B(p, 'UpLeg', -0.34, 0, 0);
+        B(p, 'Leg', 0.6, 0, 0);
+        T(p, 'Hips', 0, -0.075, -0.02);
+      }, 'out'],
+      // The arc, faster and faster, round to his left.
+      [S, (p) => {
+        C(p, 'Waist', 0.15, 0.36, 0);
+        C(p, 'Chest', 0.12, 0.42, 0);
+        C(p, 'Head', 0, -0.32, 0);
+        R(p, 'Arm', -0.35, -0.85, 0.8);
+        R(p, 'ForeArm', -0.15, 0, 0);
+        R(p, 'Hand', 0, 0, -0.15);
+        L(p, 'Arm', 0.25, 0, 0.4);
+        B(p, 'UpLeg', -0.36, 0, 0);
+        B(p, 'Leg', 0.62, 0, 0);
+        T(p, 'Hips', 0, -0.08, 0.05);
+      }, 'in'],
+      // Carried on past by its own weight.
+      [0.7, (p) => {
+        C(p, 'Waist', 0.18, 0.44, 0);
+        C(p, 'Chest', 0.16, 0.5, 0);
+        C(p, 'Head', 0, -0.3, 0);
+        R(p, 'Arm', -0.3, -1.0, 0.62);
+        R(p, 'ForeArm', -0.2, 0, 0);
+        L(p, 'Arm', 0.3, 0, 0.35);
+        B(p, 'UpLeg', -0.38, 0, 0);
+        B(p, 'Leg', 0.66, 0, 0);
+        T(p, 'Hips', 0, -0.09, 0.06);
+      }, 'out'],
+      [0.88, (p) => {
+        C(p, 'Waist', 0.08, 0.2, 0);
+        C(p, 'Chest', 0.06, 0.22, 0);
+        R(p, 'Arm', -0.2, -0.45, 0.35);
+        R(p, 'ForeArm', -0.25, 0, 0);
+        B(p, 'UpLeg', -0.15, 0, 0);
+        B(p, 'Leg', 0.25, 0, 0);
+        T(p, 'Hips', 0, -0.03, 0.02);
       }],
       [1, null],
     ]),
@@ -534,46 +551,94 @@ const AXE_ATTACKS = {
   axeChop: (u) =>
     keyed(u, [
       [0, null],
-      [W, (p) => {
-        C(p, 'Waist', -0.25, 0.15, 0);
-        C(p, 'Chest', -0.25, 0.1, 0);
-        C(p, 'Neck', 0.1, 0, 0);
-        C(p, 'Head', 0.15, 0, 0);
-        R(p, 'Shoulder', 0, 0, 0.4);
-        R(p, 'Arm', -0.45, 0.15, 1.75);
-        R(p, 'ForeArm', -1.1, 0, 0);
-        R(p, 'Hand', -0.3, 0, 0);
-        L(p, 'Arm', -0.7, 0, 0.5);
-        L(p, 'ForeArm', -0.6, 0, 0);
-        B(p, 'UpLeg', -0.12, 0, 0);
-        B(p, 'Leg', 0.2, 0, 0);
-      }],
-      [S, (p) => {
-        C(p, 'Waist', 0.55, 0, 0);
-        C(p, 'Chest', 0.35, 0, 0);
-        C(p, 'Neck', -0.2, 0, 0);
-        C(p, 'Head', -0.35, 0, 0);
-        R(p, 'Arm', -0.9, 0.1, 0.35);
-        R(p, 'ForeArm', -0.15, 0, 0);
-        R(p, 'Hand', 0.6, 0, 0);
-        L(p, 'Arm', -0.3, 0, 0.45);
+      // The axe comes up.
+      [0.2, (p) => {
+        C(p, 'Waist', -0.12, 0.1, 0);
+        C(p, 'Chest', -0.16, 0.06, 0);
+        R(p, 'Shoulder', 0, 0, 0.25);
+        R(p, 'Arm', -0.35, 0.1, 1.2);
+        R(p, 'ForeArm', -0.9, 0, 0);
+        L(p, 'Arm', -0.35, 0, 0.45);
         L(p, 'ForeArm', -0.4, 0, 0);
-        B(p, 'UpLeg', -0.5, 0, 0);
-        B(p, 'Leg', 0.85, 0, 0);
-        B(p, 'Foot', -0.35, 0, 0);
-        T(p, 'Hips', 0, 0, 0.05);
+        B(p, 'UpLeg', -0.08, 0, 0);
+        B(p, 'Leg', 0.12, 0, 0);
       }],
-      [0.82, (p) => {
-        C(p, 'Waist', 0.45, 0, 0);
-        C(p, 'Chest', 0.3, 0, 0);
+      // Reared right back, up on his toes, the axe high over his head.
+      [W * 0.85, (p) => {
+        C(p, 'Waist', -0.24, 0.12, 0);
+        C(p, 'Chest', -0.26, 0.08, 0);
+        C(p, 'Neck', 0.1, 0, 0);
+        C(p, 'Head', 0.18, 0, 0);
+        R(p, 'Shoulder', 0, 0, 0.35);
+        R(p, 'Arm', -0.45, 0.15, 1.5);
+        R(p, 'ForeArm', -1.2, 0, 0);
+        R(p, 'Hand', -0.4, 0, 0);
+        L(p, 'Arm', -0.6, 0, 0.55);
+        L(p, 'ForeArm', -0.5, 0, 0);
+        B(p, 'UpLeg', -0.06, 0, 0);
+        B(p, 'Leg', 0.1, 0, 0);
+        B(p, 'Foot', 0.15, 0, 0);
+        T(p, 'Hips', 0, 0.025, -0.02);
+      }],
+      [W, (p) => {
+        C(p, 'Waist', -0.26, 0.12, 0);
+        C(p, 'Chest', -0.28, 0.08, 0);
+        C(p, 'Neck', 0.1, 0, 0);
+        C(p, 'Head', 0.2, 0, 0);
+        R(p, 'Shoulder', 0, 0, 0.37);
+        R(p, 'Arm', -0.47, 0.15, 1.55);
+        R(p, 'ForeArm', -1.22, 0, 0);
+        R(p, 'Hand', -0.42, 0, 0);
+        L(p, 'Arm', -0.62, 0, 0.56);
+        L(p, 'ForeArm', -0.5, 0, 0);
+        B(p, 'UpLeg', -0.06, 0, 0);
+        B(p, 'Leg', 0.1, 0, 0);
+        B(p, 'Foot', 0.16, 0, 0);
+        T(p, 'Hips', 0, 0.03, -0.02);
+      }, 'out'],
+      // Down with all of him behind it: a deep squat as it bites the floor.
+      [S, (p) => {
+        C(p, 'Waist', 0.52, 0, 0);
+        C(p, 'Chest', 0.34, 0, 0);
+        C(p, 'Neck', -0.15, 0, 0);
         C(p, 'Head', -0.3, 0, 0);
-        R(p, 'Arm', -0.85, 0.1, 0.3);
+        R(p, 'Arm', -0.95, 0.1, 0.35);
+        R(p, 'ForeArm', -0.1, 0, 0);
+        R(p, 'Hand', 0.6, 0, 0);
+        L(p, 'Arm', -0.3, 0, 0.42);
+        L(p, 'ForeArm', -0.4, 0, 0);
+        B(p, 'UpLeg', -0.55, 0, 0);
+        B(p, 'Leg', 0.95, 0, 0);
+        B(p, 'Foot', -0.4, 0, 0);
+        T(p, 'Hips', 0, -0.12, 0.05);
+      }, 'in'],
+      // The jolt of it coming up through him.
+      [0.68, (p) => {
+        C(p, 'Waist', 0.6, 0, 0);
+        C(p, 'Chest', 0.4, 0, 0);
+        C(p, 'Neck', -0.15, 0, 0);
+        C(p, 'Head', -0.25, 0, 0);
+        R(p, 'Arm', -1.0, 0.1, 0.32);
+        R(p, 'ForeArm', -0.1, 0, 0);
+        R(p, 'Hand', 0.62, 0, 0);
+        L(p, 'Arm', -0.25, 0, 0.4);
+        L(p, 'ForeArm', -0.35, 0, 0);
+        B(p, 'UpLeg', -0.6, 0, 0);
+        B(p, 'Leg', 1.02, 0, 0);
+        B(p, 'Foot', -0.42, 0, 0);
+        T(p, 'Hips', 0, -0.14, 0.05);
+      }, 'out'],
+      [0.86, (p) => {
+        C(p, 'Waist', 0.35, 0, 0);
+        C(p, 'Chest', 0.2, 0, 0);
+        C(p, 'Head', -0.15, 0, 0);
+        R(p, 'Arm', -0.7, 0.1, 0.3);
         R(p, 'ForeArm', -0.2, 0, 0);
-        R(p, 'Hand', 0.55, 0, 0);
-        B(p, 'UpLeg', -0.45, 0, 0);
-        B(p, 'Leg', 0.75, 0, 0);
-        B(p, 'Foot', -0.3, 0, 0);
-        T(p, 'Hips', 0, 0, 0.04);
+        R(p, 'Hand', 0.4, 0, 0);
+        B(p, 'UpLeg', -0.35, 0, 0);
+        B(p, 'Leg', 0.6, 0, 0);
+        B(p, 'Foot', -0.25, 0, 0);
+        T(p, 'Hips', 0, -0.06, 0.03);
       }],
       [1, null],
     ]),
@@ -619,7 +684,7 @@ Object.assign(AXE_ATTACKS, {
         B(p, 'Leg', 0.75, 0, 0);
         B(p, 'Foot', -0.3, 0, 0);
         T(p, 'Hips', 0, 0, 0.06);
-      }],
+      }, 'in'],
       [1, GRAB_HOLD],
     ]),
   // The axe held straight out to his right while the whole of him spins
@@ -669,20 +734,23 @@ Object.assign(AXE_ATTACKS, {
     ]),
 });
 
-// Asleep, sat slumped on his bones: thighs out in front, forearms on his
-// knees, head sunk on his chest, breathing slow and deep.
+// Asleep, slouched back in his throne: thighs level and knees fallen apart,
+// shins straight down to the floor, his back sunk into the seat, forearms
+// along its arms with the hands hanging off the ends, chin down on his chest
+// and his head lolled to one side, breathing slow and deep.
 function sleepPose(p, breath = 0) {
-  T(p, 'Hips', 0, -0.1, -0.04);
-  B(p, 'UpLeg', -1.35, 0, 0.12);
-  B(p, 'Leg', 1.45, 0, 0);
-  B(p, 'Foot', -0.15, 0, 0);
-  C(p, 'Waist', 0.3 + breath * 0.04, 0, 0);
-  C(p, 'Chest', 0.28 + breath * 0.05, 0, 0);
-  C(p, 'Neck', 0.25, 0, 0);
-  C(p, 'Head', 0.35 - breath * 0.04, 0, 0);
-  B(p, 'Arm', -0.75, 0, -0.05);
-  B(p, 'ForeArm', -0.55, 0, 0);
-  B(p, 'Hand', 0.3, 0, 0);
+  T(p, 'Hips', 0, 0, -0.05);
+  B(p, 'UpLeg', -1.5, 0, 0.22);
+  B(p, 'Leg', 1.5, 0, 0);
+  B(p, 'Foot', -0.05, 0, 0);
+  C(p, 'Waist', -0.32 + breath * 0.03, 0, 0);
+  C(p, 'Chest', -0.16 + breath * 0.05, 0, 0.04);
+  // (His skull is tipped onto his jaw on top of this: the mouth shut.)
+  C(p, 'Neck', 0.15, 0, 0);
+  C(p, 'Head', 0.08 - breath * 0.04, 0, 0.2);
+  B(p, 'Arm', -0.3, 0, 0.05);
+  B(p, 'ForeArm', -1.15, 0, 0);
+  B(p, 'Hand', 0.45, 0, 0);
 }
 
 const SLEEPER_CLIPS = {
@@ -718,8 +786,21 @@ const SLEEPER_CLIPS = {
         [0, (p) => sleepPose(p)],
         [0.12, (p) => {
           sleepPose(p);
-          C(p, 'Head', -0.3, 0, 0);
+          C(p, 'Head', -0.3, 0, -0.18);
           C(p, 'Neck', -0.15, 0, 0);
+        }],
+        // Hands down hard on the throne's arms, leaning forward to rise.
+        [0.2, (p) => {
+          T(p, 'Hips', 0, 0, -0.03);
+          B(p, 'UpLeg', -1.35, 0, 0.18);
+          B(p, 'Leg', 1.45, 0, 0);
+          B(p, 'Foot', -0.15, 0, 0);
+          C(p, 'Waist', 0.25, 0, 0);
+          C(p, 'Chest', 0.15, 0, 0);
+          C(p, 'Head', -0.2, 0, 0);
+          B(p, 'Arm', -0.1, 0, 0.15);
+          B(p, 'ForeArm', -0.9, 0, 0);
+          B(p, 'Hand', -0.4, 0, 0);
         }],
         [0.3, (p) => {
           T(p, 'Hips', 0, -0.06, 0);
@@ -1161,11 +1242,24 @@ export function clipsFor(def) {
   // A model rigged in a T-pose: its arms brought down to its sides in every
   // clip, the turn shared between the shoulder and the arm so neither
   // stretches the skin round it too far.
+  // And whatever a clip asks of the arm, part of it is taken up at the
+  // shoulder (raised or swung, the whole shoulder goes with it, as a real one
+  // does) so the bulk round the joint is carried, not drawn out.
   if (def.armDrop) {
+    const share = def.shoulderShare ?? [0, 0, 0];
     for (const c of clips) {
       const sample = c.sample;
       c.sample = (u) => {
         const p = sample(u);
+        for (const side of ['Left', 'Right']) {
+          const arm = p[`${side}Arm`];
+          if (!arm) continue;
+          const sh = (p[`${side}Shoulder`] ||= [0, 0, 0]);
+          for (let k = 0; k < 3; k++) {
+            sh[k] += arm[k] * share[k];
+            arm[k] -= arm[k] * share[k];
+          }
+        }
         B(p, 'Shoulder', 0, 0, -def.armDrop * 0.3);
         B(p, 'Arm', 0, 0, -def.armDrop * 0.7);
         return p;

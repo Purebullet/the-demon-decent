@@ -127,6 +127,8 @@ export class Dressing {
     this.fragile = [];
     this._findEdges();
     for (const b of this.d.braziers) this.claim(b.x, b.z, 1.1);
+    // The secret's niche and the ground before it are left bare.
+    if (this.d.secret) this.claim(this.d.secret.x, this.d.secret.z, 1.6);
     this._shell();
     this._hanging();
     this._rubble();

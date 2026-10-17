@@ -191,6 +191,13 @@ export const RIGS = {
     yaw: 0,
     plan: 'biped',
     armDrop: 1.15,
+    // Of each turn of an arm (x, y, z), the share the shoulder takes.
+    shoulderShare: [0.15, 0.3, 0.38],
+    smooth: 12,
+    // The arms' limits fade out over this much (of his height) rather than
+    // ending in a seam the skin tears along (the skull keeps its hard line
+    // above the jaw).
+    limitSoft: { r: 0.035, bones: /Shoulder|Arm|Hand/ },
     joints: {
       Hips: [0, 0.31, 0],
       Waist: [0, 0.47, 0.03],
