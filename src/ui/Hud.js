@@ -241,6 +241,9 @@ const P0_CHAT = 412;
 const NUM_W = 0.1;
 const NUM_H = 0.04;
 
+// How long an announcement stays up (seconds).
+export const ANNOUNCE_HOLD = 3.4;
+
 export class Hud {
   constructor(host) {
     this.host = host;
@@ -448,8 +451,9 @@ export class Hud {
     this.toastDirty = true;
   }
 
-  announce(text, sub = '') {
-    this.announcement = { text, sub, t: 0 };
+  // `hold`: how long it stays up (seconds), its fade included.
+  announce(text, sub = '', hold = ANNOUNCE_HOLD) {
+    this.announcement = { text, sub, t: 0, hold };
     this._paintAnnouncementLayer();
   }
 
@@ -901,7 +905,7 @@ export class Hud {
     if (this.toasts.length !== before) this.toastDirty = true;
     if (this.announcement) {
       this.announcement.t += dt;
-      if (this.announcement.t > 3.4) this.announcement = null;
+      if (this.announcement.t > this.announcement.hold) this.announcement = null;
     }
     const step = this.fadeSpeed * dt;
     this.fadeValue += Math.max(-step, Math.min(step, this.fadeTarget - this.fadeValue));
@@ -1117,16 +1121,15 @@ export class Hud {
       c.mesh.material.opacity = fade;
     }
 
-    // Announcement: fades in and out over its 3.4 s.
+    // Announcement: fades in, holds, and fades out over its last 0.85 s.
     const a = this.announcement;
     this.announceL.mesh.visible = !!a && this.panel !== 'title';
     if (a) {
-      const k = a.t / 3.4;
       const w = Math.min(this.vw * 0.95, 900);
       const h = (w * this.announceL.ch) / this.announceL.cw;
       const grow = 1 + 0.04 * (1 - Math.min(1, a.t / 0.5));
       this._place(this.announceL.mesh, this.vw / 2 - (w * grow) / 2, this.vh * 0.2, w * grow, h * grow);
-      this.announceL.mesh.material.opacity = Math.max(0, Math.min(1, a.t / 0.4) * Math.min(1, (1 - k) / 0.25));
+      this.announceL.mesh.material.opacity = Math.max(0, Math.min(1, a.t / 0.4) * Math.min(1, (a.hold - a.t) / 0.85));
     }
 
     // Numbers over the fills (health, cooldowns): repainted when they change.
@@ -1350,7 +1353,7 @@ export class Hud {
     while ((m = re.exec(markup))) {
       if (m[1] !== undefined) parts.push([m[1], C.ember]);
       else if (m[3] !== undefined) parts.push([m[3], m[2]]);
-      else if (m[4] !== undefined) parts.push([m[4].replace(/&mdash;/g, '—').replace(/&middot;/g, '·').replace(/&times;/g, '×'), C.bone]);
+      else if (m[4] !== undefined) parts.push([m[4].replace(/&mdash;/g, '-').replace(/&middot;/g, '·').replace(/&times;/g, '×'), C.bone]);
     }
     g.font = `${size}px ${SERIF}`;
     const total = parts.reduce((w, [t]) => w + g.measureText(t).width, 0);
@@ -1641,7 +1644,7 @@ export class Hud {
     // Prompt.
     if (i.prompt) {
       g.font = `18px ${SERIF}`;
-      const plain = i.prompt.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '—');
+      const plain = i.prompt.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '-');
       const pw = Math.min(w - 20, g.measureText(plain).width + 36);
       this._box(g, (w - pw) / 2, h * 0.64 - 21, pw, 42, C.panel, C.edge);
       this._rich(g, i.prompt, w / 2, h * 0.64, 18);
@@ -2299,7 +2302,7 @@ export class Hud {
         const y = by0 + 50 + k * 22;
         const col = r.you ? hue.accent : C.light;
         this._text(g, `${k + 1}.`, bx + 24, y, { size: 14, color: C.ash });
-        this._text(g, String(r.name || '—').slice(0, 22), bx + 52, y, { size: 14, color: col });
+        this._text(g, String(r.name || '-').slice(0, 22), bx + 52, y, { size: 14, color: col });
         this._text(g, fmtTime((r.score || 0) / 1000, true), bx + bw - 24, y, { size: 14, color: col, align: 'right' });
       });
       g.restore();

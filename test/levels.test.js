@@ -26,7 +26,7 @@ test('each floor past the sixth: 15% more health, 10% faster blows, 5% harder hi
   for (let f = 7; f <= 9; f++) {
     const a = floorDef(f - 1);
     const b = floorDef(f);
-    assert.ok(Math.abs(b.hp / a.hp - 1.15) < 1e-9, `health on floor ${f}`);
+    assert.ok(Math.abs(b.hp / a.hp - (1.15 * (b.hpBoost ?? 1)) / (a.hpBoost ?? 1)) < 1e-9, `health on floor ${f}`);
     assert.ok(Math.abs(a.windup / b.windup - 1.1) < 1e-9, `wind-ups on floor ${f}`);
     assert.ok(Math.abs(a.cooldown / b.cooldown - 1.1) < 1e-9, `cooldowns on floor ${f}`);
     assert.ok(Math.abs(b.dmg / a.dmg - 1.05) < 1e-9, `damage on floor ${f}`);

@@ -530,9 +530,9 @@ export class Surface {
     const old = this.plaque.material.map;
     this.plaque.material.map = textTexture([
       { text: "THIS WEEK'S DEEPEST", size: 36 },
-      { text: top ? `Floor ${top.score}` : '—', size: 92, gap: 82 },
+      { text: top ? `Floor ${top.score}` : 'None yet', size: 92, gap: 82 },
       { text: top ? String(top.name).slice(0, 18) : 'no soul yet', size: 34, gap: 64 },
-      { text: `Your best: ${best ? `floor ${best}` : '—'}`, size: 32 },
+      { text: `Your best: ${best ? `floor ${best}` : 'none yet'}`, size: 32 },
       { text: last ? `Last run: floor ${last}` : '', size: 30 },
     ]);
     this.plaque.material.needsUpdate = true;

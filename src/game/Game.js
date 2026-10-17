@@ -23,7 +23,7 @@ import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
 import { xpForKill, gainXp, spendPoint, legacyOf, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL, LEVEL_HEAL } from './Levels.js';
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
-import { Hud, fmtTime } from '../ui/Hud.js';
+import { Hud, fmtTime, ANNOUNCE_HOLD } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
@@ -621,7 +621,7 @@ export class Game {
       this.audio.fadeMusic(2.5);
     }
     this.hud.update(dt, p, this.run, {
-      floorLabel: `${this.lotLabel} — The Surface`,
+      floorLabel: `${this.lotLabel}: The Surface`,
       enemyLabel: '',
       best: this.best,
       prompt: this.surface.nearPit(p.position) ? 'Step into the pit to begin your descent' : '',
@@ -723,7 +723,9 @@ export class Game {
     this.player.spawnAt(sp.x, sp.z, level.spawnYaw());
     this.player.position.y = 0;
     this.player.dash = null;
-    this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${inDeep ? ' — the Deep' : ''}`];
+    // (The Deep's first floor: what it says stays up longer, to be read.)
+    const hold = floor === DEEP_FROM ? ANNOUNCE_HOLD + 3 : ANNOUNCE_HOLD;
+    this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${inDeep ? ', in the Deep' : ''}`, hold];
     this.intro = null;
     this.renderer.toneMappingExposure = 1.2;
     if (arrival) this._beginArrival(level);
@@ -735,8 +737,8 @@ export class Game {
     // The first step into the Deep: say what has changed.
     if (floor === DEEP_FROM) {
       setTimeout(() => {
-        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates');
-      }, arrival ? 9000 : 3200);
+        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates', hold);
+      }, (arrival ? 9 : hold - 0.2) * 1000);
     } else if (floor > DEEP_FROM && !def.boss) {
       // Each floor below that: they grow worse again.
       setTimeout(() => {
@@ -813,14 +815,14 @@ export class Game {
     if (kind === 'perfect') {
       if (r) r.best.chain = Math.max(r.best.chain, chain);
       this.hud.rhythm('perfect', chain);
-      if (chain >= 2) this.hud.callout(chain >= 5 ? `PERFECT ×${chain} — FLOW` : `PERFECT ×${chain}`, { color: chain >= 4 ? '#fff4d0' : '#ffd070', size: 0.8 + chain * 0.06 });
+      if (chain >= 2) this.hud.callout(chain >= 5 ? `PERFECT ×${chain}: FLOW` : `PERFECT ×${chain}`, { color: chain >= 4 ? '#fff4d0' : '#ffd070', size: 0.8 + chain * 0.06 });
       else this.hud.callout('PERFECT', { color: '#ffd070', size: 0.75 });
     } else if (kind === 'fumble') {
       this.audio.fumble();
       this.hud.rhythm('fumble');
       this.hud.callout('TOO SOON', { color: '#c0503a', size: 0.62 });
     } else if (kind === 'sluggish') {
-      this.hud.callout('SLUGGISH — EXPOSED', { color: '#8a6a60', size: 0.62 });
+      this.hud.callout('SLUGGISH: EXPOSED', { color: '#8a6a60', size: 0.62 });
     } else if (kind === 'dodge') this.hud.rhythm('dodge');
   }
 
@@ -1028,9 +1030,9 @@ export class Game {
     if (intro) return;
 
     let prompt = this.pickups.weaponPrompt(this.run) || level.props.prompt() || level.hall?.prompt();
-    if (!prompt && level.exitOpen && !p.dead) prompt = 'The portal is open — descend';
+    if (!prompt && level.exitOpen && !p.dead) prompt = 'The portal is open: descend';
     this.hud.update(dt, p, this.run, {
-      floorLabel: `Floor ${this.run.floor} / ${FLOOR_COUNT} — ${level.def.name}`,
+      floorLabel: `Floor ${this.run.floor} / ${FLOOR_COUNT}: ${level.def.name}`,
       enemyLabel: level.exitOpen ? 'Seal broken' : alive.length === 1 ? '1 demon remains' : `${alive.length} demons remain`,
       best: this.best,
       boss: this.boss && this.bossAnnounced && this.boss.alive ? this.boss : null,
@@ -1049,7 +1051,7 @@ export class Game {
     run.health = Math.min(run.maxHealth, run.health + Math.round(run.maxHealth * LEVEL_HEAL));
     this.audio.levelUp?.();
     this.hud.callout(`LEVEL ${run.level}`, { color: '#ffe08a', size: 1.7 });
-    this.hud.toast(`Level ${run.level} — a perk to choose, and your wounds close`);
+    this.hud.toast(`Level ${run.level}: a perk to choose, and your wounds close`);
     this.ctx?.hitStop?.(0.45);
     p.flash?.(0xffd27a, 40, 0.6);
     p.shake?.(0.15);
@@ -1327,7 +1329,7 @@ export class Game {
     else if (sc.portalOpen) prompt = 'The way down is open';
     else if (focused) prompt = `<b>F</b> ${NODES[focused.key].title}`;
     else prompt = 'Approach an altar and press <b>F</b>';
-    this.hud.update(dt, p, this.run, { floorLabel: `Sanctum — before Floor ${sc.nextFloor}`, enemyLabel: '', best: this.best, prompt });
+    this.hud.update(dt, p, this.run, { floorLabel: `Sanctum, before Floor ${sc.nextFloor}`, enemyLabel: '', best: this.best, prompt });
   }
 
   _pickOption(i) {
@@ -1388,7 +1390,7 @@ export class Game {
       board: this.descent,
       lines: won
         ? ['Azrakel has fallen. The descent is done.', time ? `${fmtTime(time.ms / 1000, true)} from the first floor to his death.` : 'You climb out of the pit with nothing but the memory of it.']
-        : [`Slain on floor ${run.floor} — ${name}`, kept ? `Everything you carried is lost, but half your strength stays: you rise again at level ${kept}.` : 'Everything you carried is lost.'],
+        : [`Slain on floor ${run.floor}: ${name}`, kept ? `Everything you carried is lost, but half your strength stays: you rise again at level ${kept}.` : 'Everything you carried is lost.'],
       floor: run.floor,
       floors: FLOORS.length,
       deepest: Math.max(this.best, run.floor),
@@ -1399,7 +1401,7 @@ export class Game {
         ['blades', 'Counters', run.best?.counters || 0],
         ['shield', 'Parries', run.best?.parries || 0],
         ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
-        ['blades', 'Best weapon', run.bestWeapon?.name || run.weapon?.name || '—', run.bestWeapon?.color],
+        ['blades', 'Best weapon', run.bestWeapon?.name || run.weapon?.name || 'None', run.bestWeapon?.color],
       ],
       ready: false,
     });

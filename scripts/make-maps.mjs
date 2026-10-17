@@ -13,6 +13,10 @@
 // them into src/world/LevelData.js (still plain ASCII to edit by hand).
 //
 //   node scripts/make-maps.mjs [--write] [floor ...]
+//
+// A floor's `layout` (in LevelData) makes it bigger than the rest: its
+// height in tiles (H), how many rooms, their widths and heights, and the
+// lengths of the passages between them ([min, max] each).
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { FLOORS } from '../src/world/LevelData.js';
@@ -23,7 +27,7 @@ const args = process.argv.slice(2);
 const write = args.includes('--write');
 const only = args.filter((a) => /^\d+$/.test(a)).map(Number);
 
-const H = 19;
+const H0 = 19;
 const COUNT = ['g', 'G', 'c', 'b', 'd', 'm', 'h', 'w', 'o', 't', '~', '^', 'v'];
 
 function compose(def) {
@@ -38,20 +42,22 @@ function layout(def, floor, seed) {
   const ri = (a, b) => a + Math.floor(r() * (b - a + 1));
   const n = compose(def);
   const foes = n.g + n.G + n.c + n.b + n.d + n.m;
-  const N = Math.max(5, Math.min(7, 2 + Math.round(foes / 3)));
+  const S = def.layout || {};
+  const H = S.H ?? H0;
+  const N = S.rooms ?? Math.max(5, Math.min(7, 2 + Math.round(foes / 3)));
 
   // Rooms, left to right, wandering up and down.
   const rooms = [];
   let x = 2;
   let cy = Math.floor(H / 2);
   for (let i = 0; i < N; i++) {
-    const w = i === 0 ? 4 : ri(4, 6);
-    const h = i === 0 ? 4 : ri(4, 5);
+    const w = i === 0 ? 4 : ri(...(S.w ?? [4, 6]));
+    const h = i === 0 ? 4 : ri(...(S.h ?? [4, 5]));
     if (i > 0) cy += ri(-3, 3);
     const y = Math.max(3, Math.min(H - 4 - h, cy - Math.floor(h / 2)));
     cy = y + Math.floor(h / 2);
     rooms.push({ x, y, w, h });
-    x += w + ri(3, 5);
+    x += w + ri(...(S.gap ?? [3, 5]));
   }
   const W = x + 1;
   const g = Array.from({ length: H }, () => Array(W).fill('#'));

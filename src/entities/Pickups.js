@@ -243,7 +243,7 @@ export class Pickups {
     if (it.starter) return `<b>F</b> take up your <span style="color:${w.color}">${w.name}</span>`;
     const R = RARITIES[w.rarity];
     const held = run.weapon;
-    return `<b>F</b> take <span style="color:${w.color}">${w.name}</span> (${R ? `${R.name} ` : ''}${def.label}, ${w.damage} dmg) &mdash; holding <span style="color:${held.color}">${held.name}</span> (${held.damage})`;
+    return `<b>F</b> take <span style="color:${w.color}">${w.name}</span> (${R ? `${R.name} ` : ''}${def.label}, ${w.damage} dmg) · holding <span style="color:${held.color}">${held.name}</span> (${held.damage})`;
   }
 
   // Taken: a burst of its light; `grand` (a sigil or a relic) with its own
