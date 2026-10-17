@@ -315,10 +315,12 @@ export class Dressing {
     const d = this.d;
     const nav = d.nav;
     const isRock = (c, r) => d.tiles[r]?.[c] === '#';
-    const tint = new THREE.Color(...this.look.rock.map((v) => v * 0.16));
-    const material = new THREE.MeshLambertMaterial({ color: tint });
+    // Unlit black (fading into the fog with distance): it reads as deep
+    // shadow between the stones, never as a face of its own.
+    const material = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const BACK = 0.45;
+    // Well back behind the boulders' fronts.
+    const BACK = 0.65;
     const list = [];
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
