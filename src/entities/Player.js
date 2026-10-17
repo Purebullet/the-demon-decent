@@ -8,7 +8,7 @@ import { TorchFire } from '../world/TorchFire.js';
 import { Assets } from '../assets/AssetLibrary.js';
 import { clamp } from '../core/rng.js';
 import { classifyPress, lightTiming, chainBonus, CHAIN_MAX, EXPOSED_DAMAGE } from '../combat/Rhythm.js';
-import { MOMENTUM_MAX, MOMENTUM_DECAY_AFTER, momentumSpeed, STUMBLE, guardOutcome } from '../combat/Styles.js';
+import { MOMENTUM_MAX, MOMENTUM_DECAY_AFTER, momentumDamage, STUMBLE, guardOutcome } from '../combat/Styles.js';
 import { relicPassive } from '../combat/Relics.js';
 import { ProcEngine } from '../combat/Procs.js';
 import { damageMul, swingSpeedMul, takenMul } from '../game/Levels.js';
@@ -675,6 +675,9 @@ export class Player {
   }
 
   _onPress(ctx) {
+    // Knocked back off a guard: the blade is not yours until it settles, and
+    // a press then is simply not taken (it is no fault of timing).
+    if (this.swing?.bounced) return;
     const widen = relicPassive(this.run, 'window') ?? 1;
     const kind = classifyPress(this.swing, widen);
     if (kind === 'mash') {
@@ -694,8 +697,7 @@ export class Player {
   }
 
   _swingSpeed() {
-    const m = this.weaponDef === WEAPON_TYPES.sword ? momentumSpeed(this.momentum) : 1;
-    return swingSpeedMul(this.run) * m;
+    return swingSpeedMul(this.run);
   }
 
   _currentPose() {
@@ -706,7 +708,7 @@ export class Player {
     const def = this.weaponDef;
     const sluggish = !perfect && (this.fumbleNext || !!this.swing?.fumbled);
     const chain = perfect ? Math.min(CHAIN_MAX, this.chain + 1) : 0;
-    const T = lightTiming(def, { perfect, chain, sluggish, speed: this._swingSpeed() });
+    const T = lightTiming(def, { sluggish, speed: this._swingSpeed() });
     const arc = def.prepared[this.comboIndex % def.prepared.length];
     this.comboIndex++;
     const from = this._currentPose();
@@ -749,7 +751,7 @@ export class Player {
   }
 
   _swingCommon(ctx) {
-    Object.assign(this.swing, { t: 0, prevK: 0, hitSet: new Set(), hits: 0, sounded: false, fumbled: false, bounced: null, counter: false });
+    Object.assign(this.swing, { t: 0, rt: 0, prevK: 0, hitSet: new Set(), hits: 0, sounded: false, fumbled: false, bounced: null, counter: false });
     ctx.audio?.swingStart?.();
     if (!this.swing.heavy) for (const e of ctx.enemies) e.onPlayerSwing?.(ctx, false);
   }
@@ -823,6 +825,7 @@ export class Player {
       return;
     }
     s.t += dt;
+    s.rt += ctx.realDt ?? dt;
     const { W, A, R } = s;
     const arc = s.arc;
     if (s.bounced) {
@@ -1205,6 +1208,7 @@ export class Player {
       if (heavy) amount *= 1.6 + 0.8 * s.power;
       if (s.perfect) amount *= bonus.damage * (1 + (relicPassive(run, 'perfectDamage') ?? 0));
       if (s.sluggish) amount *= 0.85;
+      if (w.type === 'sword') amount *= momentumDamage(this.momentum);
       if (counter) amount *= heavy ? 2.5 : 2;
       if (guard === 'crash') amount *= 0.6;
       if (this.flameT > 0) amount *= FLAME_DAMAGE;

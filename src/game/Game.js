@@ -737,9 +737,9 @@ export class Game {
 
   _onRhythm(kind, chain = 0) {
     const r = this.run;
-    if (kind === 'swing') this._hint('rhythm', 'Click again <b>the instant your blade finishes its arc</b> for a Perfect Chain');
-    else if (kind === 'perfect' && chain >= 2) this._hint('chain', 'Keep the rhythm: each link of the chain strikes <b>faster, harder</b> and wakes your relics');
-    else if (kind === 'fumble') this._hint('fumble', 'Too early: mashing fumbles the next swing and leaves you <b>exposed</b>');
+    if (kind === 'swing') this._hint('rhythm', 'Click again <b>when the ring round your crosshair turns gold</b> for a Perfect hit');
+    else if (kind === 'perfect' && chain >= 2) this._hint('chain', 'Keep the rhythm: each link of the chain strikes <b>harder</b> and wakes your relics');
+    else if (kind === 'fumble') this._hint('fumble', 'Too soon: click <b>before the ring turns gold</b> and your next swing is sluggish and leaves you <b>exposed</b>');
     else if (kind === 'heavy') this._hint('heavy', 'A heavy blow cannot be stopped once it falls: <b>commit</b> to it');
     if (kind === 'perfect') {
       if (r) r.best.chain = Math.max(r.best.chain, chain);
@@ -749,6 +749,7 @@ export class Game {
     } else if (kind === 'fumble') {
       this.audio.fumble();
       this.hud.rhythm('fumble');
+      this.hud.callout('TOO SOON', { color: '#c0503a', size: 0.62 });
     } else if (kind === 'sluggish') {
       this.hud.callout('SLUGGISH — EXPOSED', { color: '#8a6a60', size: 0.62 });
     } else if (kind === 'dodge') this.hud.rhythm('dodge');

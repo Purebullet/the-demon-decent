@@ -7,7 +7,7 @@ import { IconAtlas } from './IconAtlas.js';
 import { RELICS, relicPassive } from '../combat/Relics.js';
 import { PROCS, ENCHANTS } from '../combat/Procs.js';
 import { MOMENTUM_MAX } from '../combat/Styles.js';
-import { WINDOW_EARLY, WINDOW_LATE, CHAIN_MAX } from '../combat/Rhythm.js';
+import { beat, CHAIN_MAX } from '../combat/Rhythm.js';
 
 // The interface, drawn over the 3D view. Project 0 runs the game in a worker
 // with no DOM, so nothing here may touch the page.
@@ -225,6 +225,9 @@ const BAR_FRAG = `
   }`;
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
+// Project 0's chat sits over the game at the bottom left: how far it reaches
+// in from the left edge (screen pixels), with a hair to spare.
+const P0_CHAT = 412;
 // Damage numbers' size as a share of the screen's height.
 const NUM_W = 0.1;
 const NUM_H = 0.04;
@@ -987,10 +990,10 @@ export class Hud {
     let alpha = 0;
     if (play && p.armed) {
       if (s && !s.bounced) {
-        const done = s.W + s.A;
-        const widen = relicPassive(r, 'window') ?? 1;
-        R.uProg.value = clamp01(s.t / done);
-        R.uWin.value = !s.fumbled && s.t >= done - WINDOW_EARLY * widen && s.t <= done + WINDOW_LATE * widen ? 1 : 0;
+        // Exactly what a press now would be judged (combat/Rhythm.js).
+        const b = beat(s, relicPassive(r, 'window') ?? 1);
+        R.uProg.value = b.fill;
+        R.uWin.value = b.window ? 1 : 0;
         alpha = 1;
       } else {
         R.uProg.value = 0;
@@ -1481,9 +1484,9 @@ export class Hud {
     let hw = Math.min(520, w * 0.5);
     let hx = (w - hw) / 2;
     const lead = 52 + r.potionCap * 26;
-    const chat = this.host?.kind === 'p0' ? 430 / this.u : 0;
+    const chat = this.host?.kind === 'p0' ? P0_CHAT / this.u : 0;
     if (chat && hx - lead < chat + 10) {
-      hx = chat + 10 + lead;
+      hx = chat + lead;
       hw = Math.max(200, Math.min(hw, w - pad - ww - 61 - hx));
     }
     const cx = hx + hw / 2;
@@ -1797,7 +1800,19 @@ export class Hud {
         ],
       },
       {
+        // When to click again: the ring round the crosshair (combat/Rhythm.js).
+        title: 'Timing',
+        color: '#d8a040',
+        rows: [
+          [{ ring: 'soon' }, 'too soon: sluggish', '#d86a50'],
+          [{ ring: 'gold' }, 'on the gold: perfect', '#ffd36a'],
+          [{ ring: 'late' }, 'later: a plain swing'],
+        ],
+        note: 'Click again as the ring round your crosshair turns gold. Keep that beat to chain perfect hits.',
+      },
+      {
         title: 'Demon spells',
+        color: C.ember,
         rows: SPELL_IDS.map((id) => [{ keys: [SPELLS[id].label === 'SPACE' ? 'Space' : SPELLS[id].label] }, SPELLS[id].name]),
         note: 'Shade Step is yours from the start; find the others in chests and at the Magic Circle between floors.',
       },
@@ -1807,34 +1822,37 @@ export class Hud {
       col.w = col.iconW + 12 + Math.max(...col.rows.map(([, d]) => this._measure(g, d, WHAT)), 0) + 30;
       col.w = Math.max(col.w, this._measure(g, col.title.toUpperCase(), { size: 11, ls: 2 }) + 30);
     }
-    const spells = cols[2];
+    const spells = cols[3];
     spells.w = Math.max(spells.w, 200);
+    cols[2].w = Math.max(cols[2].w, 210);
     const pw = cols.reduce((a, c) => a + c.w, 0) + 14;
     const ph = 38 + 6 * ROW + 10;
-    // Clear of Project 0's chat (its width in screen pixels), unless the
-    // screen is too narrow to keep it clear without shrinking the panel
-    // past reading.
-    const reserve = this.host?.kind === 'p0' ? 430 / this.u : 0;
-    let left = reserve + 10;
+    // Right beside Project 0's chat (its width in screen pixels), unless
+    // the screen is too narrow to keep it clear without shrinking the panel
+    // past reading; centred anywhere else.
+    const reserve = this.host?.kind === 'p0' ? P0_CHAT / this.u : 0;
+    let left = reserve;
     let room = w - left - 12;
+    let beside = reserve > 0;
     if (room < pw * 0.62) {
       left = 12;
       room = w - 24;
+      beside = false;
     }
     let cy = Math.max(top + 18, h - 14 - ph);
     const k = Math.max(0.5, Math.min(1, room / pw, (h - 8 - cy) / ph));
     if (cy + ph * k > h - 8) cy = h - 8 - ph * k;
     g.save();
-    g.translate(left + (room - pw * k) / 2, cy);
+    g.translate(beside ? left : left + (room - pw * k) / 2, cy);
     g.scale(k, k);
     this._box(g, 0, 0, pw, ph, 'rgba(10,2,2,0.74)', C.edge);
     let cx = 22;
     cols.forEach((col, n) => {
-      this._label(g, col.title, cx, 24, { size: 11, color: n === 2 ? C.ember : C.ash });
-      col.rows.forEach(([icon, what], r) => {
+      this._label(g, col.title, cx, 24, { size: 11, color: col.color || C.ash });
+      col.rows.forEach(([icon, what, color], r) => {
         const cyRow = 38 + r * ROW + ROW / 2;
         this._controlIcon(g, icon, cx, cyRow, true);
-        this._text(g, what, cx + col.iconW + 12, cyRow, { ...WHAT, color: C.bone, base: 'middle' });
+        this._text(g, what, cx + col.iconW + 12, cyRow, { ...WHAT, color: color || C.bone, base: 'middle' });
       });
       if (col.note) {
         const ny = 38 + col.rows.length * ROW + 12;
@@ -1869,6 +1887,7 @@ export class Hud {
   // (`tag`: HOLD, ×3, or ! for a demon's wind-up). Drawn centred on y from
   // x; returns its width (with draw false, only measures).
   _controlIcon(g, icon, x, y, draw) {
+    if (icon.ring) return this._ringIcon(g, icon.ring, x, y, draw);
     if (icon.keys) {
       let cx = x;
       icon.keys.forEach((label, i) => {
@@ -1896,6 +1915,44 @@ export class Hud {
       width += 5 + tagW;
     }
     return width;
+  }
+
+  // The rhythm ring round the crosshair as it looks at a moment of the
+  // swing: 'soon' (still filling), 'gold' (the window) or 'late' (past it).
+  _ringIcon(g, state, x, y, draw) {
+    const size = 26;
+    if (!draw) return size;
+    const cx = x + size / 2;
+    const r = 9.5;
+    g.save();
+    g.lineWidth = 3;
+    g.lineCap = 'round';
+    g.strokeStyle = 'rgba(120,40,20,0.45)';
+    g.beginPath();
+    g.arc(cx, y, r, 0, Math.PI * 2);
+    g.stroke();
+    if (state === 'soon') {
+      g.strokeStyle = '#e8641e';
+      g.beginPath();
+      g.arc(cx, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * 0.55);
+      g.stroke();
+    } else {
+      g.strokeStyle = state === 'gold' ? '#ffd36a' : '#7a3418';
+      if (state === 'gold') {
+        g.shadowColor = 'rgba(255,200,90,0.95)';
+        g.shadowBlur = 10;
+      }
+      g.beginPath();
+      g.arc(cx, y, r, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.shadowBlur = 0;
+    g.fillStyle = state === 'gold' ? '#fff0c0' : 'rgba(230,200,180,0.7)';
+    g.beginPath();
+    g.arc(cx, y, 1.6, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    return size;
   }
 
   // A keycap: a dark key with a lit top face, its label on it.

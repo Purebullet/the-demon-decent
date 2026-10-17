@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPress, lightTiming, chainBonus, WINDOW_EARLY, WINDOW_LATE, CHAIN_MAX, LIGHT_SPEED } from '../src/combat/Rhythm.js';
-import { momentumSpeed, MOMENTUM_MAX, sunderDamage, SUNDER_MAX, guardOutcome } from '../src/combat/Styles.js';
+import { classifyPress, beat, lightTiming, chainBonus, WINDOW_EARLY, WINDOW_LATE, CHAIN_MAX, LIGHT_SPEED } from '../src/combat/Rhythm.js';
+import { momentumDamage, MOMENTUM_MAX, sunderDamage, SUNDER_MAX, guardOutcome } from '../src/combat/Styles.js';
 import { RELICS, RELIC_IDS, rollRelic, addRelic, relicPassive } from '../src/combat/Relics.js';
 import { ProcEngine, procChance, procSources, PROCS, ENCHANTS } from '../src/combat/Procs.js';
 import { WEAPON_TYPES, WEAPON_MODELS, RARITIES, makeWeapon, rollWeapon } from '../src/entities/Weapons.js';
@@ -28,22 +28,44 @@ test('mashing spoils the window: a fumbled swing never chains perfectly', () => 
   assert.equal(classifyPress(swing(0.35, { bounced: { t: 0 } })), 'mash');
 });
 
+test('a blow landing (hit-stop) holds the blade, not the beat', () => {
+  const done = 0.35;
+  // The blade was frozen for 60 ms of the 300 that passed: on the rhythm,
+  // the press is as perfect as if the swing had missed.
+  assert.equal(classifyPress(swing(0.24, { rt: 0.3 })), 'perfect');
+  assert.equal(classifyPress(swing(0.24)), 'mash');
+  // And the window closes by the blade's own time, so the freeze never
+  // shortens it.
+  assert.equal(classifyPress(swing(done + WINDOW_LATE - 0.01, { rt: done + WINDOW_LATE + 0.05 })), 'perfect');
+});
+
+test('the ring shows exactly what a press would be', () => {
+  for (const t of [0.05, 0.2, 0.28, 0.35, 0.45, 0.6]) {
+    const s = swing(t, { rt: t + 0.03 });
+    assert.equal(beat(s).window, classifyPress(s) === 'perfect');
+  }
+  assert.equal(beat(swing(0.35)).fill, 1);
+  assert.equal(beat(swing(0.35, { fumbled: true })).window, false);
+});
+
 test('a wider window (Grim Metronome) catches presses the plain one misses', () => {
   const t = 0.35 - WINDOW_EARLY - 0.02;
   assert.equal(classifyPress(swing(t)), 'mash');
   assert.equal(classifyPress(swing(t), 1.45), 'perfect');
 });
 
-test('light swings are a quarter faster; perfect ones faster still, sluggish ones slower', () => {
+test('light swings are a quarter faster; perfect ones keep the beat, sluggish ones slower', () => {
   const def = WEAPON_TYPES.sword;
   const plain = lightTiming(def);
   assert.ok(Math.abs(plain.W - def.windup * LIGHT_SPEED) < 1e-9);
   assert.ok(Math.abs(plain.A + plain.W + plain.R - (def.windup + def.active + def.recover) * 0.75) < 1e-9);
+  // One steady rhythm: however long the chain, the arc completes on the
+  // same beat.
   const perfect = lightTiming(def, { perfect: true, chain: 3 });
-  assert.ok(perfect.W < plain.W * 0.6 && perfect.A < plain.A);
+  assert.ok(Math.abs(perfect.W + perfect.A - (plain.W + plain.A)) < 1e-9);
   const slow = lightTiming(def, { sluggish: true });
   assert.ok(slow.W > plain.W * 1.4 && slow.R > plain.R * 1.3);
-  const quick = lightTiming(def, { speed: momentumSpeed(MOMENTUM_MAX) });
+  const quick = lightTiming(def, { speed: 1.1 });
   assert.ok(quick.W < plain.W && quick.W > plain.W * 0.6);
 });
 
@@ -58,8 +80,8 @@ test('a longer chain hits harder, glows brighter, sounds deeper and procs more',
 });
 
 test('weapon personalities: momentum caps, sunder stacks cap, guards answer to the weapon', () => {
-  assert.equal(momentumSpeed(0), 1);
-  assert.equal(momentumSpeed(MOMENTUM_MAX + 5), momentumSpeed(MOMENTUM_MAX));
+  assert.equal(momentumDamage(0), 1);
+  assert.equal(momentumDamage(MOMENTUM_MAX + 5), momentumDamage(MOMENTUM_MAX));
   assert.equal(sunderDamage(SUNDER_MAX + 2), sunderDamage(SUNDER_MAX));
   assert.equal(guardOutcome('axe', false, 0), 'shatter');
   assert.equal(guardOutcome('sword', true, 1), 'bounce');

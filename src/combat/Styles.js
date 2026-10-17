@@ -1,9 +1,11 @@
 // What each kind of weapon does to a duel, beyond its damage.
 //
 //   Sword - Momentum & Flow. Every swing that lands builds momentum (up to
-//           MOMENTUM_MAX); each point makes swings 4.5% faster. A swing
+//           MOMENTUM_MAX); each point makes its blows 3% harder. A swing
 //           that hits nothing, or a blow you take, throws it all away, and
 //           it bleeds off a point a second when you stop landing hits.
+//           (Harder, not faster: the rhythm of the swing never moves, so
+//           losing momentum never throws your timing off.)
 //   Axe   - Savagery & Sunder. Every hit sunders the demon (stacks up to
 //           SUNDER_MAX, each +8% damage taken and a weaker stance), and an
 //           axe shatters a guard outright instead of bouncing off it,
@@ -13,10 +15,10 @@
 //           straight through a guard. Bosses only stumble from heavy blows.
 
 export const MOMENTUM_MAX = 10;
-export const MOMENTUM_STEP = 0.045;
+export const MOMENTUM_STEP = 0.03;
 export const MOMENTUM_DECAY_AFTER = 3; // seconds without a hit before it bleeds off
 
-export const momentumSpeed = (m) => 1 + MOMENTUM_STEP * Math.min(m, MOMENTUM_MAX);
+export const momentumDamage = (m) => 1 + MOMENTUM_STEP * Math.min(m, MOMENTUM_MAX);
 
 export const SUNDER_MAX = 5;
 export const SUNDER_TIME = 7; // seconds a sunder lasts after the last axe hit

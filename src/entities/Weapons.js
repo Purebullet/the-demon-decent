@@ -6,7 +6,7 @@ import { ENCHANTS } from '../combat/Procs.js';
 // Melee weapons. The player never has armour; these are all there is. Each
 // kind has a personality (combat/Styles.js):
 //
-//   Sword - Momentum: quick alternating slashes that speed up while they land.
+//   Sword - Momentum: quick alternating slashes that hit harder while they land.
 //   Axe   - Sunder: slow diagonal chops that tear defences away and shatter guards.
 //   Mace  - Domination: crushing blows that knock a demon out of anything it does.
 //
