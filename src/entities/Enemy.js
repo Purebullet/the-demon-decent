@@ -103,6 +103,8 @@ export class Enemy {
     // Guard, wounds and weapon marks.
     this.guardCd = rand(0.5, 2);
     this.guardPending = -1;
+    this.dodgeCd = type.dodge ? rand(0.5, 1.5) : Infinity;
+    this.leapH = 0;
     this.status = {};
     this.statusTick = 0;
     this.sunder = 0;
@@ -181,6 +183,7 @@ export class Enemy {
   }
 
   setState(s, dur = 0) {
+    if (this.leapH && s !== 'evade') this._land();
     this.state = s;
     this.stateT = 0;
     this.stateDur = dur;
@@ -217,6 +220,7 @@ export class Enemy {
     this.flash = Math.max(0, this.flash - dt * 9);
     this.cooldown -= dt;
     this.blinkCd -= dt;
+    this.dodgeCd -= dt;
     this.poise = Math.max(0, this.poise - dt * this.type.poise * 0.3);
     const dx = player.position.x - this.position.x;
     const dz = player.position.z - this.position.z;
@@ -721,12 +725,39 @@ export class Enemy {
     burst(ctx.fx.alpha, tmpV.set(this.position.x, 0.15, this.position.z), { count: 10, speed: 2, color: C.smoke, colorEnd: C.smoke, size: 0.35, life: 0.6, gravity: -1 });
   }
 
+  // Leaps back out of reach of a swing it sees coming: crouch, spring
+  // up and back (the pounce clip's gather and flight), land; sometimes
+  // straight into a pounce while you are still finishing the swing.
+  _leapBack(ctx) {
+    const D = this.type.dodge;
+    this.dodgeCd = rand(D.cooldown[0], D.cooldown[1]);
+    const pounce = Math.random() < D.pounce ? this.type.attacks.find((a) => a.name === 'pounce') : null;
+    this._evade(ctx, { side: rand(-0.45, 0.45), away: 1, speed: 11.5, dur: 0.46, follow: pounce, followScale: 0.7 });
+    this.leapH = 0.55;
+    this.cooldown = Math.max(this.cooldown, 0.35);
+  }
+
+  _land() {
+    this.leapH = 0;
+    this.pose = null;
+    this.root.position.y = 0;
+  }
+
   _updateEvade(dt, ctx, dx, dz) {
     const k = Math.min(1, this.stateT / this.stateDur);
     const f = (1 - k) * 1.7 * dt;
     ctx.world.move(this.position, this.radius, this.evadeV.x * f, this.evadeV.z * f);
-    this.moveBlend = 1;
-    this.walkPhase += dt * 12;
+    if (this.leapH) {
+      // Up and back in an arc, legs gathered under it.
+      const a = Math.sin(Math.PI * Math.min(1, k * 1.15));
+      this.root.position.y = this.leapH * Math.max(0, a);
+      this.pose = { name: 'pounce', u: 0.36 + 0.26 * a, rate: 18 };
+      this.moveBlend = 0;
+      if (k >= 1) this._land();
+    } else {
+      this.moveBlend = 1;
+      this.walkPhase += dt * 12;
+    }
     this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 1.5);
     if (this.stateT < this.stateDur) return;
     const follow = this.evadeFollow;
@@ -965,6 +996,16 @@ export class Enemy {
   // The player started a swing; a guarding demon that sees it coming may
   // raise its guard (after a moment to react: a fast enough blow beats it).
   onPlayerSwing(ctx, heavy) {
+    // Quick beasts may leap back out of reach instead.
+    const D = this.type.dodge;
+    if (D && this.alive && !this.hidden && this.dodgeCd <= 0 && (this.state === 'chase' || this.state === 'recover') && this.distToPlayer < D.range) {
+      const p = ctx.player.position;
+      const facing = Math.abs(angleDelta(this.yaw, Math.atan2(p.x - this.position.x, p.z - this.position.z))) < 1.4;
+      if (facing && Math.random() < D.chance * (heavy ? 1.4 : 1)) {
+        this._leapBack(ctx);
+        return;
+      }
+    }
     if (!this.canGuard() || this.guardCd > 0 || this.guardPending >= 0) return;
     if (this.state !== 'chase' && this.state !== 'recover') return;
     if (this.distToPlayer > 3.6) return;

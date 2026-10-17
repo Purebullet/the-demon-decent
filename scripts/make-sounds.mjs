@@ -368,6 +368,55 @@ const SOUNDS = {
     for (let i = 0; i < 3; i++) noise(o, { type: 'lowpass', freq: 500, freqEnd: 200, decay: 0.08, gain: 0.4, delay: i * 0.17 });
   },
   pickup: (o) => [523, 659, 784].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: 0.25, gain: 0.14, delay: i * 0.06 })),
+  // Taking up a spell sigil or a relic: a deep thump, the air sucked up
+  // past you, a bright rising arpeggio and a shimmering tail.
+  acquire: (o) => {
+    tone(o, { freq: 70, freqEnd: 34, attack: 0.004, decay: 0.45, gain: 0.7 });
+    noise(o, { freq: 300, freqEnd: 4200, q: 1.4, attack: 0.18, decay: 0.25, gain: 0.35 });
+    [392, 523, 659, 784, 1047].forEach((f, i) => {
+      tone(o, { type: 'triangle', freq: f, attack: 0.004, decay: 0.55, gain: 0.13, delay: 0.06 + i * 0.055 });
+      tone(o, { type: 'sine', freq: f * 2.01, attack: 0.004, decay: 0.35, gain: 0.05, delay: 0.06 + i * 0.055 });
+    });
+    noise(o, { type: 'highpass', freq: 6000, attack: 0.05, decay: 0.9, gain: 0.08, delay: 0.25 });
+    punch(o, 1.6);
+  },
+  // Something worth having falls to the floor: a dull knock and a bell.
+  drop: (o) => {
+    tone(o, { freq: 150, freqEnd: 60, attack: 0.002, decay: 0.16, gain: 0.55 });
+    noise(o, { type: 'lowpass', freq: 1400, freqEnd: 200, decay: 0.12, gain: 0.4 });
+    tone(o, { type: 'triangle', freq: 988, attack: 0.003, decay: 0.7, gain: 0.12, delay: 0.04 });
+    tone(o, { type: 'triangle', freq: 1480, attack: 0.003, decay: 0.5, gain: 0.07, delay: 0.04 });
+    punch(o, 1.4);
+  },
+  // The Sleeper: a footfall like a felled tree; the axe biting the floor;
+  // the giant axe's swing; his roar.
+  boss_step: (o) => {
+    tone(o, { freq: 58, freqEnd: 24, attack: 0.003, decay: 0.75, gain: 1.0 });
+    noise(o, { type: 'lowpass', freq: 600, freqEnd: 40, decay: 0.6, gain: 0.8 });
+    noise(o, { freq: 1300, freqEnd: 300, q: 1.2, decay: 0.12, gain: 0.35 });
+    punch(o, 2.6);
+  },
+  boss_impact: (o) => {
+    noise(o, { type: 'highpass', freq: 2500, decay: 0.05, gain: 0.6 });
+    tone(o, { freq: 62, freqEnd: 21, attack: 0.002, decay: 1.3, gain: 1.0 });
+    tone(o, { type: 'sawtooth', freq: 44, freqEnd: 26, attack: 0.002, decay: 0.7, gain: 0.35, lp: 160 });
+    noise(o, { type: 'lowpass', freq: 1800, freqEnd: 45, decay: 1.2, gain: 0.95 });
+    for (let k = 0; k < 9; k++) noise(o, { freq: 900 + rnd() * 2400, q: 3, decay: 0.05 + rnd() * 0.06, gain: 0.25, delay: 0.15 + rnd() * 0.75 });
+    punch(o, 3);
+  },
+  boss_swing: (o) => {
+    swish(o, { dur: 0.7, f0: 110, f1: 700, f2: 160, peak: 0.55, q: 2.4, gain: 1.0, low: 1.8, edge: 0.05 });
+    tone(o, { freq: 52, freqEnd: 30, attack: 0.1, decay: 0.5, gain: 0.5, delay: 0.15 });
+    punch(o, 2.2);
+  },
+  boss_roar: (o) => {
+    tone(o, { type: 'sawtooth', freq: 62, freqEnd: 38, attack: 0.1, decay: 1.8, gain: 0.5, lp: 420 });
+    tone(o, { type: 'sawtooth', freq: 93, freqEnd: 55, attack: 0.12, decay: 1.7, gain: 0.32, lp: 650 });
+    tone(o, { freq: 40, freqEnd: 28, attack: 0.08, decay: 1.6, gain: 0.6 });
+    noise(o, { freq: 260, freqEnd: 120, q: 1.6, attack: 0.15, decay: 1.6, gain: 0.45 });
+    noise(o, { freq: 1400, freqEnd: 500, q: 1, attack: 0.1, decay: 1.2, gain: 0.18 });
+    punch(o, 2.4);
+  },
   choose: (o) => {
     [196, 247, 294, 392].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: 0.8, gain: 0.14, delay: i * 0.1 }));
     tone(o, { freq: 60, freqEnd: 40, decay: 1.2, gain: 0.35 });

@@ -238,6 +238,7 @@ export class Audio {
     this.play(`telegraph_${this.kind(kind)}`, { pos, volume: 0.6, gap: 0.12 });
   }
   enemySwing(kind, pos) {
+    if (kind === 'sleeper') return this.bossSwing(pos);
     this.play('enemy_swing', { pos, volume: 0.6, gap: 0.08 });
   }
   death(kind, pos) {
@@ -269,6 +270,26 @@ export class Audio {
   }
   pickup() {
     this.play('pickup', { volume: 0.6 });
+  }
+  // A spell sigil or a relic taken up; one falling to the floor.
+  acquire() {
+    this.play('acquire', { volume: 0.95, gap: 0.2 });
+  }
+  drop(pos) {
+    this.play('drop', { pos, volume: 0.85, gap: 0.08 });
+  }
+  // The Sleeper's own: footfalls, the axe in the floor, its swing, his roar.
+  bossStep(pos) {
+    this.play('boss_step', { pos, volume: 0.95, rate: 0.92 + Math.random() * 0.12, gap: 0.12 });
+  }
+  bossImpact(pos) {
+    this.play('boss_impact', { pos, volume: 1, gap: 0.2 });
+  }
+  bossSwing(pos) {
+    this.play('boss_swing', { pos, volume: 1, gap: 0.3 });
+  }
+  bossRoar(pos) {
+    this.play('boss_roar', { pos, volume: 1, gap: 0.5 });
   }
   choose() {
     this.play('choose', { volume: 0.8 });

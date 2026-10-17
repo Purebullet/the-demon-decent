@@ -265,6 +265,8 @@ export class Game {
     this._cover(r);
     for (const o of staged) o.removeFromParent();
     this.compiling = false;
+    // From here what drops is heard landing.
+    if (this.pickups) this.pickups.quiet = false;
     this.host.log(`[t] warm-up: ${jobs.length} programs in ${Math.round(performance.now() - t0)} ms`);
   }
 

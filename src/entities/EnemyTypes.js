@@ -35,7 +35,9 @@
 //
 // Kind fields: `guard` (raises a guard against swings it sees coming:
 // chance, how long, seconds between), `skittish` (springs clear after
-// `hits` blows within `window` s), `blink` (vanishes and reappears:
+// `hits` blows within `window` s), `dodge` (sees your swing coming and
+// leaps back out of reach: chance per swing, how near, seconds between,
+// chance it pounces straight back in), `blink` (vanishes and reappears:
 // 'behind' the player, or 'away' from them), `enrage` (below `at` of its
 // health: windups, cooldowns and speed scaled).
 
@@ -58,6 +60,7 @@ export const ENEMY_TYPES = {
     turnRate: 9,
     stride: 2.6,
     skittish: { hits: 2, window: 1.5, chance: 0.55 },
+    dodge: { chance: 0.3, range: 3.2, cooldown: [1.6, 3], pounce: 0.3 },
     loot: { potion: 0.14, weapon: 0.05, spell: 0.012 },
     attacks: [
       // A quick snap: little warning and little harm, but it may run straight
@@ -139,6 +142,7 @@ export const ENEMY_TYPES = {
     turnRate: 10,
     stride: 2.2,
     skittish: { hits: 1, window: 1, chance: 0.35 },
+    dodge: { chance: 0.4, range: 3.4, cooldown: [1.2, 2.4], pounce: 0.45 },
     loot: { potion: 0.12, weapon: 0.04, spell: 0.012 },
     attacks: [
       { name: 'bite', windup: 0.3, strike: 0.12, recover: 0.42, dmg: 0.75, minRange: 0, maxRange: 2.0, volume: { c: [0, 0.6, 1.1], h: [0.4, 0.4, 0.6] }, lunge: 4, knockback: 1.5, ignite: { dps: 0.12, dur: 2 }, combo: { next: 'bite', chance: 0.5, windup: 0.65, max: 2 } },

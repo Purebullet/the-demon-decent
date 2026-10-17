@@ -7,9 +7,13 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { RELICS, addRelic } from '../combat/Relics.js';
 import { IconAtlas } from '../ui/IconAtlas.js';
 
-// Loot on the cavern floor. Potions, spell sigils and relics are taken by
-// walking over them; weapons need F so a good blade is never swapped by
-// accident.
+// Loot on the cavern floor. Potions are taken by walking over them; weapons,
+// spell sigils (abilities) and relics (attributes) are taken up with F, each
+// with its own sound, and anything worth having that drops while you are
+// there lands with a sound of its own.
+
+// Within this of one, F takes it.
+const REACH = 1.8;
 
 const flaskBody = new THREE.SphereGeometry(0.16, 24, 16);
 const flaskNeck = new THREE.CylinderGeometry(0.05, 0.06, 0.14, 16);
@@ -32,6 +36,10 @@ export class Pickups {
     this.items = [];
     this.time = 0;
     this.nearWeapon = null;
+    this.nearItem = null;
+    // Quiet while a floor is being laid out (Game lifts it once it is up):
+    // only what drops in play makes a sound landing.
+    this.quiet = true;
   }
 
   clear() {
@@ -42,7 +50,7 @@ export class Pickups {
   _add(kind, x, z, mesh, extra = {}) {
     mesh.position.set(x, 0.7, z);
     this.scene.add(mesh);
-    const it = { kind, mesh, x, z, t: Math.random() * 6, ...extra };
+    const it = { kind, mesh, x, z, t: Math.random() * 6, fresh: !this.quiet && kind !== 'potion', ...extra };
     this.items.push(it);
     return it;
   }
@@ -134,10 +142,16 @@ export class Pickups {
     const p = ctx.player.position;
     const run = ctx.player.run;
     this.nearWeapon = null;
-    let nearestW = 1.8;
+    this.nearItem = null;
+    let near = null;
+    let nearest = REACH;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.t += dt;
+      if (it.fresh) {
+        it.fresh = false;
+        ctx.audio?.drop?.(it.mesh.position);
+      }
       if (!it.starter) {
         it.mesh.position.y = 0.75 + Math.sin(it.t * 2.2) * 0.08;
         if (!it.noSpin) it.mesh.rotation.y += dt * (it.kind === 'spell' ? 1.6 : 0.9);
@@ -174,18 +188,25 @@ export class Pickups {
           it.warned = true;
           ctx.toast?.('Potions full');
         }
-      } else if (it.kind === 'spell' && d < 1.1) {
-        const msg = grantSpellSigil(run);
-        this._take(i, ctx, msg);
-      } else if (it.kind === 'relic' && d < 1.2) {
+      } else if (it.kind !== 'potion' && d < nearest) {
+        nearest = d;
+        near = it;
+      }
+    }
+    if (near?.kind === 'weapon') this.nearWeapon = near;
+    else this.nearItem = near;
+    if (this.nearItem && ctx.input.wasPressed('KeyF')) {
+      const it = this.nearItem;
+      const i = this.items.indexOf(it);
+      if (it.kind === 'spell') this._take(i, ctx, grantSpellSigil(run), true);
+      else {
         const R = RELICS[it.relic];
         const n = addRelic(run, it.relic);
-        this._take(i, ctx, n > 1 ? `${R.name} deepens (x${n})` : `Relic: ${R.name}`);
+        this._take(i, ctx, n > 1 ? `${R.name} deepens (x${n})` : `Relic: ${R.name}`, true);
         ctx.onRelic?.(it.relic, n);
-      } else if (it.kind === 'weapon' && d < nearestW) {
-        nearestW = d;
-        this.nearWeapon = it;
       }
+      ctx.input.pressed.delete('KeyF');
+      this.nearItem = null;
     }
     if (this.nearWeapon && this.nearWeapon.starter && ctx.input.wasPressed('KeyF')) {
       const it = this.nearWeapon;
@@ -209,6 +230,12 @@ export class Pickups {
   }
 
   weaponPrompt(run) {
+    const item = this.nearItem;
+    if (item?.kind === 'spell') return '<b>F</b> take the demon sigil';
+    if (item?.kind === 'relic') {
+      const R = RELICS[item.relic];
+      return `<b>F</b> take the relic <span style="color:#${item.color.getHexString()}">${R.name}</span>`;
+    }
     const it = this.nearWeapon;
     if (!it) return null;
     const w = it.weapon;
@@ -219,13 +246,23 @@ export class Pickups {
     return `<b>F</b> take <span style="color:${w.color}">${w.name}</span> (${R ? `${R.name} ` : ''}${def.label}, ${w.damage} dmg) &mdash; holding <span style="color:${held.color}">${held.name}</span> (${held.damage})`;
   }
 
-  _take(i, ctx, label) {
+  // Taken: a burst of its light; `grand` (a sigil or a relic) with its own
+  // sound and a ring of light going up round you.
+  _take(i, ctx, label, grand = false) {
     const it = this.items[i];
     const col = it.color || (it.kind === 'spell' ? C.violet : C.emberHot);
-    burst(ctx.fx.add, it.mesh.position, { count: it.color ? 40 : 20, speed: it.color ? 4 : 2.5, size: 0.12, life: 0.5, gravity: 0, color: col, colorEnd: it.kind === 'spell' ? C.violetDark : C.emberRed });
+    burst(ctx.fx.add, it.mesh.position, { count: it.color || grand ? 40 : 20, speed: it.color || grand ? 4 : 2.5, size: 0.12, life: 0.5, gravity: 0, color: col, colorEnd: it.kind === 'spell' ? C.violetDark : C.emberRed });
+    if (grand) {
+      const p = ctx.player.position;
+      for (let k = 0; k < 28; k++) {
+        const a = (k / 28) * Math.PI * 2;
+        ctx.fx.add.emit({ x: p.x + Math.cos(a) * 0.7, y: 0.2, z: p.z + Math.sin(a) * 0.7, vx: Math.cos(a) * 0.4, vy: 2.6 + Math.random(), vz: Math.sin(a) * 0.4, life: 0.9, size: 0.1, sizeEnd: 0.02, color: col, colorEnd: C.violetDark, drag: 0.6 });
+      }
+    }
     this.scene.remove(it.mesh);
     this.items.splice(i, 1);
-    ctx.audio?.pickup();
+    if (grand) ctx.audio?.acquire?.();
+    else ctx.audio?.pickup();
     ctx.toast?.(label);
   }
 }

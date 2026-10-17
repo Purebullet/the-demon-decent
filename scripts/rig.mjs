@@ -210,17 +210,19 @@ function segDist(p, a, b) {
 
 // How far inside a bone's limits a point lies: 1 well inside, 0 outside,
 // and with `soft` > 0 a blend over that distance either side of each bound
-// (no hard seam where a bone's reach ends).
+// (no hard seam where a bone's reach ends). A range's third number is its
+// own softness: [min, max, soft].
 function inLimit(l, p, soft = 0) {
   if (!l) return 1;
   let k = 1;
-  const ramp = (d) => (soft > 0 ? Math.max(0, Math.min(1, (d + soft) / (2 * soft))) : d >= 0 ? 1 : 0);
+  const ramp = (d, s) => (s > 0 ? Math.max(0, Math.min(1, (d + s) / (2 * s))) : d >= 0 ? 1 : 0);
   for (const [axis, i] of [['x', 0], ['y', 1], ['z', 2]]) {
     const r = l[axis];
     if (!r) continue;
     const v = p.getComponent(i);
-    if (r[0] !== undefined && r[0] !== null) k *= ramp(v - r[0]);
-    if (r[1] !== undefined && r[1] !== null) k *= ramp(r[1] - v);
+    const s = r[2] ?? soft;
+    if (r[0] !== undefined && r[0] !== null) k *= ramp(v - r[0], s);
+    if (r[1] !== undefined && r[1] !== null) k *= ramp(r[1] - v, s);
   }
   return k * k * (3 - 2 * k);
 }

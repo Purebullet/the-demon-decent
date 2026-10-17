@@ -407,7 +407,7 @@ export class Sleeper extends Boss {
     if (this.state !== 'sleeping') return;
     this.setState('rising');
     this.pose = { name: 'rise', u: 0, rate: 6 };
-    ctx.audio?.roar(this.position);
+    ctx.audio?.bossRoar(this.position);
     this.roarT = ROAR_TIME;
     ctx.shake?.(0.25);
   }
@@ -586,7 +586,7 @@ export class Sleeper extends Boss {
       player.air.vz += _v.z * 9;
       player.air.vy = Math.max(player.air.vy, 3);
       ctx.shake?.(0.6);
-      ctx.audio?.slam(this.position);
+      ctx.audio?.bossImpact(this.position);
       burst(ctx.fx.alpha, _v.set(player.position.x, player.position.y + 1.2, player.position.z), { count: 40, speed: 5, color: C.blood, colorEnd: C.bloodDark, size: 0.2, life: 1 });
     }
     if (a?.arc || a?.spin) {
@@ -616,7 +616,7 @@ export class Sleeper extends Boss {
     const x = this.position.x + s * aoe.at[1] + c * aoe.at[0];
     const z = this.position.z + c * aoe.at[1] - s * aoe.at[0];
     ctx.effects?.quake(x, z, aoe.radius, 1);
-    ctx.audio?.slam(_v.set(x, 0.2, z));
+    ctx.audio?.bossImpact(_v.set(x, 0.2, z));
     const p = ctx.player;
     const d = Math.hypot(p.position.x - x, p.position.z - z);
     ctx.shake?.(Math.max(0.15, 0.95 - d * 0.06));
@@ -628,27 +628,31 @@ export class Sleeper extends Boss {
     this._feet(ctx);
   }
 
-  // Each footfall (a foot coming down from a stride, read off his skeleton):
-  // the floor gives a little under it and the ground shakes.
+  // Each footfall (two to a stride of his walk, in step with it): the foot
+  // that is down presses the floor in, the ground shakes (hard near him,
+  // and felt anywhere in the hall) and it booms.
   _feet(ctx) {
     if (!this.alive || this.asleep || this.state === 'holding' || this.state === 'flinging') return;
-    const H = (this.model.height || 4.5) * (this.type.scale || 1);
-    this.feet ||= ['LeftFoot', 'RightFoot'].map((n) => ({ bone: this.model.bones.find((b) => b.name === n), up: false, rest: null }));
-    for (const f of this.feet) {
-      if (!f.bone) continue;
-      f.bone.getWorldPosition(_v);
-      const y = _v.y - this.root.position.y;
-      if (f.rest === null || y < f.rest) f.rest = y;
-      if (y > f.rest + H * 0.035) f.up = true;
-      else if (f.up && y < f.rest + H * 0.012) {
-        f.up = false;
-        const p = ctx.player.position;
-        const d = Math.hypot(p.x - _v.x, p.z - _v.z);
-        ctx.effects?.quake(_v.x, _v.z, 1.5, 0.22);
-        ctx.shake?.(Math.max(0, 0.22 - d * 0.012));
-        ctx.audio?.play?.('slam', { pos: _v.clone().setY(0.2), volume: 0.4, rate: 0.6 + Math.random() * 0.1, gap: 0.15 });
-      }
+    const half = Math.floor(this.walkPhase / Math.PI);
+    if (this.lastHalf === undefined || half === this.lastHalf) {
+      this.lastHalf = half;
+      return;
     }
+    this.lastHalf = half;
+    if ((this.moveBlend || 0) < 0.12) return;
+    this.feet ||= ['LeftFoot', 'RightFoot'].map((n) => this.model.bones.find((b) => b.name === n)).filter(Boolean);
+    let x = this.position.x;
+    let z = this.position.z;
+    let low = Infinity;
+    for (const f of this.feet) {
+      f.getWorldPosition(_v);
+      if (_v.y < low) [low, x, z] = [_v.y, _v.x, _v.z];
+    }
+    const p = ctx.player.position;
+    const d = Math.hypot(p.x - x, p.z - z);
+    ctx.effects?.quake(x, z, 1.5, 0.22);
+    ctx.shake?.(Math.max(0.1, 0.45 - d * 0.018));
+    ctx.audio?.bossStep(_v.set(x, 0.2, z));
   }
 
   // ---- His grab ----
@@ -662,7 +666,7 @@ export class Sleeper extends Boss {
     this.pose = { name: 'toss', u: 0, rate: 10 };
     this.squeezed = false;
     ctx.shake?.(0.35);
-    ctx.audio?.roar(this.position);
+    ctx.audio?.bossRoar(this.position);
     this.roarT = ROAR_TIME;
     ctx.onCombat?.('grabbed');
   }
@@ -698,7 +702,7 @@ export class Sleeper extends Boss {
         p.toss(Math.sin(this.yaw) * 3.2, 9.5, Math.cos(this.yaw) * 3.2);
         this.setState('flinging', FLING);
         this.pose = { name: 'toss', u: 0, rate: 16 };
-        ctx.audio?.enemySwing?.('brute', this.position);
+        ctx.audio?.bossSwing?.(this.position);
       }
       return;
     }
@@ -717,7 +721,7 @@ export class Sleeper extends Boss {
       this.phase = 2;
       ctx.announce?.('Vorgrath’s fury builds!');
       ctx.shake?.(0.4);
-      ctx.audio?.roar(this.position);
+      ctx.audio?.bossRoar(this.position);
       this.roarT = ROAR_TIME;
     }
   }
@@ -781,7 +785,7 @@ export class Sleeper extends Boss {
       if (k >= 1 && !this.landed) {
         this.landed = true;
         ctx.shake?.(0.6);
-        ctx.audio?.slam(this.position);
+        ctx.audio?.bossImpact?.(this.position);
         burst(ctx.fx.alpha, _v.set(this.position.x + Math.sin(this.yaw) * 2.5, 0.4, this.position.z + Math.cos(this.yaw) * 2.5), { count: 60, speed: 4, color: C.smoke, colorEnd: C.smoke, size: 1, life: 1.6, gravity: -1 });
       }
       // Lies there, then sinks away.

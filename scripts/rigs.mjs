@@ -222,9 +222,15 @@ export const RIGS = {
     limit: {
       // Only the skull above the mouth: the jaw stays with the chest.
       Head: { x: [-0.15, 0.15], y: [0.74], z: [-0.03] },
-      Chest: { y: [null, 0.82] },
-      LeftShoulder: { x: [0.06] },
-      LeftArm: { x: [0.22] },
+      // The trunk keeps to his body (never wider than 0.35 of his height):
+      // its big reach took a share of his fat arms and the claws held out
+      // in front of his hands, which stayed behind as the arms moved.
+      Chest: { x: [-0.38, 0.38, 0.03], y: [null, 0.82] },
+      Waist: { x: [-0.38, 0.38, 0.03] },
+      Hips: { x: [-0.38, 0.38, 0.03] },
+      Neck: { x: [-0.3, 0.3, 0.03] },
+      LeftShoulder: { x: [0.06, 0.5] },
+      LeftArm: { x: [0.22, 0.62] },
       LeftForeArm: { x: [0.38] },
       LeftHand: { x: [0.56] },
       LeftUpLeg: { x: [0.02], y: [null, 0.34] },

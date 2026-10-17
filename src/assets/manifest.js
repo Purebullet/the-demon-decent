@@ -97,6 +97,9 @@ export const CHARACTERS = {
     height: 5.2,
     look: "The lot owner's ogre-demon",
     pose: BIPED,
+    // Skinned with dual quaternions: his thick arms keep their girth as they
+    // twist and bend (no candy-wrapper pinch at the shoulders and wrists).
+    dualQuat: true,
     fire: [],
   },
   gorvath: {

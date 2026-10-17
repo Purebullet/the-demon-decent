@@ -341,12 +341,12 @@ export class Props {
     }
     if (this.shrine) {
       this.shrine.update(dt, ctx);
-      if (this.shrine.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon) {
+      if (this.shrine.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon && !ctx.pickups?.nearItem) {
         this.shrine.use(ctx);
         ctx.input.pressed.delete('KeyF');
       }
     }
-    if (this.nearChest && !ctx.player.dead && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon) {
+    if (this.nearChest && !ctx.player.dead && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon && !ctx.pickups?.nearItem) {
       this._open(this.nearChest, ctx);
       // The same press must not also take what just fell out.
       ctx.input.pressed.delete('KeyF');

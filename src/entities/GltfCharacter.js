@@ -81,6 +81,91 @@ function installBend(mesh, toChar, U) {
   }
 }
 
+// Dual-quaternion skinning: each bone's pull is a rotation and a move,
+// blended as such (not as matrices), so a limb twisted or bent keeps its
+// thickness instead of pinching like a sweet wrapper where two bones share
+// the skin. Each frame the bones' transforms (in the mesh's own space) are
+// turned into dual quaternions on the CPU and handed to the shader.
+const DQ_GLSL = /* glsl */ `
+uniform vec4 dqReal[DQ_BONES];
+uniform vec4 dqDual[DQ_BONES];
+vec3 dqRot(vec4 r, vec3 v) { return v + 2.0 * cross(r.xyz, cross(r.xyz, v) + r.w * v); }`;
+const DQ_BLEND = /* glsl */ `
+#ifdef USE_SKINNING
+  ivec4 dqi = ivec4(skinIndex);
+  vec4 dq0 = dqReal[dqi.x];
+  vec4 dqR = skinWeight.x * dq0;
+  vec4 dqD = skinWeight.x * dqDual[dqi.x];
+  float dqw = dot(dq0, dqReal[dqi.y]) < 0.0 ? -skinWeight.y : skinWeight.y;
+  dqR += dqw * dqReal[dqi.y]; dqD += dqw * dqDual[dqi.y];
+  dqw = dot(dq0, dqReal[dqi.z]) < 0.0 ? -skinWeight.z : skinWeight.z;
+  dqR += dqw * dqReal[dqi.z]; dqD += dqw * dqDual[dqi.z];
+  dqw = dot(dq0, dqReal[dqi.w]) < 0.0 ? -skinWeight.w : skinWeight.w;
+  dqR += dqw * dqReal[dqi.w]; dqD += dqw * dqDual[dqi.w];
+  float dqLen = max(length(dqR), 1e-6);
+  dqR /= dqLen;
+  dqD /= dqLen;
+  vec3 dqMove = 2.0 * (dqR.w * dqD.xyz - dqD.w * dqR.xyz + cross(dqR.xyz, dqD.xyz));
+#endif`;
+const DQ_NORMAL = /* glsl */ `
+#ifdef USE_SKINNING
+  objectNormal = dqRot(dqR, objectNormal);
+  #ifdef USE_TANGENT
+  objectTangent = dqRot(dqR, objectTangent);
+  #endif
+#endif`;
+const DQ_VERTEX = /* glsl */ `
+#ifdef USE_SKINNING
+  transformed = dqRot(dqR, transformed) + dqMove;
+#endif`;
+const _dqM = new THREE.Matrix4();
+const _dqP = new THREE.Vector3();
+const _dqQ = new THREE.Quaternion();
+const _dqS = new THREE.Vector3();
+
+function installDualQuat(mesh) {
+  const sk = mesh.skeleton;
+  const nb = sk.bones.length;
+  const real = new Float32Array(nb * 4);
+  const dual = new Float32Array(nb * 4);
+  const prev = mesh.onBeforeRender;
+  mesh.onBeforeRender = function (...args) {
+    prev?.apply(this, args);
+    for (let i = 0; i < nb; i++) {
+      _dqM.multiplyMatrices(mesh.bindMatrixInverse, sk.bones[i].matrixWorld).multiply(sk.boneInverses[i]).multiply(mesh.bindMatrix);
+      _dqM.decompose(_dqP, _dqQ, _dqS);
+      const { x: qx, y: qy, z: qz, w: qw } = _dqQ;
+      const { x: tx, y: ty, z: tz } = _dqP;
+      const o = i * 4;
+      real[o] = qx;
+      real[o + 1] = qy;
+      real[o + 2] = qz;
+      real[o + 3] = qw;
+      // dual = (t, 0) q / 2
+      dual[o] = 0.5 * (tx * qw + ty * qz - tz * qy);
+      dual[o + 1] = 0.5 * (-tx * qz + ty * qw + tz * qx);
+      dual[o + 2] = 0.5 * (tx * qy - ty * qx + tz * qw);
+      dual[o + 3] = -0.5 * (tx * qx + ty * qy + tz * qz);
+    }
+  };
+  const U = { dqReal: { value: real }, dqDual: { value: dual } };
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    const before = m.onBeforeCompile;
+    const key = m.customProgramCacheKey;
+    m.onBeforeCompile = (shader, renderer) => {
+      before?.call(m, shader, renderer);
+      Object.assign(shader.uniforms, U);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <skinning_pars_vertex>', `#include <skinning_pars_vertex>\n#ifdef USE_SKINNING\n#define DQ_BONES ${nb}\n${DQ_GLSL}\n#endif`)
+        .replace('#include <skinbase_vertex>', DQ_BLEND)
+        .replace('#include <skinnormal_vertex>', DQ_NORMAL)
+        .replace('#include <skinning_vertex>', DQ_VERTEX);
+    };
+    m.customProgramCacheKey = () => `${key ? key.call(m) : ''}|dq${nb}`;
+    m.needsUpdate = true;
+  }
+}
+
 export function buildGltfCharacter(id, rootScale = 1) {
   const inst = Assets.instantiateCharacter(id, rootScale);
   const H = inst.height;
@@ -102,6 +187,7 @@ export function buildGltfCharacter(id, rootScale = 1) {
     const re = pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i');
     return bones.find((b) => b.name === pattern) || bones.find((b) => re.test(norm(b.name))) || null;
   };
+  if (inst.entry.dualQuat) for (const m of meshes) if (m.isSkinnedMesh && m.skeleton) installDualQuat(m);
   const head = find(BONES.head);
   const chest = find(BONES.chest);
   const hips = find(BONES.hips);
