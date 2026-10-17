@@ -145,7 +145,13 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/ja
 function serve(dir, port, { cors = false, dynamicIndex = false } = {}) {
   createServer(async (req, res) => {
     const url = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    const headers = { 'Cache-Control': 'no-store', ...(cors ? { 'Access-Control-Allow-Origin': '*' } : {}) };
+    const headers = { 'Cache-Control': 'no-store', ...(cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Private-Network': 'true' } : {}) };
+    // The devkit's page (on the web) asks first before reaching a local
+    // server.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, headers).end();
+      return;
+    }
     if (dynamicIndex && url === '/assets/models/index.json') {
       res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
       res.end(JSON.stringify(await listModels()));

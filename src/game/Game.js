@@ -389,9 +389,21 @@ export class Game {
     this.busy = true;
     await this.hud.fade(true, 500);
     const t0 = performance.now();
-    this.fsm.change(name, params);
-    this.host.log(`[t] enter ${name}: ${Math.round(performance.now() - t0)} ms`);
-    await this.warmUp();
+    // Whatever goes wrong building the next place, the black lifts: a
+    // failed load is logged and play goes on as far as it can, never a
+    // screen left dark for good.
+    try {
+      this.fsm.change(name, params);
+      this.host.log(`[t] enter ${name}: ${Math.round(performance.now() - t0)} ms`);
+    } catch (err) {
+      this.host.log(`[error] entering ${name}: ${err?.stack || err}`);
+    }
+    try {
+      await this.warmUp();
+    } catch (err) {
+      this.compiling = false;
+      this.host.log(`[error] warming up ${name}: ${err?.stack || err}`);
+    }
     await this.hud.fade(false, 600);
     this.busy = false;
     const next = this.pendingGoto;

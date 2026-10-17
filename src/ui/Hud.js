@@ -1827,23 +1827,17 @@ export class Hud {
     cols[2].w = Math.max(cols[2].w, 210);
     const pw = cols.reduce((a, c) => a + c.w, 0) + 14;
     const ph = 38 + 6 * ROW + 10;
-    // Right beside Project 0's chat (its width in screen pixels), unless
-    // the screen is too narrow to keep it clear without shrinking the panel
-    // past reading; centred anywhere else.
+    // Centred under the title; on Project 0 nudged right only as far as it
+    // must be to clear the chat at the bottom left (its width in screen
+    // pixels), and shrunk if even that does not fit.
     const reserve = this.host?.kind === 'p0' ? P0_CHAT / this.u : 0;
-    let left = reserve;
-    let room = w - left - 12;
-    let beside = reserve > 0;
-    if (room < pw * 0.62) {
-      left = 12;
-      room = w - 24;
-      beside = false;
-    }
     let cy = Math.max(top + 18, h - 14 - ph);
-    const k = Math.max(0.5, Math.min(1, room / pw, (h - 8 - cy) / ph));
+    let k = Math.max(0.5, Math.min(1, (w - 24) / pw, (h - 8 - cy) / ph));
+    const left = Math.max((w - pw * k) / 2, reserve);
+    if (left + pw * k > w - 12) k = Math.max(0.5, (w - 12 - left) / pw);
     if (cy + ph * k > h - 8) cy = h - 8 - ph * k;
     g.save();
-    g.translate(beside ? left : left + (room - pw * k) / 2, cy);
+    g.translate(left, cy);
     g.scale(k, k);
     this._box(g, 0, 0, pw, ph, 'rgba(10,2,2,0.74)', C.edge);
     let cx = 22;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { C } from './Particles.js';
+import { makeCanvas } from './Textures.js';
 
 // A heavy blow on the floor: the Sleeper's axe biting into it, his stamp,
 // and (smaller) every step he takes. Where it lands:
@@ -27,8 +28,7 @@ function textures() {
   if (tex) return tex;
   const S = 256;
   const mk = (draw) => {
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = S;
+    const cv = makeCanvas(S, S);
     const g = cv.getContext('2d');
     g.translate(S / 2, S / 2);
     draw(g);

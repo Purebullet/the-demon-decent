@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Assets } from '../assets/AssetLibrary.js';
-import { softDotTexture } from './Textures.js';
+import { softDotTexture, makeCanvas } from './Textures.js';
 import { burst } from './Particles.js';
 import { rollRelic } from '../combat/Relics.js';
 
@@ -22,8 +22,7 @@ let runeTex = null;
 function runes() {
   if (runeTex) return runeTex;
   const S = 256;
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = S;
+  const cv = makeCanvas(S, S);
   const g = cv.getContext('2d');
   g.translate(S / 2, S / 2);
   g.strokeStyle = '#fff';

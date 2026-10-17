@@ -215,7 +215,7 @@ function lowPoly(geo, tris) {
 
 // Triangles per piece in LOD1 and LOD2 (the tall pieces only).
 const LOD1_TRIS = { horn: 420, tower: 460, crag: 130, 'pillar-a': 300, 'pillar-b': 220, 'pillar-c': 300 };
-const LOD2_TRIS = { horn: 44, tower: 44, crag: 0, 'pillar-a': 24, 'pillar-b': 0, 'pillar-c': 24 };
+const LOD2_TRIS = { horn: 76, tower: 64, crag: 0, 'pillar-a': 34, 'pillar-b': 0, 'pillar-c': 34 };
 
 // Which way a piece leans or curls (the direction from the middle of its
 // foot to the middle of its top, as an angle in its own x-z), so a horn can
@@ -743,11 +743,12 @@ export async function buildLod1(width, depth, height, models) {
 export async function buildLod2(width, depth, height, models) {
   const dims = shape(width, depth, height);
   const K = await kit(models);
-  // One 256 px texture, glowing where it is bright (the city's halo takes the
-  // glow): a strip of plain dark rock for the pieces and the opening's
-  // depths; a map of the mound seen from above, dark rock split by molten
-  // cracks running out from the crater as near-by; and the lake's fire,
-  // hot at the opening's lip and deep red out at its rim.
+  // One 256 px texture (its only one), seen from far off as the near build
+  // looks: the same dark rock for the mound and every piece, a few thin
+  // molten cracks out from the crater (the near build's glints of lava, not
+  // a web of them), and the lake's fire, hot at the opening's lip and deep
+  // red out at its rim. It glows through a warm tint, so the fire and the
+  // cracks burn and the rock barely does (not a pale glowing slab by day).
   const c = makeCanvas(256, 256);
   const g = c.getContext('2d');
   g.drawImage(rockTextures(265, [58, 46, 44]).map.image, 0, 0, 128, 256);
@@ -759,7 +760,7 @@ export async function buildLod2(width, depth, height, models) {
   g.fillStyle = rock;
   g.fillRect(0, 0, 128, 256);
   g.fillStyle = '#050202';
-  g.fillRect(0, 0, 12, 256);
+  g.fillRect(0, 0, 6, 256);
   // The mound from above: lot x across [16, 128), z down the height.
   const W = width;
   const D = depth;
@@ -767,7 +768,13 @@ export async function buildLod2(width, depth, height, models) {
   const mz = (z) => (z / D + 0.5) * 256;
   const r = mulberry32(271);
   g.lineCap = 'round';
-  for (let k = 0; k < 46; k++) {
+  // (Kept to the mound's own part of the texture: the strips beside it are
+  // what the pieces and the depths are painted with.)
+  g.save();
+  g.beginPath();
+  g.rect(16, 0, 112, 256);
+  g.clip();
+  for (let k = 0; k < 14; k++) {
     // A crack from the crater's lip out down the slope, wandering, forking.
     let a = r() * TAU;
     let rad = dims.rc * (0.9 + r() * 0.25);
@@ -778,7 +785,7 @@ export async function buildLod2(width, depth, height, models) {
       rad += 0.7;
       pts.push([Math.cos(a) * rad, Math.sin(a) * rad]);
     }
-    for (const [w, col] of [[3.2, 'rgba(150,20,4,0.55)'], [1.4, 'rgba(255,110,24,0.95)']]) {
+    for (const [w, col] of [[2.2, 'rgba(120,16,4,0.45)'], [0.9, 'rgba(255,104,22,0.85)']]) {
       g.strokeStyle = col;
       g.lineWidth = w;
       g.beginPath();
@@ -786,6 +793,7 @@ export async function buildLod2(width, depth, height, models) {
       g.stroke();
     }
   }
+  g.restore();
   // The fire, inner (u = 0.52) to outer (u = 0.98).
   const grad = g.createLinearGradient(132, 0, 252, 0);
   grad.addColorStop(0, '#ff7418');
@@ -795,7 +803,7 @@ export async function buildLod2(width, depth, height, models) {
   g.fillRect(128, 0, 128, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.MeshStandardMaterial({ name: 'Rock', map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1, roughness: 0.95 });
+  const mat = new THREE.MeshStandardMaterial({ name: 'Rock', map: tex, emissive: 0xffb373, emissiveMap: tex, emissiveIntensity: 1, roughness: 0.95 });
   // UVs: the mound from above; the pieces and the opening plain dark; the
   // lake by how far out from the opening.
   const above = (geo) => {
@@ -805,10 +813,11 @@ export async function buildLod2(width, depth, height, models) {
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (16 + (pos.getX(i) / W + 0.5) * 112) / 256, 1 - pos.getZ(i) / D - 0.5);
     return p;
   };
-  const plain = (geo) => {
+  // The plain strips: rock for the pieces; the depths the fire's deep red.
+  const plain = (geo, u = 0.04) => {
     const p = prep(geo);
     const uv = p.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.02, 0.5);
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, u, 0.5);
     return p;
   };
   const fire = (geo) => {
@@ -831,8 +840,8 @@ export async function buildLod2(width, depth, height, models) {
   depths.translate(0, 0.25, 0);
   // The horns, towers and pillars as a few dozen triangles each (no crags).
   const pieces = piecesGeometry(list, K.pieces, 'far', dims);
-  const parts = [ground, lake, plain(depths)];
-  if (pieces) parts.push(plain(pieces));
+  const parts = [ground, lake, plain(depths, 0.99)];
+  if (pieces) parts.push(plain(pieces, 0.04));
   const root = new THREE.Group();
   root.name = 'HellMouth';
   root.add(mesh('HellMouth', mergeGeometries(parts), mat));
