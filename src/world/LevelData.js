@@ -33,14 +33,20 @@ export const TILE = 2;
 // Below the fifth floor lies the Deep: its demons have a fifth more health,
 // are 5% quicker on their feet and 5% quicker with their blows and powers
 // (shorter wind-ups and cooldowns), on top of each floor's own tuning. The
-// Deep is harder for how its demons fight (packs that close in together,
-// ambushers, traps, champions at the exits), not for how long they take
-// to cut down.
+// Deep is harder above all for how its demons fight (packs that close in
+// together, ambushers, traps, champions at the exits).
+//
+// And each floor past the sixth (bosses aside) is worse again than the one
+// above: its demons have 15% more health, strike 10% faster (wind-ups and
+// cooldowns) and hit 5% harder, compounding (DEEPER).
 export const DEEP_FROM = 6;
+export const DEEPER = { from: 6, hp: 1.15, pace: 1.1, dmg: 1.05 };
 export function floorDef(floor) {
   const def = FLOORS[floor - 1];
   if (floor < DEEP_FROM) return def;
-  return { ...def, hp: def.hp * 1.2, speed: def.speed * 1.05, windup: def.windup / 1.05, cooldown: def.cooldown / 1.05 };
+  const k = def.boss ? 0 : Math.max(0, floor - DEEPER.from);
+  const pace = 1.05 * DEEPER.pace ** k;
+  return { ...def, hp: def.hp * 1.2 * DEEPER.hp ** k, dmg: def.dmg * DEEPER.dmg ** k, speed: def.speed * 1.05, windup: def.windup / pace, cooldown: def.cooldown / pace };
 }
 
 export const FLOORS = [
@@ -218,7 +224,7 @@ export const FLOORS = [
   {
     name: 'The Cinder Galleries',
     look: 'cinder',
-    hp: 1.3, dmg: 1.3, speed: 1.11, windup: 0.88, cooldown: 0.88, attackers: 3, swarm: false, aggro: 15,
+    hp: 1.25, dmg: 1.25, speed: 1.11, windup: 0.9, cooldown: 0.9, attackers: 3, swarm: false, aggro: 15,
     fog: 0.055, light: 15, loot: 1.0,
     map: [
       '###########################################################',
@@ -245,7 +251,7 @@ export const FLOORS = [
   {
     name: 'The Flayed Maze',
     look: 'flayed',
-    hp: 1.35, dmg: 1.36, speed: 1.13, windup: 0.86, cooldown: 0.85, attackers: 3, swarm: true, aggro: 12,
+    hp: 1.25, dmg: 1.25, speed: 1.13, windup: 0.9, cooldown: 0.9, attackers: 3, swarm: true, aggro: 12,
     fog: 0.06, light: 14, loot: 1.0,
     map: [
       '#######################################################',
@@ -272,7 +278,7 @@ export const FLOORS = [
   {
     name: 'The Threshold of Ash',
     look: 'ash',
-    hp: 1.4, dmg: 1.42, speed: 1.15, windup: 0.84, cooldown: 0.83, attackers: 3, swarm: true, aggro: 15,
+    hp: 1.25, dmg: 1.25, speed: 1.15, windup: 0.9, cooldown: 0.9, attackers: 3, swarm: true, aggro: 15,
     fog: 0.058, light: 14, loot: 1.1,
     map: [
       '######################################################',

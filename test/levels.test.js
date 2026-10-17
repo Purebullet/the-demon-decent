@@ -21,15 +21,20 @@ test('the first five floors have no hazards or ambushers', () => {
   });
 });
 
-test('deep floors are faster and tighter, not just tougher', () => {
-  for (let i = 6; i < 9; i++) {
-    const a = FLOORS[i - 1];
-    const b = FLOORS[i];
-    assert.ok(b.speed >= a.speed, `speed regresses on floor ${i + 1}`);
-    assert.ok(b.windup <= a.windup, `windup loosens on floor ${i + 1}`);
+test('each floor past the sixth: 15% more health, 10% faster blows, 5% harder hits', async () => {
+  const { floorDef } = await import('../src/world/LevelData.js');
+  for (let f = 7; f <= 9; f++) {
+    const a = floorDef(f - 1);
+    const b = floorDef(f);
+    assert.ok(Math.abs(b.hp / a.hp - 1.15) < 1e-9, `health on floor ${f}`);
+    assert.ok(Math.abs(a.windup / b.windup - 1.1) < 1e-9, `wind-ups on floor ${f}`);
+    assert.ok(Math.abs(a.cooldown / b.cooldown - 1.1) < 1e-9, `cooldowns on floor ${f}`);
+    assert.ok(Math.abs(b.dmg / a.dmg - 1.05) < 1e-9, `damage on floor ${f}`);
+    assert.ok(b.speed >= a.speed, `speed regresses on floor ${f}`);
   }
   assert.ok(FLOORS[8].speed > FLOORS[0].speed);
-  assert.ok(FLOORS[8].windup < FLOORS[0].windup);
+  // The last floor is the Archfiend's: his own tuning, not the ramp's.
+  assert.equal(floorDef(10).hp, FLOORS[9].hp * 1.2);
 });
 
 test('every creature in the maps and boss summons has stats and a model slot', async () => {

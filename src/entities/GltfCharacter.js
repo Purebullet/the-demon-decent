@@ -511,7 +511,9 @@ export function buildGltfCharacter(id, rootScale = 1) {
 
     if (mixer) {
       drive(e, dt, t);
-      if (e.state === 'dying') flop(e.stateT);
+      // (Not over a death the creature paces itself: the mixer leaves a bone
+      // its clip holds still alone, and the flop would pile up on it.)
+      if (e.state === 'dying' && e.deathU === undefined) flop(e.stateT);
       // Attacks without a clip of their own still get a body lean; a guard
       // rears back behind it; a stumble lurches.
       pose.rotation.x = (attacking && !clips[e.attack?.clip || e.attack?.name] && !clips.attack ? -0.25 * raise + 0.4 * swing : 0) - 0.14 * guard - (e.stumbling ? 0.22 * stagger : 0);

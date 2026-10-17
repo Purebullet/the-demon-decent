@@ -461,6 +461,50 @@ const BIPED_ATTACKS = {
     ]),
 };
 
+// A quick, low front kick (the right foot), a punt at whoever crowds him:
+// the leg drawn back with the knee bent, then swung straight through low in
+// front, the body rocking back over the standing leg.
+function kick(u) {
+  return keyed(u, [
+    [0, null],
+    [W, (p) => {
+      R(p, 'UpLeg', 0.4, 0, 0.05);
+      R(p, 'Leg', 1.15, 0, 0);
+      R(p, 'Foot', 0.25, 0, 0);
+      L(p, 'UpLeg', -0.25, 0, 0);
+      L(p, 'Leg', 0.45, 0, 0);
+      L(p, 'Foot', -0.15, 0, 0);
+      C(p, 'Waist', 0.2, 0.08, 0);
+      C(p, 'Chest', 0.1, 0, 0);
+      C(p, 'Head', -0.15, 0, 0);
+      B(p, 'Arm', 0.1, 0, 0.45);
+      T(p, 'Hips', 0, -0.025, -0.02);
+    }],
+    [S, (p) => {
+      R(p, 'UpLeg', -1.0, 0, 0.05);
+      R(p, 'Leg', 0.12, 0, 0);
+      R(p, 'Foot', -0.4, 0, 0);
+      L(p, 'UpLeg', -0.15, 0, 0);
+      L(p, 'Leg', 0.35, 0, 0);
+      L(p, 'Foot', -0.15, 0, 0);
+      C(p, 'Waist', -0.22, -0.1, 0);
+      C(p, 'Chest', -0.1, 0, 0);
+      C(p, 'Head', 0.2, 0, 0);
+      B(p, 'Arm', -0.15, 0, 0.6);
+      T(p, 'Hips', 0, -0.02, 0.03);
+    }, 'in'],
+    [0.78, (p) => {
+      R(p, 'UpLeg', -0.45, 0, 0);
+      R(p, 'Leg', 0.7, 0, 0);
+      L(p, 'UpLeg', -0.1, 0, 0);
+      L(p, 'Leg', 0.2, 0, 0);
+      C(p, 'Waist', -0.08, 0, 0);
+      B(p, 'Arm', 0, 0, 0.3);
+    }],
+    [1, null],
+  ]);
+}
+
 // The pose seen in a mirror: left for right (and turns and rolls reversed).
 function mirror(pose) {
   const out = {};
@@ -474,6 +518,7 @@ function mirror(pose) {
 // Azrakel, the Archfiend: a hunched, long-armed beast-lord, quick and
 // springy. His blows are claws, his tail and his whole weight.
 const LORD_ATTACKS = {
+  kick: (u) => kick(u),
   // The left claw: the right's sweep, mirrored.
   swipeL: (u, d) => mirror(BIPED_ATTACKS.swipe(u, d)),
   // Coiled low, then a dash: both claws driven forward at the end of it.
@@ -1436,6 +1481,19 @@ export function clipsFor(def) {
     clips.push({ name: attack, duration: 1, sample: (u) => fn(u, def), ground: (u) => (airborne && u > W && u < S ? null : 'feet') });
   }
   for (const name of def.clips || []) clips.push({ name, ...(SLEEPER_CLIPS[name] || LORD_CLIPS[name]) });
+  // Fingers of their own (`def.grip`): the right fist closed round what it
+  // holds, the left curled, in every clip.
+  if (def.grip) {
+    for (const c of clips) {
+      const sample = c.sample;
+      c.sample = (u) => {
+        const p = sample(u);
+        R(p, 'Fingers', 0, 0, -def.grip.right);
+        L(p, 'Fingers', 0, 0, -def.grip.left);
+        return p;
+      };
+    }
+  }
   // A biped with a tail (`def.tail`): it swings with every clip, slowly at
   // rest, with the stride in the gaits, and lags behind the blows.
   if (def.tail && biped) {

@@ -279,7 +279,7 @@ export class Props {
     const run = ctx.player.run;
     // One thing per chest. The first chest of a run always holds a relic.
     const table = [
-      ['relic', 0.3],
+      ['relic', 0.2],
       ['weapon', 0.25],
       ['potion', 0.25],
       ['spell', 0.12],

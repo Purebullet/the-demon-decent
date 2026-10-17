@@ -30,6 +30,9 @@ import { angleDelta } from '../core/rng.js';
 import { disposeTree } from '../core/dispose.js';
 import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
 
+// The chance an elite demon carries a relic.
+const ELITE_RELIC = 0.27;
+
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
 // Owns the run and the state machine that moves the player between the
@@ -715,6 +718,11 @@ export class Game {
       setTimeout(() => {
         if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates');
       }, arrival ? 9000 : 3200);
+    } else if (floor > DEEP_FROM && !def.boss) {
+      // Each floor below that: they grow worse again.
+      setTimeout(() => {
+        if (this.run?.floor === floor) this.hud.toast('Deeper still: the demons grow stronger and quicker');
+      }, 3200);
     }
   }
 
@@ -899,8 +907,8 @@ export class Game {
     if (Math.random() < loot.potion * luck) this.pickups.addPotion(x + off(), z + off());
     if (Math.random() < loot.weapon * luck) this.pickups.addWeapon(x + off(), z + off(), rollWeapon(run.floor, e.isBoss ? 1 : 0));
     if (Math.random() < loot.spell * luck) this.pickups.addSpell(x + off(), z + off());
-    // Elites sometimes carry relics; bosses always do.
-    if ((e.elite && Math.random() < 0.4) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
+    // Elites sometimes carry relics (about one in four); bosses always do.
+    if ((e.elite && Math.random() < ELITE_RELIC) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
       this.pickups.addPotion(x + 1.2, z);
