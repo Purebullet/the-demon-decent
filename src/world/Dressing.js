@@ -357,107 +357,6 @@ export class Dressing {
       }
     }
     for (const sh of shapes) this._instances(sh.geometry, sh.material, sh.list, sh.lod);
-    this._core();
-  }
-
-  // Behind the boulders, the rock itself: a dark block filling each wall
-  // tile from floor to vault, joined to its rock neighbours and kept a little
-  // back from open ground. Wherever two boulders leave a gap, you see deep
-  // rock through it, not the void beyond the cavern.
-  _core() {
-    const d = this.d;
-    const nav = d.nav;
-    const isRock = (c, r) => d.tiles[r]?.[c] === '#';
-    // Through the gaps between the boulders: depth, and fog drifting in it.
-    // Deep in the rock a solid backing the very colour of the floor's
-    // distance haze (so a gap looks as if it runs on into the dark, and
-    // nothing beyond shows through); in front of it a sheet of soft, slowly
-    // billowing mist, added light, thicker toward the floor.
-    const deep = new THREE.MeshBasicMaterial({ color: this.look.fog ?? 0x0b0606 });
-    // Smoke-grey, a little warm.
-    const tint = new THREE.Color(0x6c5c5a).multiplyScalar(0.42);
-    const mist = new THREE.ShaderMaterial({
-      fog: true,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uColor: { value: tint }, uNoise: { value: null } }]),
-      vertexShader: /* glsl */ `
-        #include <fog_pars_vertex>
-        varying vec3 vWorld;
-        void main() {
-          vec4 wp = vec4(position, 1.0);
-          #ifdef USE_INSTANCING
-            wp = instanceMatrix * wp;
-          #endif
-          wp = modelMatrix * wp;
-          vWorld = wp.xyz;
-          vec4 mvPosition = viewMatrix * wp;
-          gl_Position = projectionMatrix * mvPosition;
-          #include <fog_vertex>
-        }`,
-      fragmentShader: /* glsl */ `
-        #include <fog_pars_fragment>
-        uniform float uTime;
-        uniform vec3 uColor;
-        uniform sampler2D uNoise;
-        varying vec3 vWorld;
-        float n2(vec2 p) { return texture2D(uNoise, p / 16.0).r; }
-        void main() {
-          float t = uTime * 0.12;
-          vec2 p = vec2(vWorld.x + vWorld.z, vWorld.y * 1.5) * 0.55;
-          float n = n2(p + vec2(t, -t * 0.7)) * 0.55 + n2(p * 2.1 + vec2(-t * 1.6, -t * 1.2)) * 0.3 + n2(p * 4.3 + vec2(t * 2.2, -t * 1.9)) * 0.15;
-          float billow = smoothstep(0.3, 0.9, n);
-          float low = 1.0 - smoothstep(0.0, 5.0, vWorld.y);
-          vec3 col = uColor * (0.12 + billow) * (0.4 + 0.7 * low);
-          // Fades away into the distance (added light: toward nothing).
-          #ifdef USE_FOG
-            col *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
-          #endif
-          gl_FragColor = vec4(col, 1.0);
-        }`,
-    });
-    mist.uniforms.uNoise.value = mistNoise();
-    this.coreMat = mist;
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    // How far back from the rock's face each lies (less where a wall is thin,
-    // open on both sides, so that something of it is left).
-    const blocks = (BACK) => {
-      const back = (a, b) => (a && b ? Math.min(BACK, (TILE - 0.3) / 2) : a ? BACK : 0);
-      const list = [];
-      const m = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const s = new THREE.Vector3();
-      const p = new THREE.Vector3();
-      const seen = new Set();
-      // Every rock tile within reach of open ground (two tiles), so a block's
-      // neighbours behind it are there too.
-      for (const t of this.wallTiles) {
-        for (let dr = -1; dr <= 1; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            const c = t.c + dc;
-            const r = t.r + dr;
-            const key = r * d.cols + c;
-            if (seen.has(key) || !isRock(c, r) || nav.isWalkable(c, r)) continue;
-            seen.add(key);
-            const W = nav.isWalkable(c - 1, r);
-            const E = nav.isWalkable(c + 1, r);
-            const N = nav.isWalkable(c, r - 1);
-            const S = nav.isWalkable(c, r + 1);
-            const x0 = c * TILE + back(W, E);
-            const x1 = (c + 1) * TILE - back(E, W);
-            const z0 = r * TILE + back(N, S);
-            const z1 = (r + 1) * TILE - back(S, N);
-            p.set((x0 + x1) / 2, this.ceiling / 2, (z0 + z1) / 2);
-            s.set(x1 - x0, this.ceiling + 0.2, z1 - z0);
-            list.push(m.compose(p, q, s).clone());
-          }
-        }
-      }
-      return list;
-    };
-    this._instances(geometry, deep, blocks(1.25), null);
-    this._instances(geometry, mist, blocks(0.7), null);
   }
 
   // The group for the chunk of the map around (x, z).
@@ -864,7 +763,6 @@ export class Dressing {
 
   tick(t) {
     for (const m of this.mist || []) m.uniforms.uTime.value = t;
-    if (this.coreMat) this.coreMat.uniforms.uTime.value = t;
   }
 
   // Up to `n` glowing set pieces spread over the floor, for point lights.
