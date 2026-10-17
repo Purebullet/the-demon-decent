@@ -15,14 +15,15 @@ import { Player } from '../entities/Player.js';
 import { Enemy } from '../entities/Enemy.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss, Sleeper } from '../entities/Bosses.js';
+import { Archfiend } from '../entities/Archfiend.js';
 import { Pickups } from '../entities/Pickups.js';
 import { rollWeapon, makeWeapon, weaponMemory, WEAPON_MODELS } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
-import { xpForKill, gainXp, spendPoint, legacyOf, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL } from './Levels.js';
+import { xpForKill, gainXp, spendPoint, legacyOf, STAT_IDS, LEVEL_STATS, STAT_CAP, MAX_LEVEL, LEVEL_HEAL } from './Levels.js';
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
-import { Hud } from '../ui/Hud.js';
+import { Hud, fmtTime } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
 import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
@@ -32,7 +33,7 @@ import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
 // Owns the run and the state machine that moves the player between the
-// surface lot, the 20 floors and the sanctums in between. Everything outside
+// surface lot, the ten floors and the sanctums in between. Everything outside
 // the game (renderer, input, sound, scores) comes from the host: Project 0's
 // sandbox or a plain web page (src/platform).
 
@@ -46,7 +47,10 @@ const SONG_FOR = { 5: 'hall', 10: 'deep' };
 // The Sleeper wakes this long after the arena's last candle catches (the
 // corridor's music fading away meanwhile).
 const WAKE_AFTER = 4.5;
-const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', gorvath: 'Warden of the tenth seal', azrakel: 'Lord of the last pit' };
+const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', azrakel: 'Lord of the last pit' };
+// A finished descent's time goes on a table of its own, the quickest first
+// (the weekly table keeps the deepest floor).
+const DESCENT_BOARD = 'Fastest Descent';
 // How long after the blow that levels you up before the choice opens.
 const LEVEL_UP_DELAY = 0.7;
 const LEVEL_UP_ARM = 0.6;
@@ -138,7 +142,14 @@ export class Game {
 
     // Scores live in the host (the lot's weekly table on Project 0).
     host.on('reward', (r2) => {
-      if (r2?.kind === 'score' && r2.best) this.best = Math.max(this.best, r2.best);
+      if (r2?.kind !== 'score') return;
+      // The answer to a descent's time, or to a floor reached.
+      if (r2.board === DESCENT_BOARD || (this.pendingTime && r2.score === this.pendingTime)) {
+        this.pendingTime = 0;
+        if (r2.best) this.bestTime = r2.best;
+        return;
+      }
+      if (r2.best && r2.best <= FLOOR_COUNT) this.best = Math.max(this.best, r2.best);
       this._refreshTitle();
     });
     host.on('table', (top) => {
@@ -146,6 +157,14 @@ export class Game {
       this._refreshTitle();
     });
     for (const row of this.table) if (row.you) this.best = Math.max(this.best, row.score);
+    // The fastest descents this week (and this player's own best time).
+    this.descent = [];
+    this.bestTime = 0;
+    this.pendingTime = 0;
+    host.on('board', (b) => {
+      if (b?.name === DESCENT_BOARD) this._setDescent(b.top);
+    });
+    this._setDescent(host.boards?.[DESCENT_BOARD]);
 
     this.fsm = new StateMachine(this, TRANSITIONS);
     this.fsm
@@ -654,9 +673,21 @@ export class Game {
     this.guideDir = null;
 
     for (const e of level.data.enemies) this._spawnEnemy(e.type, e);
+    // Champions: from the third floor the demons nearest the gate are elites,
+    // one of them (two from the Deep on), waiting where you must go.
+    const champions = floor >= DEEP_FROM ? 2 : floor >= 3 ? 1 : 0;
+    const gate = level.data.exit;
+    if (champions && gate && !def.boss) {
+      const near = this.enemies.filter((e) => e.state !== 'burrowed').sort((a, b) => Math.hypot(a.position.x - gate.x, a.position.z - gate.z) - Math.hypot(b.position.x - gate.x, b.position.z - gate.z));
+      for (const e of near.slice(0, champions)) {
+        e.makeElite();
+        this.eliteCount++;
+      }
+    }
     if (level.data.boss) {
       const B = level.data.boss;
-      const b = B.type === 'sleeper' ? new Sleeper(B.type, B, def) : new Boss(B.type, B, def);
+      const Kind = B.type === 'sleeper' ? Sleeper : B.type === 'azrakel' ? Archfiend : Boss;
+      const b = new Kind(B.type, B, def);
       // He sleeps facing the way you come in.
       if (level.hall) b.yaw = Math.atan2(level.spawn.x - B.x, 0);
       this._addEnemy(b);
@@ -682,7 +713,7 @@ export class Game {
     // The first step into the Deep: say what has changed.
     if (floor === DEEP_FROM) {
       setTimeout(() => {
-        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Demons here have 50% more health, and move and strike 5% faster');
+        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates');
       }, arrival ? 9000 : 3200);
     }
   }
@@ -726,11 +757,6 @@ export class Game {
 
   _spawnEnemy(type, pos, emerge = false) {
     const e = new Enemy(type, pos, this.level.def);
-    // From floor 3 a few demons come as elites (never the summoned).
-    if (!emerge && this.run.floor >= 3 && this.eliteCount < 2 && Math.random() < 0.1 + this.run.floor * 0.006) {
-      e.makeElite();
-      this.eliteCount++;
-    }
     this._addEnemy(e);
     if (emerge) {
       // (A boss's summons: worth half the experience.)
@@ -792,6 +818,14 @@ export class Game {
       this.armoredT = this.time;
       this._hint('armor', ARMOR_HINT);
     } else if (kind === 'stunned') this.hud.callout('STUNNED', { color: '#ffd080', size: 1.0 });
+    else if (kind === 'open') {
+      this.hud.callout('OPEN', { color: '#ffb040', size: 1.25 });
+      this._hint('open', 'He glows like the forge: <b>strike now</b>, while he is open');
+    } else if (kind === 'glance' || kind === 'untouchable') {
+      if (this.time - (this.glanceT ?? -9) > 1.2) this.hud.callout(kind === 'glance' ? 'GLANCED' : 'UNTOUCHABLE', { color: '#9a8a80', size: 0.8 });
+      this.glanceT = this.time;
+      this._hint('glance', 'His hide turns blows aside. He is <b>open</b> after his own blows, when you <b>parry</b> him, when he lands a pounce, or when his dash hits a pillar');
+    }
     else if (kind === 'grabbed') {
       this.hud.callout('SEIZED', { color: '#ff6a4a', size: 1.0 });
       this._hint('grab', 'His open hand is quicker than his axe: <b>Shade Step</b> out of its reach');
@@ -854,11 +888,9 @@ export class Game {
     const run = this.run;
     run.kills++;
     // Experience; a level made opens the choice a moment later (_updateLevelUp).
-    if (gainXp(run, xpForKill(e, run.floor)) > 0) {
-      this.levelUpT = LEVEL_UP_DELAY;
-      this.audio.levelUp?.();
-      this.hud.callout(`LEVEL ${run.level}`, { color: '#ffe08a', size: 1.25 });
-    }
+    // (The last lord's death ends the descent: no perk to choose after it.)
+    const last = e.isBoss && run.floor === FLOOR_COUNT;
+    if (!last && gainXp(run, xpForKill(e, run.floor)) > 0) this._levelGained();
     const luck = this.level.def.loot;
     const loot = e.type.loot;
     const x = e.position.x;
@@ -867,8 +899,8 @@ export class Game {
     if (Math.random() < loot.potion * luck) this.pickups.addPotion(x + off(), z + off());
     if (Math.random() < loot.weapon * luck) this.pickups.addWeapon(x + off(), z + off(), rollWeapon(run.floor, e.isBoss ? 1 : 0));
     if (Math.random() < loot.spell * luck) this.pickups.addSpell(x + off(), z + off());
-    // Elites carry relics, and so do bosses.
-    if ((e.elite && Math.random() < 0.7) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
+    // Elites sometimes carry relics; bosses always do.
+    if ((e.elite && Math.random() < 0.4) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
       this.pickups.addPotion(x + 1.2, z);
@@ -936,6 +968,11 @@ export class Game {
     this.pickups.update(dt, ctx);
 
     const alive = this.enemies.filter((e) => e.alive);
+    // The last lord down: the descent's clock stops.
+    if (this.boss && !this.boss.alive && this.run.floor === FLOOR_COUNT && !this.run.finished) {
+      this.run.finished = true;
+      if (!this.run.dev) this.hud.toast(`Descent time ${fmtTime(this.run.time, true)}`);
+    }
     if (!level.exitOpen && alive.length === 0) {
       level.openExit();
       this.audio.sealBreak();
@@ -972,6 +1009,36 @@ export class Game {
       prompt,
       compass: this._compass(alive),
     });
+  }
+
+  // A level gained (they are few, and each one is a perk): time catches its
+  // breath, a column of golden light rises round you, a third of your
+  // wounds close, and a moment later the choice opens.
+  _levelGained() {
+    const run = this.run;
+    const p = this.player;
+    this.levelUpT = LEVEL_UP_DELAY + 0.3;
+    run.health = Math.min(run.maxHealth, run.health + Math.round(run.maxHealth * LEVEL_HEAL));
+    this.audio.levelUp?.();
+    this.hud.callout(`LEVEL ${run.level}`, { color: '#ffe08a', size: 1.7 });
+    this.hud.toast(`Level ${run.level} — a perk to choose, and your wounds close`);
+    this.ctx?.hitStop?.(0.45);
+    p.flash?.(0xffd27a, 40, 0.6);
+    p.shake?.(0.15);
+    const x = p.position.x;
+    const z = p.position.z;
+    const gold = new THREE.Color(1, 0.82, 0.4);
+    const white = new THREE.Color(1, 0.97, 0.85);
+    // A ring on the floor bursting outward, and sparks spiralling up.
+    for (let i = 0; i < 64; i++) {
+      const a = (i / 64) * Math.PI * 2;
+      this.fx.add.emit({ x: x + Math.cos(a) * 0.6, y: 0.15, z: z + Math.sin(a) * 0.6, vx: Math.cos(a) * 6, vy: 0.4, vz: Math.sin(a) * 6, life: 0.8, size: 0.22, sizeEnd: 0.04, color: white, colorEnd: gold, drag: 2.5 });
+    }
+    for (let i = 0; i < 90; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.7 + Math.random() * 0.6;
+      this.fx.add.emit({ x: x + Math.cos(a) * r, y: Math.random() * 0.6, z: z + Math.sin(a) * r, vx: -Math.sin(a) * 1.6, vy: 2.5 + Math.random() * 3.5, vz: Math.cos(a) * 1.6, life: 1.2 + Math.random() * 0.8, size: 0.09, sizeEnd: 0.02, color: white, colorEnd: gold, drag: 0.6, turbulence: 0.8 });
+    }
   }
 
   // A level gained: a moment after the blow that made it, everything stops
@@ -1255,13 +1322,32 @@ export class Game {
 
   // ------------------------------------------------------- death / victory ---
 
+  _setDescent(top) {
+    this.descent = Array.isArray(top) ? top : [];
+    for (const r of this.descent) if (r.you && r.score > 0) this.bestTime = this.bestTime ? Math.min(this.bestTime, r.score) : r.score;
+    if (this.hud.endInfo?.time) this.hud.setEnd({ ...this.hud.endInfo, board: this.descent });
+  }
+
   _enterEnd(won) {
     const run = this.run;
     // The best weapon of this run turns up more often in the next.
     if (run.bestWeapon) weaponMemory.favourite = run.bestWeapon.model;
     this.lastFloor = run.floor;
-    // The deepest floor reached goes on the lot's weekly table.
+    // The deepest floor reached goes on the lot's weekly table, and a
+    // finished descent's time on the table of the fastest.
     if (!run.dev) this.host.score(run.floor);
+    let time = null;
+    if (won && run.finished) {
+      const ms = Math.max(1, Math.round(run.time * 1000));
+      const prev = this.bestTime;
+      const record = !run.dev && (!prev || ms < prev);
+      if (!run.dev) {
+        this.pendingTime = ms;
+        this.host.score(ms, { board: DESCENT_BOARD, lower: true });
+      }
+      if (record) this.bestTime = ms;
+      time = { ms, best: this.bestTime || ms, record, prev };
+    }
     this.hud.setPlaying(false);
     this.viewRoot.visible = false;
     const name = FLOORS[run.floor - 1]?.name || '';
@@ -1270,8 +1356,10 @@ export class Game {
     const kept = this.legacy?.level || 0;
     this.hud.setEnd({
       won,
+      time,
+      board: this.descent,
       lines: won
-        ? ['Azrakel has fallen.', 'You climb out of the pit with nothing but the memory of it.']
+        ? ['Azrakel has fallen. The descent is done.', time ? `${fmtTime(time.ms / 1000, true)} from the first floor to his death.` : 'You climb out of the pit with nothing but the memory of it.']
         : [`Slain on floor ${run.floor} — ${name}`, kept ? `Everything you carried is lost, but half your strength stays: you rise again at level ${kept}.` : 'Everything you carried is lost.'],
       floor: run.floor,
       floors: FLOORS.length,
@@ -1341,6 +1429,10 @@ export class Game {
       this.time += wdt;
       if (this.ctx) this.ctx.realDt = dt;
       this.fsm.update(wdt);
+      // The descent's clock: play time from the first floor to the
+      // Archfiend's death (menus, choices and loading stopped out).
+      const run = this.run;
+      if (run && !run.finished && run.floor >= 1 && !menu && !this.busy && (state === 'floor' || state === 'sanctum')) run.time = (run.time || 0) + dt;
       this.fx.add.update(wdt);
       this.fx.alpha.update(wdt);
       this.audio.listener = this.player.position;

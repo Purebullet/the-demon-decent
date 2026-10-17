@@ -24,6 +24,7 @@ export function createP0Host(p0) {
     p0.on(type, (e) => emit(type, e || {}));
   }
   p0.on('table', (top) => emit('table', top));
+  p0.on('board', (name, top) => emit('board', { name, top }));
   p0.on('reward', (r) => emit('reward', r));
 
   const lot = p0.lot;
@@ -70,10 +71,14 @@ export function createP0Host(p0) {
         return p0.music.time;
       },
     },
-    // Scores: the deepest floor goes to the lot's weekly table.
-    score: (n) => p0.score(n),
+    // Scores: the deepest floor goes to the lot's weekly table; a finished
+    // descent's time to a named table of its own (`opts.board`).
+    score: (n, opts) => (opts ? p0.score(n, opts) : p0.score(n)),
     get table() {
       return p0.table || [];
+    },
+    get boards() {
+      return p0.boards || {};
     },
     me: () => p0.me,
     exit: () => p0.exit(),

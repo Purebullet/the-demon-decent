@@ -8,7 +8,7 @@ import { Vector3 } from 'three';
 //    slots behind and beside the player, routed by A* with a penalty on tiles
 //    inside the player's view cone, so they come around pillars instead of
 //    walking into the blade.
-//  - Swarm (floors 11+): ghoul packs take evenly spaced slots on a ring around
+//  - Swarm (floors 8 and 9): ghoul packs take evenly spaced slots on a ring around
 //    the player and, once enough have closed in, lunge in a rapid sequence.
 
 const tmp = new Vector3();

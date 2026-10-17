@@ -6,6 +6,7 @@ import * as THREE from 'three';
 // { x, y, dx, dy, buttons, button, touch } for the pointer).
 
 const SCORE_KEY = 'demonDescent.v1';
+const BOARDS_KEY = 'demonDescent.boards.v1';
 
 export function createBrowserHost(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -95,6 +96,12 @@ export function createBrowserHost(canvas) {
   };
 
   let best = 0;
+  let boards = {};
+  try {
+    boards = JSON.parse(localStorage.getItem(BOARDS_KEY) || '{}') || {};
+  } catch {
+    boards = {};
+  }
   try {
     best = JSON.parse(localStorage.getItem(SCORE_KEY) || '{}').best || 0;
   } catch {
@@ -164,7 +171,23 @@ export function createBrowserHost(canvas) {
         return musicSrc ? audio().currentTime - musicSrc.t0 : 0;
       },
     },
-    score(n) {
+    score(n, opts) {
+      if (opts?.board) {
+        // A named table (the fastest descents): kept in this browser.
+        const name = opts.board;
+        const prev = boards[name]?.[0]?.score;
+        if (prev === undefined || (opts.lower ? n < prev : n > prev)) {
+          boards[name] = [{ uid: 'you', name: 'You', score: n, you: true }];
+          try {
+            localStorage.setItem(BOARDS_KEY, JSON.stringify(boards));
+          } catch {
+            // ignore
+          }
+        }
+        emit('reward', { kind: 'score', ok: true, score: n, best: boards[name][0].score, board: name });
+        emit('board', { name, top: boards[name] });
+        return;
+      }
       if (n > best) {
         best = n;
         try {
@@ -177,6 +200,9 @@ export function createBrowserHost(canvas) {
     },
     get table() {
       return best ? [{ name: 'You', score: best, you: true }] : [];
+    },
+    get boards() {
+      return boards;
     },
     me: () => ({ name: 'You' }),
     exit: () => {},

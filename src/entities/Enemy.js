@@ -40,7 +40,7 @@ const BROKEN_TAKEN = 1.5;
 
 // One demon. Runs a small state machine:
 //
-//   burrowed -> emerging -> chase                    (ambushers, floors 11+)
+//   burrowed -> emerging -> chase                    (ambushers, the Deep)
 //   dormant  -> chase <-> windup -> strike -> recover -> chase
 //                 ^         ^          |                  |
 //                 |         +- combo --+ (next blow of a string)
@@ -153,12 +153,15 @@ export class Enemy {
     }
   }
 
-  // An elite: larger, far tougher, harder-hitting, smouldering red and
-  // shedding embers, and it carries a relic.
+  // An elite (a champion at the gate): larger, tougher, harder-hitting and
+  // quicker to strike, smouldering red and shedding embers; it may carry a
+  // relic.
   makeElite() {
     this.elite = true;
-    this.maxHealth = this.health = Math.round(this.maxHealth * 2.1);
-    this.damage *= 1.25;
+    this.maxHealth = this.health = Math.round(this.maxHealth * 1.4);
+    this.damage *= 1.2;
+    this.windupMul = 0.82;
+    this.cooldownMul = 0.75;
     this.root.scale.multiplyScalar(1.12);
     this.radius *= 1.1;
     this.hitRadius *= 1.12;
@@ -573,7 +576,7 @@ export class Enemy {
     this.aoeDone = false;
     this.charged = 0;
     const rage = this.enraged ? this.type.enrage.windup : 1;
-    this.setState('windup', a.windup * this.tuning.windup * windupScale * rage * WINDUP_SCALE);
+    this.setState('windup', a.windup * this.tuning.windup * windupScale * rage * WINDUP_SCALE * (this.windupMul || 1));
     ctx.audio?.telegraph(this.typeKey, this.position);
   }
 
@@ -751,7 +754,8 @@ export class Enemy {
       // Up and back in an arc, legs gathered under it.
       const a = Math.sin(Math.PI * Math.min(1, k * 1.15));
       this.root.position.y = this.leapH * Math.max(0, a);
-      this.pose = { name: 'pounce', u: 0.36 + 0.26 * a, rate: 18 };
+      const hop = this.type.hopClip;
+      this.pose = hop ? { name: hop, u: Math.min(1, k), rate: 20 } : { name: 'pounce', u: 0.36 + 0.26 * a, rate: 18 };
       this.moveBlend = 0;
       if (k >= 1) this._land();
     } else {
@@ -874,7 +878,7 @@ export class Enemy {
   _endAttack(ctx) {
     ctx.director.releaseToken(this);
     this.attack = null;
-    this.cooldown = this.type.cooldown * this.tuning.cooldown * rand(0.8, 1.25) * (this.enraged ? this.type.enrage.cooldown : 1);
+    this.cooldown = this.type.cooldown * this.tuning.cooldown * rand(0.8, 1.25) * (this.enraged ? this.type.enrage.cooldown : 1) * (this.cooldownMul || 1);
     this.setState('chase');
   }
 

@@ -32,7 +32,7 @@ const EXPERIENCE = {
   entry: 'main.js',
   name: 'The Demon Descent',
   description:
-    'A first-person dark-fantasy roguelike of rhythm and steel. Step into the pit and fight down twenty floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds, flame-horned brutes and three demon lords, the first asleep at the end of a candlelit hall. Time your strikes into Perfect Chains, counter their wind-ups, break their guards, and hunt cursed relics. One life, no armour; your deepest floor goes on the weekly table.',
+    'A first-person dark-fantasy roguelike of rhythm and steel. Step into the pit and fight down ten floors of caverns: gaunt stalkers, shadow fiends, pyre witches, hellhounds and flame-horned brutes, a giant asleep at the end of a candlelit hall, and at the bottom Azrakel, the Archfiend, quick, springy and all but untouchable until you read him. Time your strikes into Perfect Chains, parry, counter their wind-ups and hunt cursed relics. One life, no armour; your deepest floor goes on the weekly table, and a finished descent’s time on the Fastest Descent table.',
   maxPlayers: 8,
   credits: [
     { work: 'Game, code, sound and stand-in models', by: 'made for this lot; sounds synthesized in code' },

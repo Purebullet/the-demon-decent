@@ -243,14 +243,24 @@ const SOUNDS = {
     noise(o, { freq: 5000, freqEnd: 7000, q: 2, attack: 0.2, decay: 0.6, gain: 0.08 });
     tone(o, { freq: 98, decay: 1, gain: 0.2 });
   },
-  // A level gained: a war drum's thud under a minor chord rising, the last
-  // note held and shimmering.
+  // A level gained: two war-drum hits, a brass-like swell of an open fifth
+  // rising to a major chord, a bell ringing over it and a long shimmer.
   levelup: (o) => {
-    tone(o, { freq: 82, freqEnd: 55, decay: 0.7, gain: 0.45 });
-    noise(o, { type: 'lowpass', freq: 900, freqEnd: 200, decay: 0.35, gain: 0.25 });
-    [220, 262, 330, 440, 523].forEach((f, i) => tone(o, { type: 'triangle', freq: f, decay: i === 4 ? 1.6 : 0.7, gain: 0.11, delay: 0.05 + i * 0.075 }));
-    tone(o, { type: 'sine', freq: 1046, decay: 1.4, gain: 0.04, delay: 0.38 });
-    noise(o, { freq: 6000, freqEnd: 8000, q: 3, attack: 0.25, decay: 1.0, gain: 0.06, delay: 0.3 });
+    tone(o, { freq: 72, freqEnd: 38, attack: 0.003, decay: 0.6, gain: 0.8 });
+    tone(o, { freq: 82, freqEnd: 40, attack: 0.003, decay: 0.8, gain: 0.85, delay: 0.16 });
+    noise(o, { type: 'lowpass', freq: 1200, freqEnd: 120, decay: 0.4, gain: 0.45 });
+    noise(o, { type: 'lowpass', freq: 1200, freqEnd: 120, decay: 0.5, gain: 0.45, delay: 0.16 });
+    // The swell: saws through a low-pass, entering one after another.
+    [[147, 0.18], [220, 0.26], [294, 0.34], [370, 0.42], [440, 0.5]].forEach(([f, d]) => {
+      tone(o, { type: 'sawtooth', freq: f, attack: 0.12, decay: 1.5, gain: 0.07, delay: d, lp: 1800 });
+      tone(o, { type: 'triangle', freq: f * 2, attack: 0.08, decay: 1.2, gain: 0.05, delay: d });
+    });
+    // The bell, and its echo an octave up.
+    tone(o, { type: 'sine', freq: 880, attack: 0.002, decay: 2.0, gain: 0.16, delay: 0.5 });
+    tone(o, { type: 'sine', freq: 2217, attack: 0.002, decay: 1.2, gain: 0.05, delay: 0.5 });
+    tone(o, { type: 'sine', freq: 1760, attack: 0.002, decay: 1.6, gain: 0.06, delay: 0.72 });
+    noise(o, { type: 'highpass', freq: 6500, attack: 0.4, decay: 1.6, gain: 0.09, delay: 0.45 });
+    punch(o, 1.8);
   },
   swing_heavy_1: (o) => heavySwing(o, 0),
   swing_heavy_2: (o) => heavySwing(o, 1),

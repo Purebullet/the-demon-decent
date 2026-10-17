@@ -102,36 +102,18 @@ export const CHARACTERS = {
     dualQuat: true,
     fire: [],
   },
-  gorvath: {
-    // Boss of floor 10: the brute, grown huge and burning.
-    name: 'Gorvath, the Flame-Horned',
-    zoodle: 203,
-    model: 'assets/models/brute.glb',
-    tint: [1, 0.72, 0.62],
-    height: 4.4,
-    look: 'The Horned Monster grown colossal',
-    pose: BIPED,
-    fire: [
-      { bone: 'LeftHorn', at: [0.1, 0.91, 0.08], kind: 'horn', rate: 44 },
-      { bone: 'RightHorn', at: [-0.1, 0.91, 0.08], kind: 'horn', rate: 44 },
-      { bone: 'Chest', offset: [0, 0.02, 0.12], at: [0, 0.55, 0.15], kind: 'heart', rate: 14 },
-    ],
-  },
   azrakel: {
-    // Final boss of floor 20: the shadow fiend, grown huge, blood-red and burning.
+    // Boss of floor 10, the last: the user's own Zoodle creature, a hunched
+    // beast-lord in bone-white plates over red hide, with a black mane and a
+    // tail (rigged by scripts/rig.mjs).
     name: 'Azrakel, the Archfiend',
-    zoodle: 209,
-    model: 'assets/models/fiend.glb',
-    tint: [1, 0.55, 0.52],
-    height: 4.8,
-    look: 'The Shadow Beast grown colossal',
+    zoodle: 211,
+    model: 'assets/models/azrakel.glb',
+    height: 3.5,
+    look: 'A hunched beast-lord, bone plates on red hide, a black mane',
     pose: BIPED,
-    fire: [
-      { bone: 'LeftHorn', at: [0.1, 0.92, 0.09], kind: 'horn', rate: 40 },
-      { bone: 'RightHorn', at: [-0.1, 0.92, 0.09], kind: 'horn', rate: 40 },
-      { bone: 'Heart', at: [0, 0.66, 0.12], kind: 'heart', rate: 30 },
-      { bone: 'StaffTip', at: [-0.19, 0.27, 0.05], kind: 'torch', rate: 30, name: 'staffTip' },
-    ],
+    dualQuat: true,
+    fire: [],
   },
 };
 

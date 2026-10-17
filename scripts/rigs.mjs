@@ -179,6 +179,77 @@ export const RIGS = {
     attacks: { sweep: 'swipe', lash: 'lash', volley: 'cast', gust: 'burst', leap: 'leap', rain: 'cast' },
   },
 
+  // Zoodle #211 "Azrakel": the Archfiend, lord of the last pit (floor 10). A
+  // hunched beast-lord in bone-white plates over red hide, a black mane, arms
+  // long enough to walk on and a tail curling off to his left; quick and
+  // springy for all his bulk.
+  azrakel: {
+    slot: 'azrakel',
+    zoodle: 211,
+    source: 'assets/source/azrakel.glb',
+    out: 'assets/models/azrakel.glb',
+    yaw: Math.PI / 2,
+    plan: 'biped',
+    joints: {
+      Hips: [0, 0.34, 0.03],
+      Waist: [0, 0.43, 0.06],
+      Chest: [0, 0.54, 0.1],
+      Neck: [0, 0.63, 0.2],
+      Head: [0, 0.66, 0.28],
+      HeadTop: [0, 0.74, 0.46],
+      LeftShoulder: [0.1, 0.66, 0.12],
+      LeftArm: [0.3, 0.68, 0.13],
+      LeftForeArm: [0.39, 0.48, 0.11],
+      LeftHand: [0.43, 0.22, 0.12],
+      LeftHandTip: [0.4, 0.03, 0.17],
+      LeftUpLeg: [0.13, 0.35, 0.03],
+      LeftLeg: [0.16, 0.2, 0.05],
+      LeftFoot: [0.2, 0.09, 0.05],
+      LeftToe: [0.22, 0.01, 0.17],
+      Tail1: [0, 0.3, -0.1],
+      Tail2: [0.05, 0.19, -0.26],
+      Tail3: [0.11, 0.15, -0.38],
+      TailEnd: [0.25, 0.25, -0.53],
+    },
+    extra: [
+      ['Tail1', 'Hips'],
+      ['Tail2', 'Tail1'],
+      ['Tail3', 'Tail2'],
+      ['TailEnd', 'Tail3', { end: true }],
+      ['Heart', 'Chest', { marker: true, at: [0, 0.55, 0.26] }],
+    ],
+    snap: { LeftArm: 0.1, LeftForeArm: 0.12, LeftHand: 0.08, LeftLeg: 0.08, LeftFoot: 0.06 },
+    r: { Hips: 0.13, Waist: 0.15, Chest: 0.17, Neck: 0.12, Head: 0.12, LeftShoulder: 0.1, LeftArm: 0.09, LeftForeArm: 0.1, LeftHand: 0.07, LeftUpLeg: 0.09, LeftLeg: 0.08, LeftFoot: 0.06, Tail1: 0.07, Tail2: 0.06, Tail3: 0.05 },
+    smooth: 8,
+    limitSoft: { r: 0.03, bones: /Shoulder|Arm|Hand/ },
+    limit: {
+      // The face and snout only: the mane behind goes with the neck.
+      Head: { y: [0.5], z: [0.14] },
+      // The trunk keeps to his body; the arms and tail are their own.
+      Neck: { x: [-0.2, 0.2, 0.03] },
+      Chest: { x: [-0.24, 0.24, 0.03] },
+      Waist: { x: [-0.24, 0.24, 0.03] },
+      Hips: { x: [-0.26, 0.26, 0.03] },
+      LeftShoulder: { x: [0.06, 0.46] },
+      LeftArm: { x: [0.24, 0.62] },
+      LeftForeArm: { x: [0.28] },
+      LeftHand: { x: [0.26], y: [null, 0.32] },
+      LeftUpLeg: { x: [0.02, 0.32], y: [null, 0.42], z: [-0.14] },
+      LeftLeg: { x: [0.04, 0.33], y: [null, 0.28], z: [-0.12] },
+      LeftFoot: { x: [0.04, 0.34], y: [null, 0.13] },
+      Tail1: { y: [null, 0.42], z: [null, -0.04] },
+      Tail2: { z: [null, -0.17] },
+      Tail3: { z: [null, -0.31] },
+    },
+    walk: { stride: 0.4, knee: 0.7, crouch: 0.08, lean: 0.12, twist: 0.12, sway: 0.06, arm: 0.35, armOut: 0.05, elbow: 0.2 },
+    run: { stride: 0.72, knee: 1.25, crouch: 0.15, lean: 0.32, twist: 0.16, sway: 0.08, arm: 0.75, armOut: 0.08, elbow: 0.5 },
+    idle: { breath: 0.07, look: 0.25 },
+    tail: { swing: 0.28, lift: 0.08 },
+    death: 'forward',
+    clips: ['hop', 'roar'],
+    attacks: { rake: 'swipe', rakeL: 'swipeL', pounce: 'leap', lunge: 'lunge', tail: 'tailSpin', howl: 'burst' },
+  },
+
   // The floor-5 boss, the Sleeper: a vast, bloated ogre-demon (the user's own
   // model, in a T-pose: `armDrop` lowers the arms in every clip). His jaw is
   // one with his chest; the head (the skull above the mouth, hinged where

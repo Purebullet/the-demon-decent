@@ -7,10 +7,8 @@ import { Assets } from '../assets/AssetLibrary.js';
 import { sceneryMaterial } from '../world/Dressing.js';
 import { VOICE_LINES, VOICE_FPS } from './voiceLines.js';
 
-// Floor 5: Vorgrath, the Sleeper (Sleeper below). Floor 10: Gorvath, the
-// Flame-Horned (the horned brute, grown huge, its horns ablaze). Floor 20:
-// Azrakel, the Archfiend (the shadow fiend, grown huge and blood-red, fire in
-// its horns and heart).
+// Floor 5: Vorgrath, the Sleeper (Sleeper below). Floor 10, the last:
+// Azrakel, the Archfiend (Archfiend.js).
 //
 // Bosses skip the attack-token system and pick from a phase-dependent move
 // list, never repeating a move three times in a row.
@@ -56,59 +54,34 @@ export const BOSS_TYPES = {
       { name: 'spin', windup: 0.32, strike: 0.75, recover: 1.0, dmg: 0.9, minRange: 0, maxRange: 9, volume: null, spin: true, knockback: 14, weight: 0, armor: true, behind: true },
     ],
   },
-  gorvath: {
-    name: 'Gorvath, the Flame-Horned',
-    asset: 'gorvath',
-    scale: 1.9,
-    hp: 1500,
-    dmg: 24,
-    speed: 3.1,
-    radius: 1.15,
-    poise: 380,
-    mass: 12,
-    role: 'boss',
-    guard: { chance: 0.25, dur: [0.8, 1.3], cooldown: 5 },
-    cooldown: 0.9,
-    turnRate: 2.6,
-    stride: 0.9,
-    loot: { potion: 1, weapon: 1, spell: 1 },
-    summons: [
-      { at: 0.66, spawn: ['ghoul', 'ghoul', 'ghoul', 'ghoul'] },
-      { at: 0.33, spawn: ['ghoul', 'ghoul', 'fiend', 'ghoul', 'ghoul'] },
-    ],
-    attacks: [
-      { name: 'slam', windup: 1.0, strike: 0.2, recover: 0.9, dmg: 1, minRange: 0, maxRange: 4.2, volume: { c: [0, 0.8, 1.7], h: [0.6, 1.0, 1.1] }, lunge: 2, knockback: 7, aoe: { at: [0, 2.0], radius: 4.5, dmg: 0.5 }, weight: 3, armor: true },
-      { name: 'sweep', windup: 0.75, strike: 0.22, recover: 0.8, dmg: 0.85, minRange: 0, maxRange: 4.0, volume: { c: [0, 1.0, 1.3], h: [1.7, 0.7, 1.1] }, knockback: 12, weight: 3, combo: { next: 'slam', chance: 0.4, windup: 0.65 } },
-      { name: 'charge', windup: 0.85, strike: 1.0, recover: 1.1, dmg: 1.2, minRange: 6, maxRange: 40, volume: { c: [0, 0.9, 0.9], h: [0.7, 0.9, 0.6] }, lunge: 14, knockback: 14, weight: 2, armor: true },
-      { name: 'stomp', windup: 0.6, strike: 0.2, recover: 0.8, dmg: 0.7, minRange: 0, maxRange: 3.5, volume: null, aoe: { at: [0, 0], radius: 5, dmg: 0.7 }, weight: 1, behind: true },
-    ],
-  },
+  // The last lord (floor 10), quick and hard to touch (see Archfiend.js):
+  // his blows are claws in strings, a dash, a pounce, his tail and (later)
+  // a howl. `open`: extra time he stays open after that blow.
   azrakel: {
     name: 'Azrakel, the Archfiend',
     asset: 'azrakel',
-    scale: 1.45,
-    hp: 3600,
-    dmg: 26,
-    speed: 3.3,
-    radius: 1.25,
-    poise: 650,
-    mass: 15,
+    scale: 1,
+    hp: 1800,
+    dmg: 24,
+    speed: 6.4,
+    radius: 1.0,
+    poise: Infinity,
+    mass: 14,
     role: 'boss',
-    guard: { chance: 0.25, dur: [0.8, 1.3], cooldown: 5 },
+    guard: null,
     cooldown: 0.85,
-    turnRate: 3,
-    stride: 0.8,
+    turnRate: 7,
+    stride: 1.25,
+    hopClip: 'hop',
     loot: { potion: 1, weapon: 0, spell: 0 },
-    summons: [
-      { at: 0.7, spawn: ['fiend', 'ghoul', 'ghoul', 'ghoul'] },
-      { at: 0.4, spawn: ['fiend', 'witch', 'brute', 'hound', 'hound'] },
-    ],
+    summons: [],
     attacks: [
-      { name: 'sweep', windup: 0.8, strike: 0.24, recover: 0.8, dmg: 1, minRange: 0, maxRange: 5, volume: { c: [0, 1.4, 1.8], h: [2.2, 1.0, 1.6] }, knockback: 10, weight: 3, combo: { next: 'gust', chance: 0.35, windup: 0.6 } },
-      { name: 'volley', windup: 0.7, strike: 0.6, recover: 0.7, dmg: 0.6, minRange: 4, maxRange: 60, volume: null, weight: 3 },
-      { name: 'gust', windup: 0.6, strike: 0.3, recover: 0.7, dmg: 0.35, minRange: 0, maxRange: 4.5, volume: { c: [0, 1.5, 3], h: [2.5, 1.5, 3] }, knockback: 16, weight: 2 },
-      { name: 'leap', windup: 0.6, strike: 1.2, recover: 0.9, dmg: 1.2, minRange: 7, maxRange: 60, volume: null, aoe: { at: [0, 0], radius: 4, dmg: 1 }, weight: 2, armor: true },
-      { name: 'rain', windup: 0.9, strike: 0.4, recover: 0.8, dmg: 0.65, minRange: 0, maxRange: 60, volume: null, weight: 3, minPhase: 3 },
+      { name: 'rake', windup: 0.4, strike: 0.16, recover: 0.55, dmg: 0.42, minRange: 0, maxRange: 3.6, volume: { c: [0, 1.2, 1.7], h: [1.6, 1.0, 1.3] }, lunge: 4, knockback: 4, weight: 3, combo: { next: 'rakeL', chance: 0.8, windup: 0.9, max: 2 } },
+      { name: 'rakeL', windup: 0.4, strike: 0.16, recover: 0.6, dmg: 0.42, minRange: 0, maxRange: 3.6, volume: { c: [0, 1.2, 1.7], h: [1.6, 1.0, 1.3] }, lunge: 4, knockback: 4, weight: 0, comboOnly: true, combo: { next: 'rake', chance: 0.65, windup: 0.9, max: 2 } },
+      { name: 'lunge', windup: 0.5, strike: 0.42, recover: 0.95, dmg: 0.7, minRange: 3.2, maxRange: 10, volume: { c: [0, 1.0, 1.5], h: [1.0, 1.0, 1.0] }, lunge: 22, knockback: 9, charge: true, weight: 2 },
+      { name: 'pounce', windup: 0.6, strike: 0.75, recover: 1.0, dmg: 0.9, minRange: 5.5, maxRange: 16, volume: null, aoe: { at: [0, 0], radius: 3.0, dmg: 0.9 }, open: 0.4, weight: 2 },
+      { name: 'tail', windup: 0.38, strike: 0.5, recover: 0.6, dmg: 0.55, minRange: 0, maxRange: 4.6, volume: null, spin: true, knockback: 10, weight: 0, behind: true },
+      { name: 'howl', windup: 0.8, strike: 0.7, recover: 0.9, dmg: 0.6, minRange: 0, maxRange: 9, volume: null, wave: 9, weight: 1.2, minPhase: 2 },
     ],
   },
 };
@@ -128,7 +101,7 @@ export class Boss extends Enemy {
     // Lives in the scene, not under the rig, so removing the corpse never
     // changes the light count (which would recompile every shader).
     this.light = new THREE.PointLight(0xff5a1e, 12, 18, 1.4);
-    this.lightHeight = key === 'azrakel' ? 3.6 : 2.6;
+    this.lightHeight = 2.6;
     this.yaw = Math.PI;
   }
 
@@ -148,11 +121,11 @@ export class Boss extends Enemy {
 
   _checkPhase(ctx) {
     const frac = this.health / this.maxHealth;
-    const next = this.bossKey === 'azrakel' ? (frac < 0.25 ? 3 : frac < 0.6 ? 2 : 1) : frac < 0.5 ? 2 : 1;
+    const next = frac < 0.5 ? 2 : 1;
     if (next > this.phase) {
       this.phase = next;
       for (const e of this.emitters) e.rate *= 1.6;
-      ctx.announce?.(this.bossKey === 'azrakel' ? (next === 3 ? 'Azrakel’s heart erupts!' : 'Azrakel takes to the air!') : 'Gorvath’s horns blaze!');
+      ctx.announce?.(`${this.name.split(',')[0]} is enraged!`);
       ctx.shake?.(0.5);
       ctx.audio?.roar(this.position);
     }
@@ -279,7 +252,7 @@ export class Boss extends Enemy {
         ctx.shake?.(0.6);
         ctx.audio?.slam(this.position);
         burst(ctx.fx.alpha, tmp.set(this.position.x, 1.5, this.position.z), { count: 30, speed: 4, color: C.smoke, colorEnd: C.smoke, size: 0.6, life: 1.2, gravity: -1 });
-        ctx.announce?.('Gorvath is stunned!');
+        ctx.announce?.(`${this.name.split(',')[0]} is stunned!`);
         this.interrupt(ctx, 2.2);
         return;
       }

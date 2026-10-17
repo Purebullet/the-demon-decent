@@ -38,6 +38,10 @@ const FOOT = { skulls: 0.7, ribcage: 0.42, remains: 0.5, stakes: 0.42, altar: 0.
 // Decor a blow breaks (Props._fragile): bones, skulls, stakes, eggs, fungus,
 // crystals, pyres and statues. Rock, iron and altars stand.
 const FRAGILE = new Set(['skulls', 'ribcage', 'remains', 'stakes', 'eggs', 'fungus', 'crystal', 'pyre', 'statue']);
+// Props with a front: they are turned to face the open ground.
+const FACED = new Set(['statue', 'altar', 'throne', 'idol', 'gravestone', 'obelisk']);
+// Models whose front is not their +Z: the turn that brings it round.
+const FRONT = { statue: Math.PI / 2 };
 const ROCKY = new Set(['rock', 'slab', 'stalagmite', 'pillar', 'obsidian', 'basalt']);
 
 // A generated model's material made to sit in the cave: its painted colour
@@ -300,6 +304,49 @@ export class Dressing {
       }
     }
     for (const sh of shapes) this._instances(sh.geometry, sh.material, sh.list, sh.lod);
+    this._core();
+  }
+
+  // Behind the boulders, the rock itself: a dark block filling each wall
+  // tile from floor to vault, joined to its rock neighbours and kept a little
+  // back from open ground. Wherever two boulders leave a gap, you see deep
+  // rock through it, not the void beyond the cavern.
+  _core() {
+    const d = this.d;
+    const nav = d.nav;
+    const isRock = (c, r) => d.tiles[r]?.[c] === '#';
+    const tint = new THREE.Color(...this.look.rock.map((v) => v * 0.16));
+    const material = new THREE.MeshLambertMaterial({ color: tint });
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const BACK = 0.45;
+    const list = [];
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const seen = new Set();
+    // Every rock tile within reach of open ground (two tiles), so a block's
+    // neighbours behind it are there too.
+    for (const t of this.wallTiles) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const c = t.c + dc;
+          const r = t.r + dr;
+          const key = r * d.cols + c;
+          if (seen.has(key) || !isRock(c, r) || nav.isWalkable(c, r)) continue;
+          seen.add(key);
+          // Each side: back from open ground, flush with rock.
+          const x0 = c * TILE + (nav.isWalkable(c - 1, r) ? BACK : 0);
+          const x1 = (c + 1) * TILE - (nav.isWalkable(c + 1, r) ? BACK : 0);
+          const z0 = r * TILE + (nav.isWalkable(c, r - 1) ? BACK : 0);
+          const z1 = (r + 1) * TILE - (nav.isWalkable(c, r + 1) ? BACK : 0);
+          p.set((x0 + x1) / 2, this.ceiling / 2, (z0 + z1) / 2);
+          s.set(x1 - x0, this.ceiling + 0.2, z1 - z0);
+          list.push(m.compose(p, q, s).clone());
+        }
+      }
+    }
+    this._instances(geometry, material, list, null);
   }
 
   // The group for the chunk of the map around (x, z).
@@ -457,6 +504,23 @@ export class Dressing {
     return o;
   }
 
+  // The way from (x, z) with the most open ground in front of it.
+  _openYaw(x, z) {
+    const nav = this.d.nav;
+    let best = 0;
+    let most = -1;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      let open = 0;
+      for (let step = 1; step <= 6; step++) {
+        if (!nav.isWalkable(nav.tileX(x + Math.sin(a) * step * TILE), nav.tileZ(z + Math.cos(a) * step * TILE))) break;
+        open++;
+      }
+      if (open > most) [most, best] = [open, a];
+    }
+    return best;
+  }
+
   // The map's pillar tiles: rock columns, or the look's set pieces.
   _pillars() {
     const r = this.r;
@@ -464,7 +528,9 @@ export class Dressing {
     for (const pl of this.d.pillars) {
       this.claim(pl.x, pl.z, 1.2);
       const id = ids.length ? ids[Math.floor(r() * ids.length)] : null;
-      const yaw = r() * Math.PI * 2;
+      // A statue (or anything with a face) looks out over the open ground;
+      // a plain column may turn any way.
+      const yaw = FACED.has(id) ? this._openYaw(pl.x, pl.z) + (FRONT[id] || 0) : r() * Math.PI * 2;
       if (id === 'pillar' || id === 'ironSpire') {
         // Grown to reach the vault: partly wider, partly taller.
         const size = Assets.props.get(id).entry.size;
@@ -548,7 +614,7 @@ export class Dressing {
         this.claim(p.x, p.z, rad);
         const solid = { x: p.x, z: p.z, r: rad * 0.85 };
         this.solids.push(solid);
-        q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (r() - 0.5) * 0.3);
+        q.setFromAxisAngle(UP, Math.atan2(-dx, -dz) + (FRONT[k.id] || 0) + (r() - 0.5) * 0.3);
         const mm = m.compose(p, q, s.setScalar(sc)).clone();
         add(k.id, mm);
         if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solid, x: p.x, z: p.z, r: rad, h: size * sc });

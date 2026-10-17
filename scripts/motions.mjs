@@ -461,6 +461,203 @@ const BIPED_ATTACKS = {
     ]),
 };
 
+// The pose seen in a mirror: left for right (and turns and rolls reversed).
+function mirror(pose) {
+  const out = {};
+  for (const [key, v] of Object.entries(pose)) {
+    const k = key.startsWith('Left') ? `Right${key.slice(4)}` : key.startsWith('Right') ? `Left${key.slice(5)}` : key;
+    out[k] = key.endsWith('.p') ? [-v[0], v[1], v[2]] : [v[0], -v[1], -v[2]];
+  }
+  return out;
+}
+
+// Azrakel, the Archfiend: a hunched, long-armed beast-lord, quick and
+// springy. His blows are claws, his tail and his whole weight.
+const LORD_ATTACKS = {
+  // The left claw: the right's sweep, mirrored.
+  swipeL: (u, d) => mirror(BIPED_ATTACKS.swipe(u, d)),
+  // Coiled low, then a dash: both claws driven forward at the end of it.
+  lunge: (u) =>
+    keyed(u, [
+      [0, null],
+      [W, (p) => {
+        C(p, 'Waist', 0.45, 0, 0);
+        C(p, 'Chest', 0.3, 0, 0);
+        C(p, 'Neck', -0.35, 0, 0);
+        C(p, 'Head', -0.3, 0, 0);
+        B(p, 'Arm', 0.7, 0, 0.25);
+        B(p, 'ForeArm', -0.9, 0, 0);
+        B(p, 'UpLeg', -0.95, 0, 0);
+        B(p, 'Leg', 1.45, 0, 0);
+        B(p, 'Foot', -0.5, 0, 0);
+        T(p, 'Hips', 0, -0.05, -0.04);
+      }],
+      [W + (S - W) * 0.4, (p) => {
+        C(p, 'Waist', 0.6, 0, 0);
+        C(p, 'Chest', 0.25, 0, 0);
+        C(p, 'Head', -0.45, 0, 0);
+        B(p, 'Arm', -0.9, 0, 0.15);
+        B(p, 'ForeArm', -0.5, 0, 0);
+        L(p, 'UpLeg', -0.9, 0, 0);
+        L(p, 'Leg', 0.5, 0, 0);
+        R(p, 'UpLeg', 0.4, 0, 0);
+        R(p, 'Leg', 0.3, 0, 0);
+        T(p, 'Hips', 0, -0.02, 0.06);
+      }, 'in'],
+      [S, (p) => {
+        C(p, 'Waist', 0.65, 0, 0);
+        C(p, 'Chest', 0.2, 0, 0);
+        C(p, 'Head', -0.5, 0, 0);
+        B(p, 'Arm', -1.6, 0, 0.1);
+        B(p, 'ForeArm', -0.15, 0, 0);
+        B(p, 'Hand', 0.4, 0, 0);
+        L(p, 'UpLeg', 0.3, 0, 0);
+        L(p, 'Leg', 0.4, 0, 0);
+        R(p, 'UpLeg', -0.7, 0, 0);
+        R(p, 'Leg', 0.9, 0, 0);
+        T(p, 'Hips', 0, -0.04, 0.08);
+      }, 'in'],
+      [0.8, (p) => {
+        C(p, 'Waist', 0.4, 0, 0);
+        C(p, 'Head', -0.25, 0, 0);
+        B(p, 'Arm', -0.8, 0, 0.2);
+        B(p, 'ForeArm', -0.4, 0, 0);
+        B(p, 'UpLeg', -0.5, 0, 0);
+        B(p, 'Leg', 0.8, 0, 0);
+        B(p, 'Foot', -0.3, 0, 0);
+      }],
+      [1, null],
+    ]),
+  // Crouched and wound up, then round on the spot (the game turns him)
+  // with the arms flung out and the tail lashing flat across the floor.
+  tailSpin: (u) =>
+    keyed(u, [
+      [0, null],
+      [W, (p) => {
+        C(p, 'Waist', 0.35, -0.5, 0);
+        C(p, 'Chest', 0.2, -0.4, 0);
+        C(p, 'Head', -0.2, 0.6, 0);
+        B(p, 'Arm', 0.3, 0, 0.6);
+        B(p, 'ForeArm', -0.7, 0, 0);
+        B(p, 'UpLeg', -0.7, 0, 0);
+        B(p, 'Leg', 1.1, 0, 0);
+        B(p, 'Foot', -0.4, 0, 0);
+        C(p, 'Tail1', 0.15, -0.6, 0);
+        C(p, 'Tail2', 0.05, -0.5, 0);
+      }],
+      [W + (S - W) * 0.3, (p) => {
+        C(p, 'Waist', 0.3, 0.3, 0);
+        C(p, 'Chest', 0.15, 0.3, 0);
+        B(p, 'Arm', -0.3, 0, 1.2);
+        B(p, 'ForeArm', -0.3, 0, 0);
+        B(p, 'UpLeg', -0.5, 0, 0);
+        B(p, 'Leg', 0.8, 0, 0);
+        C(p, 'Tail1', 0.12, 0.5, 0);
+        C(p, 'Tail2', 0.05, 0.4, 0);
+        C(p, 'Tail3', 0.05, 0.3, 0);
+      }, 'in'],
+      [S, (p) => {
+        C(p, 'Waist', 0.3, 0.4, 0);
+        C(p, 'Chest', 0.15, 0.35, 0);
+        B(p, 'Arm', -0.2, 0, 1.0);
+        B(p, 'UpLeg', -0.5, 0, 0);
+        B(p, 'Leg', 0.8, 0, 0);
+        C(p, 'Tail1', 0.12, 0.7, 0);
+        C(p, 'Tail2', 0.05, 0.6, 0);
+        C(p, 'Tail3', 0.05, 0.4, 0);
+      }],
+      [0.82, (p) => {
+        C(p, 'Waist', 0.2, 0.1, 0);
+        B(p, 'Arm', 0, 0, 0.4);
+        B(p, 'UpLeg', -0.3, 0, 0);
+        B(p, 'Leg', 0.5, 0, 0);
+        C(p, 'Tail1', 0.05, 0.2, 0);
+      }],
+      [1, null],
+    ]),
+};
+
+// His other clips: a spring away (the game moves him and plays it by how
+// far through the hop he is) and a roar at the sky between his phases.
+const LORD_CLIPS = {
+  hop: {
+    duration: 1,
+    ground: () => null,
+    sample: (u) =>
+      keyed(u, [
+        [0, (p) => {
+          B(p, 'UpLeg', -0.9, 0, 0);
+          B(p, 'Leg', 1.5, 0, 0);
+          B(p, 'Foot', -0.55, 0, 0);
+          C(p, 'Waist', 0.4, 0, 0);
+          B(p, 'Arm', 0.4, 0, 0.3);
+          B(p, 'ForeArm', -0.8, 0, 0);
+        }],
+        [0.45, (p) => {
+          B(p, 'UpLeg', -1.3, 0, 0.1);
+          B(p, 'Leg', 1.9, 0, 0);
+          B(p, 'Foot', -0.4, 0, 0);
+          C(p, 'Waist', -0.25, 0, 0);
+          C(p, 'Chest', -0.2, 0, 0);
+          C(p, 'Head', 0.25, 0, 0);
+          B(p, 'Arm', -0.5, 0, 0.9);
+          B(p, 'ForeArm', -0.6, 0, 0);
+          C(p, 'Tail1', 0.45, 0, 0);
+          C(p, 'Tail2', 0.25, 0, 0);
+        }],
+        [1, (p) => {
+          B(p, 'UpLeg', -0.8, 0, 0);
+          B(p, 'Leg', 1.3, 0, 0);
+          B(p, 'Foot', -0.45, 0, 0);
+          C(p, 'Waist', 0.45, 0, 0);
+          C(p, 'Head', -0.2, 0, 0);
+          B(p, 'Arm', -0.3, 0, 0.5);
+          B(p, 'ForeArm', -0.5, 0, 0);
+        }],
+      ]),
+  },
+  roar: {
+    duration: 1.6,
+    ground: () => 'feet',
+    sample: (u) =>
+      keyed(u, [
+        [0, null],
+        [0.25, (p) => {
+          C(p, 'Waist', 0.4, 0, 0);
+          C(p, 'Chest', 0.3, 0, 0);
+          C(p, 'Head', 0.2, 0, 0);
+          B(p, 'Arm', 0.4, 0, 0.1);
+          B(p, 'ForeArm', -1.2, 0, 0);
+          B(p, 'UpLeg', -0.5, 0, 0);
+          B(p, 'Leg', 0.8, 0, 0);
+        }],
+        [0.42, (p) => {
+          C(p, 'Waist', -0.45, 0, 0);
+          C(p, 'Chest', -0.35, 0, 0);
+          C(p, 'Neck', -0.3, 0, 0);
+          C(p, 'Head', -0.5, 0, 0);
+          B(p, 'Shoulder', 0, 0, 0.25);
+          B(p, 'Arm', -0.6, 0, 1.4);
+          B(p, 'ForeArm', -0.3, 0, 0);
+          B(p, 'Hand', 0, 0, 0.4);
+          C(p, 'Tail1', 0.4, 0, 0);
+          C(p, 'Tail2', 0.3, 0, 0);
+        }, 'out'],
+        [0.8, (p) => {
+          C(p, 'Waist', -0.4, 0, 0);
+          C(p, 'Chest', -0.3, 0.05, 0);
+          C(p, 'Neck', -0.25, 0, 0);
+          C(p, 'Head', -0.45, 0.1, 0);
+          B(p, 'Shoulder', 0, 0, 0.22);
+          B(p, 'Arm', -0.55, 0, 1.3);
+          B(p, 'ForeArm', -0.35, 0, 0);
+          C(p, 'Tail1', 0.35, 0, 0);
+        }],
+        [1, null],
+      ]),
+  },
+};
+
 // The Sleeper's axe (in his right hand, its handle running out of the fist
 // the way his thumb points) and the poses only he has. His arms are
 // lowered from his model's T-pose in every clip (`armDrop`, see clipsFor).
@@ -1222,7 +1419,7 @@ function beastDeath(u) {
 export function clipsFor(def) {
   const biped = def.plan === 'biped';
   const gait = biped ? bipedGait : beastGait;
-  const attacks = biped ? { ...BIPED_ATTACKS, ...AXE_ATTACKS } : BEAST_ATTACKS;
+  const attacks = biped ? { ...BIPED_ATTACKS, ...AXE_ATTACKS, ...LORD_ATTACKS } : BEAST_ATTACKS;
   const feet = () => 'feet';
   const death = def.deathMotion === 'kneelDeath' ? kneelDeath : (u) => (biped ? bipedDeath : beastDeath)(u, def);
   const clips = [
@@ -1238,7 +1435,22 @@ export function clipsFor(def) {
     const airborne = motion === 'pounce' || motion === 'leap';
     clips.push({ name: attack, duration: 1, sample: (u) => fn(u, def), ground: (u) => (airborne && u > W && u < S ? null : 'feet') });
   }
-  for (const name of def.clips || []) clips.push({ name, ...SLEEPER_CLIPS[name] });
+  for (const name of def.clips || []) clips.push({ name, ...(SLEEPER_CLIPS[name] || LORD_CLIPS[name]) });
+  // A biped with a tail (`def.tail`): it swings with every clip, slowly at
+  // rest, with the stride in the gaits, and lags behind the blows.
+  if (def.tail && biped) {
+    const T = def.tail;
+    for (const c of clips) {
+      const sample = c.sample;
+      const speed = c.name === 'run' ? 1 : c.name === 'walk' ? 1 : c.name === 'idle' ? 2 : 0.5;
+      const swing = c.name === 'run' ? T.swing * 0.6 : c.name === 'death' ? 0 : T.swing;
+      c.sample = (u) => {
+        const p = sample(u);
+        tail(p, TAU * u * speed, swing, T.lift);
+        return p;
+      };
+    }
+  }
   // A model rigged in a T-pose: its arms brought down to its sides in every
   // clip, the turn shared between the shoulder and the arm so neither
   // stretches the skin round it too far.

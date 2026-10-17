@@ -59,6 +59,15 @@ const BACK_HUE = { glow: 'rgba(200,50,0,0.85)', accent: '#a8401c' };
 // (the lot's name, who is here), above the floor and demon counts.
 const TOP = 46;
 
+// A run's time: 12:04 while you play, 12:04.37 when it is done.
+export function fmtTime(sec, cents = false) {
+  const t = Math.max(0, sec || 0);
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  const base = `${m}:${String(s).padStart(2, '0')}`;
+  return cents ? `${base}.${String(Math.floor((t * 100) % 100)).padStart(2, '0')}` : base;
+}
+
 // Skill slots along the bottom: the three demon spells, then Phantom Step.
 const SLOTS = SPELL_IDS.map((id) => ({ id, icon: id }));
 
@@ -954,6 +963,7 @@ export class Hud {
       JSON.stringify(r.relics),
       i.floorLabel,
       i.enemyLabel,
+      r.floor >= 1 ? Math.floor(r.time || 0) : -1,
       i.best,
       i.prompt,
       i.boss?.name || '',
@@ -1415,6 +1425,8 @@ export class Hud {
     this._text(g, (i.floorLabel || '').toUpperCase(), pad, TOP + 32, { size: 15, ls: 1.5, color: C.bone });
     this._text(g, (i.enemyLabel || '').toUpperCase(), w - pad, TOP + 32, { size: 15, ls: 1.5, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
     if (i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, TOP + 52, { size: 11, align: 'right' });
+    // The descent's clock.
+    if (r.floor >= 1) this._text(g, fmtTime(r.time), w - pad, TOP + (i.best ? 74 : 54), { size: 15, ls: 1, color: r.finished ? '#ffd28a' : C.bone, align: 'right' });
 
     // Relics, top left: painted icons with their stack counts.
     const relics = Object.entries(r.relics || {});
@@ -1735,7 +1747,7 @@ export class Hud {
     this._text(g, 'THE DEMON DESCENT', w / 2, y, { size: big, ls: big * 0.06, color: '#f4c8a0', align: 'center', glow: 'rgba(190,25,0,1)' });
     this._divider(g, w / 2, y + big * 0.3, Math.min(w * 0.6, big * 9));
     y += big * 0.75;
-    this._text(g, 'Twenty floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.22), ls: 1, color: C.bone, align: 'center' });
+    this._text(g, 'Ten floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.22), ls: 1, color: C.bone, align: 'center' });
     y += big * 0.9;
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 2.6);
     // The button fits its words as they are drawn: capitals, spaced.
@@ -2194,8 +2206,8 @@ export class Hud {
   }
 
   // The end of a run: a sigil turning slowly behind the verdict, the cause
-  // of it, and a framed panel: how deep you got (with the descent's twenty
-  // floors as a gauge), and six stones, each with its own mark, for what you
+  // of it, and a framed panel: how deep you got (with the descent's ten
+  // floors as a gauge), or on a win the descent's time and the week's fastest, and six stones, each with its own mark, for what you
   // did on the way. Then the way back up. Each part comes in after the last.
   _paintEnd(g) {
     const { vw: w, vh: h } = this;
@@ -2237,12 +2249,21 @@ export class Hud {
     this._frame(g, px, py, pw, ph, hue);
     const dw = Math.min(250, pw * 0.3);
     const dx = px + dw / 2 + 14;
-    this._label(g, won ? 'The whole descent' : 'Depth reached', dx, py + 34, { size: 11, align: 'center', color: C.ash });
-    this._text(g, String(e.floor ?? 0), dx - 10, py + 108, { size: 70, color: hue.accent, align: 'center', glow: hue.glow });
-    this._text(g, `/ ${e.floors ?? 20}`, dx + 34, py + 108, { size: 20, color: C.ash });
-    this._gauge(g, dx - (dw - 40) / 2, py + 132, dw - 40, e.floor ?? 0, e.deepest ?? 0, e.floors ?? 20, hue);
-    if (e.record) this._badge(g, dx, py + 182, 'New deepest', hue);
-    else this._label(g, `Deepest: Floor ${e.deepest ?? 0}`, dx, py + 186, { size: 11, align: 'center', color: C.bone });
+    if (won && e.time) {
+      // A finished descent: its time, and how it stands against your best.
+      this._label(g, 'Descent time', dx, py + 34, { size: 11, align: 'center', color: C.ash });
+      this._text(g, fmtTime(e.time.ms / 1000, true), dx, py + 100, { size: Math.min(46, dw * 0.2), color: hue.accent, align: 'center', glow: hue.glow });
+      if (e.time.record) this._badge(g, dx, py + 150, e.time.prev ? 'New best time' : 'First descent', hue);
+      else this._label(g, `Your best: ${fmtTime(e.time.best / 1000, true)}`, dx, py + 154, { size: 12, align: 'center', color: C.bone });
+      this._label(g, `All ${e.floors ?? 10} floors`, dx, py + 186, { size: 11, align: 'center', color: C.ash });
+    } else {
+      this._label(g, won ? 'The whole descent' : 'Depth reached', dx, py + 34, { size: 11, align: 'center', color: C.ash });
+      this._text(g, String(e.floor ?? 0), dx - 10, py + 108, { size: 70, color: hue.accent, align: 'center', glow: hue.glow });
+      this._text(g, `/ ${e.floors ?? 10}`, dx + 34, py + 108, { size: 20, color: C.ash });
+      this._gauge(g, dx - (dw - 40) / 2, py + 132, dw - 40, e.floor ?? 0, e.deepest ?? 0, e.floors ?? 10, hue);
+      if (e.record) this._badge(g, dx, py + 182, 'New deepest', hue);
+      else this._label(g, `Deepest: Floor ${e.deepest ?? 0}`, dx, py + 186, { size: 11, align: 'center', color: C.bone });
+    }
     // The rule between the two halves.
     g.fillStyle = `${hue.deep}0.45)`;
     g.fillRect(px + dw + 26, py + 22, 1, ph - 44);
@@ -2261,8 +2282,32 @@ export class Hud {
     });
     g.restore();
 
+    // A finished descent: the week's fastest, under the panel.
+    let below = 0;
+    if (won && e.time) {
+      const rows = (e.board || []).slice(0, 5);
+      const bw = Math.min(520, pw);
+      const bx = (w - bw) / 2;
+      const by0 = py + ph + 18;
+      const bh = 34 + Math.max(1, rows.length) * 22 + 10;
+      g.save();
+      g.globalAlpha = appear(0.9);
+      this._frame(g, bx, by0, bw, bh, hue);
+      this._label(g, 'Fastest descents this week', w / 2, by0 + 22, { size: 11, align: 'center', color: C.ash });
+      if (!rows.length) this._label(g, 'Waiting for the table…', w / 2, by0 + 50, { size: 12, align: 'center', color: C.bone });
+      rows.forEach((r, k) => {
+        const y = by0 + 50 + k * 22;
+        const col = r.you ? hue.accent : C.light;
+        this._text(g, `${k + 1}.`, bx + 24, y, { size: 14, color: C.ash });
+        this._text(g, String(r.name || '—').slice(0, 22), bx + 52, y, { size: 14, color: col });
+        this._text(g, fmtTime((r.score || 0) / 1000, true), bx + bw - 24, y, { size: 14, color: col, align: 'right' });
+      });
+      g.restore();
+      below = bh + 18;
+    }
+
     // The way back up.
-    const by = py + ph + 46;
+    const by = py + ph + 46 + below;
     if (e.ready) {
       const a = Math.min(appear(1.2, 0.6), 1);
       const hot = this.hoverCode === 'Space';

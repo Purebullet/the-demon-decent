@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { FLOORS, BOSS_FLOORS } from '../src/world/LevelData.js';
 import { parseLevel, validateLevel } from '../src/world/levelParser.js';
 
-test('there are 20 floors with bosses on 5, 10 and 20', () => {
-  assert.equal(FLOORS.length, 20);
-  assert.deepEqual(BOSS_FLOORS, [5, 10, 20]);
+test('there are 10 floors with bosses on 5 and 10', () => {
+  assert.equal(FLOORS.length, 10);
+  assert.deepEqual(BOSS_FLOORS, [5, 10]);
 });
 
 test('every floor is playable: spawn, exit, and every enemy and potion reachable', () => {
@@ -13,30 +13,23 @@ test('every floor is playable: spawn, exit, and every enemy and potion reachable
   assert.deepEqual(problems, []);
 });
 
-test('hazards only appear on the deep floors (11+) and the final boss arena', () => {
-  FLOORS.forEach((f, i) => {
+test('the first five floors have no hazards or ambushers', () => {
+  FLOORS.slice(0, 5).forEach((f, i) => {
     const lvl = parseLevel(f);
-    const hazards = lvl.lava.length + lvl.spikes.length + lvl.vents.length;
-    const burrowed = lvl.enemies.filter((e) => e.burrowed).length;
-    if (i + 1 <= 10) {
-      assert.equal(hazards, 0, `floor ${i + 1} has hazards`);
-      assert.equal(burrowed, 0, `floor ${i + 1} has burrowed ambushers`);
-    } else if (i + 1 < 20) {
-      assert.ok(hazards > 0, `floor ${i + 1} should have hazards`);
-      assert.ok(f.swarm, `floor ${i + 1} should use swarm behaviour`);
-    }
+    assert.equal(lvl.lava.length + lvl.spikes.length + lvl.vents.length, 0, `floor ${i + 1} has hazards`);
+    assert.equal(lvl.enemies.filter((e) => e.burrowed).length, 0, `floor ${i + 1} has burrowed ambushers`);
   });
 });
 
 test('deep floors are faster and tighter, not just tougher', () => {
-  for (let i = 11; i < 19; i++) {
+  for (let i = 6; i < 9; i++) {
     const a = FLOORS[i - 1];
     const b = FLOORS[i];
     assert.ok(b.speed >= a.speed, `speed regresses on floor ${i + 1}`);
     assert.ok(b.windup <= a.windup, `windup loosens on floor ${i + 1}`);
   }
-  assert.ok(FLOORS[10].speed > FLOORS[8].speed);
-  assert.ok(FLOORS[10].windup < FLOORS[8].windup);
+  assert.ok(FLOORS[8].speed > FLOORS[0].speed);
+  assert.ok(FLOORS[8].windup < FLOORS[0].windup);
 });
 
 test('every creature in the maps and boss summons has stats and a model slot', async () => {
@@ -48,7 +41,7 @@ test('every creature in the maps and boss summons has stats and a model slot', a
   for (const b of Object.values(BOSS_TYPES)) for (const s of b.summons) s.spawn.forEach((t) => used.add(t));
   for (const t of used) assert.ok(ENEMY_TYPES[t], `no stats for ${t}`);
   for (const t of [...Object.values(ENEMY_TYPES), ...Object.values(BOSS_TYPES)]) assert.ok(CHARACTERS[t.asset], `no model slot for ${t.name}`);
-  assert.equal(Object.keys(CHARACTERS).length, 8);
+  assert.equal(Object.keys(CHARACTERS).length, 7);
 });
 
 test('every floor has a look, and every look dresses with props that exist', async () => {
@@ -86,7 +79,7 @@ test('the Deep (floor 6 on) is tougher, and dressed in its own rock and props', 
   assert.equal(DEEP_FROM, 6);
   assert.equal(floorDef(5), FLOORS[4]);
   const f6 = floorDef(6);
-  assert.equal(f6.hp, FLOORS[5].hp * 1.5);
+  assert.equal(f6.hp, FLOORS[5].hp * 1.2);
   assert.ok(Math.abs(f6.speed / FLOORS[5].speed - 1.05) < 1e-9);
   assert.ok(f6.cooldown < FLOORS[5].cooldown && f6.windup < FLOORS[5].windup);
   for (const id of [...Object.keys(DEEP.walls), ...DEEP.pillars, ...DEEP.decor.map(([id]) => id)]) assert.ok(PROPS[id], `no prop "${id}"`);

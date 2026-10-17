@@ -6,10 +6,10 @@ import { FLOORS } from '../src/world/LevelData.js';
 
 const ENEMY = { g: 'ghoul', G: 'ghoul', c: 'fiend', b: 'brute', d: 'hound', m: 'witch' };
 
-test('three of the first floor’s stalkers make the first level, not two', () => {
+test('the first floor’s stalkers together make the first level, not five of them', () => {
   const run = newLevels();
   const stalker = xpForKill({ typeKey: 'ghoul' }, 1);
-  assert.equal(gainXp(run, stalker * 2), 0);
+  assert.equal(gainXp(run, stalker * 5), 0);
   assert.equal(gainXp(run, stalker), 1);
   assert.equal(run.level, 1);
   assert.equal(run.points, 1);
@@ -20,38 +20,44 @@ test('bigger demons, elites and bosses are worth more; summons less', () => {
   assert.ok(xp({ typeKey: 'brute' }) > xp({ typeKey: 'fiend' }) && xp({ typeKey: 'fiend' }) > xp({ typeKey: 'ghoul' }));
   assert.equal(xp({ typeKey: 'brute', elite: true }), 2 * xp({ typeKey: 'brute' }));
   assert.ok(xp({ typeKey: 'ghoul', summoned: true }) < xp({ typeKey: 'ghoul' }));
-  assert.ok(xp({ bossKey: 'azrakel' }, 20) > xp({ bossKey: 'gorvath' }, 10));
-  assert.ok(xp({ typeKey: 'ghoul' }, 15) > xp({ typeKey: 'ghoul' }, 1));
+  assert.ok(xp({ bossKey: 'azrakel' }, 10) > xp({ bossKey: 'sleeper' }, 5));
+  assert.ok(xp({ typeKey: 'ghoul' }, 9) > xp({ typeKey: 'ghoul' }, 1));
 });
 
-test('ten points at most in each stat, thirty levels in all, and what they buy', () => {
+test('five points at most in each stat, ten levels in all, and what they buy', () => {
   const run = newRun();
   assert.equal(gainXp(run, 1e7), MAX_LEVEL);
   assert.equal(run.level, MAX_LEVEL);
   assert.equal(gainXp(run, 1e5), 0);
+  let spent = 0;
   for (const id of STAT_IDS) {
-    for (let k = 0; k < STAT_CAP; k++) assert.ok(spendPoint(run, id));
-    assert.equal(spendPoint(run, id), false);
+    for (let k = 0; k < STAT_CAP && run.points > 0; k++, spent++) assert.ok(spendPoint(run, id));
   }
+  assert.equal(spent, MAX_LEVEL);
   assert.equal(run.points, 0);
-  assert.ok(Math.abs(damageMul(run) - 1.25) < 1e-9);
-  assert.ok(Math.abs(takenMul(run) - 0.75) < 1e-9);
-  assert.ok(Math.abs(swingSpeedMul(run) - 1.1) < 1e-9);
+  assert.ok(Math.abs(damageMul(run) - 1.5) < 1e-9);
+  assert.ok(Math.abs(takenMul(run) - 0.6) < 1e-9);
+  assert.ok(Math.abs(swingSpeedMul(run) - 1) < 1e-9);
+  const full = newRun();
+  gainXp(full, 1e7);
+  for (let k = 0; k < STAT_CAP; k++) spendPoint(full, 'agility');
+  assert.equal(spendPoint(full, 'agility'), false);
+  assert.ok(Math.abs(swingSpeedMul(full) - 1.25) < 1e-9);
 });
 
-test('a full descent reaches level 30, and not before the deep floors', () => {
+test('levels come about once a floor: a few by the Sleeper, most by the last floor', () => {
   const run = newLevels();
-  let byFloor10 = 0;
+  let bySleeper = 0;
   FLOORS.forEach((f, i) => {
     let xp = 0;
     for (const ch of (f.map || []).join('')) if (ENEMY[ch]) xp += xpForKill({ typeKey: ENEMY[ch] }, i + 1);
-    if (f.boss) xp += xpForKill({ bossKey: f.boss }, i + 1);
+    if (f.boss && i + 1 < FLOORS.length) xp += xpForKill({ bossKey: f.boss }, i + 1);
     gainXp(run, xp);
-    if (i + 1 === 10) byFloor10 = run.level;
+    if (i + 1 === 5) bySleeper = run.level;
   });
-  assert.equal(run.level, MAX_LEVEL);
-  assert.ok(byFloor10 > 10 && byFloor10 < 25, `level ${byFloor10} at floor 10`);
-  assert.equal(xpToNext(0), 30);
+  assert.ok(bySleeper >= 2 && bySleeper <= 5, `level ${bySleeper} after the Sleeper`);
+  assert.ok(run.level >= 6 && run.level <= MAX_LEVEL, `level ${run.level} at the last floor`);
+  assert.equal(xpToNext(0), 60);
 });
 
 test('a run carries 3 potions, and the Blood Well raises that to 4 at most', async () => {

@@ -33,6 +33,9 @@ export function newRun() {
     ...newLevels(),
     best: { chain: 0, counters: 0, procs: 0 },
     startTime: performance.now(),
+    // Seconds of play from the first floor; stopped when the last lord falls.
+    time: 0,
+    finished: false,
     dev: false,
   };
 }

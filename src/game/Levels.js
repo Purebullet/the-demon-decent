@@ -1,31 +1,36 @@
-// Levels: every demon slain is experience, and each level gained is a point
-// to put into Attack, Defence or Agility, ten at most in each, so thirty
-// levels in all. Three of the gaunt stalkers on the first floor make the
-// first level; bigger demons, elites and the lords below are worth more, and
+// Levels: every demon slain is experience, and each level gained is a perk:
+// a point in Attack, Defence or Agility, five at most in each, ten levels in
+// all, about one a floor. They come seldom and each one counts: the first
+// floor's demons together make the first, the rest take longer and longer,
+// and each point is a blow a tenth harder, a tenth less hurt, or a twentieth
+// quicker. Bigger demons, elites and the lords below are worth more, and
 // every kind is worth a little more the deeper it is met. A run's levels die
 // with it, like everything else it carried.
 
-export const MAX_LEVEL = 30;
-export const STAT_CAP = 10;
+export const MAX_LEVEL = 10;
+export const STAT_CAP = 5;
 
 // What a point buys.
 export const LEVEL_STATS = {
-  attack: { name: 'Attack', per: 0.025, text: '+2.5% damage', color: '#ff7a3a' },
-  defence: { name: 'Defence', per: 0.025, text: '-2.5% damage taken', color: '#7ab0ff' },
-  agility: { name: 'Agility', per: 0.01, text: '+1% attack speed', color: '#9aff7a' },
+  attack: { name: 'Attack', per: 0.1, text: '+10% damage', color: '#ff7a3a' },
+  defence: { name: 'Defence', per: 0.08, text: '-8% damage taken', color: '#7ab0ff' },
+  agility: { name: 'Agility', per: 0.05, text: '+5% attack speed', color: '#9aff7a' },
 };
+
+// Of your health, what a level restores.
+export const LEVEL_HEAL = 0.3;
 export const STAT_IDS = Object.keys(LEVEL_STATS);
 
 // Experience for each kind of demon, before its depth.
-const XP = { ghoul: 10, hound: 14, fiend: 18, witch: 20, brute: 35, sleeper: 180, gorvath: 250, azrakel: 500 };
+const XP = { ghoul: 10, hound: 14, fiend: 18, witch: 20, brute: 35, sleeper: 180, azrakel: 500 };
 
 export function newLevels() {
   return { level: 0, xp: 0, points: 0, stats: { attack: 0, defence: 0, agility: 0 } };
 }
 
-// Experience from level `level` to the next: 30, then 10 more each time.
+// Experience from level `level` to the next: 60, then 40 more each time.
 export function xpToNext(level) {
-  return 30 + 10 * level;
+  return 60 + 40 * level;
 }
 
 // What a slain demon is worth on a floor: twice for an elite, half for one
