@@ -1140,7 +1140,8 @@ export class Hud {
 
     // Announcement: fades in, holds, and fades out over its last 0.85 s.
     const a = this.announcement;
-    this.announceL.mesh.visible = !!a && this.panel !== 'title';
+    // (Not over a panel: a level's cards, a choice, a notice, the pause.)
+    this.announceL.mesh.visible = !!a && !this.panel;
     if (a) {
       const w = Math.min(this.vw * 0.95, 900);
       const h = (w * this.announceL.ch) / this.announceL.cw;
@@ -1184,7 +1185,8 @@ export class Hud {
     if (this.toastL.mesh.visible) {
       const w = 340;
       const h = (w * this.toastL.ch) / this.toastL.cw;
-      this._place(this.toastL.mesh, this.vw - 18 - w, TOP + 64, w, h);
+      // (Below the top right's labels and the descent's clock.)
+      this._place(this.toastL.mesh, this.vw - 18 - w, TOP + 88, w, h);
     }
   }
 
@@ -1443,8 +1445,14 @@ export class Hud {
     const L = (this.layout = { slots: [], health: null });
 
     // Top corners (Project 0's own bar sits at the top centre).
-    this._text(g, (i.floorLabel || '').toUpperCase(), pad, TOP + 32, { size: 15, ls: 1.5, color: C.bone });
-    this._text(g, (i.enemyLabel || '').toUpperCase(), w - pad, TOP + 32, { size: 15, ls: 1.5, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
+    // (On a narrow screen both shrink until they keep apart.)
+    const fl = (i.floorLabel || '').toUpperCase();
+    const el = (i.enemyLabel || '').toUpperCase();
+    const flW = this._measure(g, fl, { size: 15, ls: 1.5 });
+    const elW = this._measure(g, el, { size: 15, ls: 1.5 });
+    const topK = Math.max(0.55, Math.min(1, (w - pad * 2 - 18) / Math.max(1, flW + elW)));
+    this._text(g, fl, pad, TOP + 32, { size: 15 * topK, ls: 1.5 * topK, color: C.bone });
+    this._text(g, el, w - pad, TOP + 32, { size: 15 * topK, ls: 1.5 * topK, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
     if (i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, TOP + 52, { size: 11, align: 'right' });
     // The descent's clock.
     if (r.floor >= 1) this._text(g, fmtTime(r.time), w - pad, TOP + (i.best ? 74 : 54), { size: 15, ls: 1, color: r.finished ? '#ffd28a' : C.bone, align: 'right' });
@@ -1458,7 +1466,14 @@ export class Hud {
         const y = TOP + 66;
         this._box(g, x, y, 40, 40, 'rgba(10,3,3,0.7)', RELICS[id]?.color || C.edge);
         if (!IconAtlas.draw(g, id, x + 2, y + 2, 36)) this._text(g, RELICS[id]?.name[0] || '?', x + 20, y + 21, { size: 18, align: 'center', base: 'middle' });
-        if (n > 1) this._text(g, `×${n}`, x + 37, y + 37, { size: 11, color: C.light, align: 'right' });
+        if (n > 1) {
+          // The stack count on a plate inside the frame's corner.
+          const t = `×${n}`;
+          const tw = this._measure(g, t, { size: 10 }) + 6;
+          g.fillStyle = 'rgba(14,4,3,0.88)';
+          g.fillRect(x + 37 - tw, y + 25, tw, 13);
+          this._text(g, t, x + 37 - tw / 2, y + 32, { size: 10, color: C.light, align: 'center', base: 'middle' });
+        }
       });
     }
 
@@ -1504,7 +1519,7 @@ export class Hud {
     if ('letterSpacing' in g) g.letterSpacing = '1.5px';
     need = Math.max(need, g.measureText(statLine).width);
     if ('letterSpacing' in g) g.letterSpacing = '0px';
-    const ww = Math.max(260, need + 108);
+    const ww = Math.min(w - pad * 2, Math.max(260, need + 108));
 
     // ---- Bottom centre: skills, then health beneath ----
     const sz = 66;
@@ -1521,6 +1536,16 @@ export class Hud {
     if (chat && hx - lead < chat + 10) {
       hx = chat + lead;
       hw = Math.max(200, Math.min(hw, w - pad - ww - 61 - hx));
+    }
+    // The vial and the level plate at its right end keep clear of the
+    // weapon card: the vial shortens, and where even that is not enough (a
+    // narrow screen) the card goes up above the skills instead.
+    const clear = w - pad - ww - 60;
+    if (hx + hw > clear) hw = Math.max(180, clear - hx);
+    const cardUp = hx + hw > clear;
+    if (cardUp) {
+      hw = Math.min(520, w - pad * 2 - lead - 60);
+      hx = Math.max(pad + lead, (w - hw) / 2);
     }
     const cx = hx + hw / 2;
     let sx = cx - total / 2;
@@ -1542,8 +1567,13 @@ export class Hud {
         g.fillRect(sx + 3, sy + 3, sz - 6, sz - 6);
       }
       g.restore();
-      // Key, level and name.
-      this._text(g, SPELLS[slot.id].label, sx + 7, sy + 15, { size: 13, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ' });
+      // Key (on a small dark plate inside the frame's corner), level and name.
+      const key = SPELLS[slot.id].label;
+      const ks = key.length > 1 ? 9 : 12;
+      const kw = this._measure(g, key, { size: ks, weight: 'bold ', ls: key.length > 1 ? 0.5 : 0 }) + 8;
+      g.fillStyle = 'rgba(14,4,3,0.88)';
+      g.fillRect(sx + 4, sy + 4, kw, 16);
+      this._text(g, key, sx + 4 + kw / 2, sy + 12.5, { size: ks, ls: key.length > 1 ? 0.5 : 0, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ', align: 'center', base: 'middle' });
       if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
       // Uses left on this floor, one pip each.
       if (lvl && Number.isFinite(left)) {
@@ -1598,8 +1628,8 @@ export class Hud {
     g.fillRect(-15, -15, 30, 30);
     g.strokeRect(-15, -15, 30, 30);
     g.restore();
-    this._text(g, String(r.level), lx, ly + 1, { size: 15, weight: 'bold ', color: '#ffe3a0', align: 'center', base: 'middle', glow: 'rgba(120,60,0,0.9)' });
-    this._text(g, maxed ? 'MAX' : 'LV', lx, ly + 27, { size: 8, ls: 1.5, color: C.ash, align: 'center' });
+    this._text(g, maxed ? 'MAX' : 'LV', lx, ly - 8, { size: 7, ls: 1, color: C.ash, align: 'center', base: 'middle' });
+    this._text(g, String(r.level), lx, ly + 4, { size: 14, weight: 'bold ', color: '#ffe3a0', align: 'center', base: 'middle', glow: 'rgba(120,60,0,0.9)' });
     // Potions to the left of it, with the key.
     for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, hx - 30 - k * 26, hy - 4, k < r.potions);
     this._key(g, 'E', hx - 40 - r.potionCap * 26, hy + 13);
@@ -1623,7 +1653,7 @@ export class Hud {
     // Weapon, bottom right: its painted icon, name, kind and personality.
     const wh = 78;
     const wx = w - pad - ww;
-    const wy = h - pad - wh;
+    const wy = cardUp ? sy - wh - (tags.length ? 40 : 18) : h - pad - wh;
     this._box(g, wx, wy, ww, wh, C.panel, C.edge);
     if (R) {
       // Its rarity: the icon backlit in the colour, a lit seam along the top.
@@ -1765,7 +1795,9 @@ export class Hud {
     g.fillRect(0, 0, w, h);
     const big = Math.max(30, Math.min(88, w * 0.072));
     let y = h * 0.3;
-    this._text(g, 'THE DEMON DESCENT', w / 2, y, { size: big, ls: big * 0.06, color: '#f4c8a0', align: 'center', glow: 'rgba(190,25,0,1)' });
+    // (Never wider than the screen.)
+    const ts = Math.min(big, (big * (w - 40)) / Math.max(1, this._measure(g, 'THE DEMON DESCENT', { size: big, ls: big * 0.06 })));
+    this._text(g, 'THE DEMON DESCENT', w / 2, y, { size: ts, ls: ts * 0.06, color: '#f4c8a0', align: 'center', glow: 'rgba(190,25,0,1)' });
     this._divider(g, w / 2, y + big * 0.3, Math.min(w * 0.6, big * 9));
     y += big * 0.75;
     this._text(g, 'Ten floors down. One life. No armour. No mercy.', w / 2, y, { size: Math.max(13, big * 0.22), ls: 1, color: C.bone, align: 'center' });
@@ -1792,14 +1824,19 @@ export class Hud {
       this._text(g, `Slay the Sleeper on floor 5: win ${t.bounty} tokens`, w / 2, y, { size: 14, color: '#ffd36a', align: 'center', glow: 'rgba(200,110,0,0.8)' });
       y += 22;
     }
-    // This week's deepest descents.
-    const table = (t.table || []).slice(0, 5);
+    // This week's deepest descents: as many rows as leave the controls
+    // panel room below them at a readable size.
+    const panel = !this.touch && h > 420 ? this._controlsLayout(g) : null;
+    const reserve = panel ? panel.ph * Math.min(0.55, (w - 24) / panel.pw) + 26 : 0;
+    const fits = Math.floor((h - reserve - y - 34) / 17);
+    const table = (t.table || []).slice(0, Math.max(0, Math.min(5, fits)));
     if (table.length) {
       y += 8;
       this._label(g, "This week's deepest", w / 2, y, { align: 'center' });
       y += 18;
       table.forEach((row, k) => {
-        this._text(g, `${k + 1}. ${row.name}`, w / 2 - 10, y, { size: 13, color: row.you ? C.ember : C.bone, align: 'right' });
+        const nm = String(row.name || '-');
+        this._text(g, `${k + 1}. ${nm.length > 18 ? `${nm.slice(0, 17)}…` : nm}`, w / 2 - 10, y, { size: 13, color: row.you ? C.ember : C.bone, align: 'right' });
         this._text(g, `Floor ${row.score}`, w / 2 + 10, y, { size: 13, color: row.you ? C.ember : C.bone });
         y += 17;
       });
@@ -1811,8 +1848,8 @@ export class Hud {
     if (!this.touch && h > 420) this._paintControls(g, y);
   }
 
-  _paintControls(g, top) {
-    const { vw: w, vh: h } = this;
+  // The controls panel's columns and size, before it is drawn.
+  _controlsLayout(g) {
     const ROW = 31;
     const WHAT = { size: 13 };
     const cols = [
@@ -1833,26 +1870,27 @@ export class Hud {
           [{ mouse: 'left' }, 'light attack'],
           [{ mouse: 'left', tag: 'HOLD' }, 'heavy attack: stagger'],
           [{ mouse: 'left', tag: '×3' }, 'chain attack'],
-          [{ mouse: 'left', tag: '!' }, 'hit its wind-up: ×2 damage'],
           [{ mouse: 'right' }, 'block'],
         ],
       },
       {
-        // When to click again: the ring round the crosshair (combat/Rhythm.js).
+        // When to click again: the ring round the crosshair (combat/Rhythm.js),
+        // and when to strike: a demon's red wind-up.
         title: 'Timing',
         color: '#d8a040',
         rows: [
           [{ ring: 'soon' }, 'too soon: sluggish', '#d86a50'],
           [{ ring: 'gold' }, 'on the gold: perfect', '#ffd36a'],
           [{ ring: 'late' }, 'later: a plain swing'],
+          [{ mouse: 'left', tag: '!' }, 'hit its wind-up: stagger', '#ff9a6a'],
         ],
-        note: 'Click again as the ring round your crosshair turns gold. Keep that beat to chain perfect hits.',
+        note: 'A demon glows red as it winds up a blow. Strike it then and it staggers.',
       },
       {
+        // (Shade Step is under Move: everyone has it from the start.)
         title: 'Demon spells',
         color: C.ember,
-        rows: SPELL_IDS.map((id) => [{ keys: [SPELLS[id].label === 'SPACE' ? 'Space' : SPELLS[id].label] }, SPELLS[id].name]),
-        note: 'Shade Step is yours from the start; find the others in chests and at the Magic Circle between floors.',
+        rows: SPELL_IDS.filter((id) => SPELLS[id].label !== 'SPACE').map((id) => [{ keys: [SPELLS[id].label] }, SPELLS[id].name]),
       },
     ];
     for (const col of cols) {
@@ -1860,11 +1898,18 @@ export class Hud {
       col.w = col.iconW + 12 + Math.max(...col.rows.map(([, d]) => this._measure(g, d, WHAT)), 0) + 30;
       col.w = Math.max(col.w, this._measure(g, col.title.toUpperCase(), { size: 11, ls: 2 }) + 30);
     }
-    const spells = cols[3];
-    spells.w = Math.max(spells.w, 200);
-    cols[2].w = Math.max(cols[2].w, 210);
+    cols[2].w = Math.max(cols[2].w, 230);
     const pw = cols.reduce((a, c) => a + c.w, 0) + 14;
-    const ph = 38 + 6 * ROW + 10;
+    // As tall as its fullest column, its note included.
+    const NOTE = 15;
+    const colH = (col) => 38 + col.rows.length * ROW + (col.note ? 8 + this._wrapCount(g, col.note, col.w - 30, 11) * NOTE : 0);
+    const ph = Math.max(...cols.map(colH)) + 14;
+    return { cols, pw, ph, ROW, WHAT, NOTE };
+  }
+
+  _paintControls(g, top) {
+    const { vw: w, vh: h } = this;
+    const { cols, pw, ph, ROW, WHAT, NOTE } = this._controlsLayout(g);
     // Centred under the title; on Project 0 nudged right only as far as it
     // must be to clear the chat at the bottom left (its width in screen
     // pixels), and shrunk if even that does not fit.
@@ -1887,8 +1932,8 @@ export class Hud {
         this._text(g, what, cx + col.iconW + 12, cyRow, { ...WHAT, color: color || C.bone, base: 'middle' });
       });
       if (col.note) {
-        const ny = 38 + col.rows.length * ROW + 12;
-        this._wrapLines(g, col.note, cx, ny, col.w - 30, 11, C.ash, 15);
+        const ny = 38 + col.rows.length * ROW + 16;
+        this._wrapLines(g, col.note, cx, ny, col.w - 30, 11, C.ash, NOTE);
       }
       cx += col.w;
       if (n < cols.length - 1) {
@@ -1897,6 +1942,35 @@ export class Hud {
       }
     });
     g.restore();
+  }
+
+  // The lines a text wraps into at a size, within maxW.
+  _wrapLinesOf(g, text, maxW, size) {
+    const out = [];
+    let line = '';
+    for (const word of text.split(' ')) {
+      const test = line ? `${line} ${word}` : word;
+      if (this._measure(g, test, { size }) > maxW && line) {
+        out.push(line);
+        line = word;
+      } else line = test;
+    }
+    if (line) out.push(line);
+    return out;
+  }
+
+  // How many lines _wrapLines makes of a text.
+  _wrapCount(g, text, maxW, size) {
+    let n = 0;
+    let line = '';
+    for (const word of text.split(' ')) {
+      const test = line ? `${line} ${word}` : word;
+      if (this._measure(g, test, { size }) > maxW && line) {
+        n++;
+        line = word;
+      } else line = test;
+    }
+    return n + (line ? 1 : 0);
   }
 
   // Wrapped lines of text, `lh` apart.
@@ -2136,7 +2210,9 @@ export class Hud {
       this.buttons.push({ x: (w / 2) * this.u, y: (y + bh / 2) * this.u, w: bw * this.u, h: bh * this.u, code: `Digit${k + 1}`, rect: true });
       y += bh + 10;
     });
-    this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Click one (or press its number) · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
+    const foot = (this.touch ? 'Tap a blessing · only one altar may be woken' : 'Click one (or press its number) · Q to step back · only one altar may be woken').toUpperCase();
+    const fs = Math.min(11, (11 * (w - 24)) / Math.max(1, this._measure(g, foot, { size: 11, ls: 2 })));
+    this._label(g, foot, w / 2, y + 22, { size: fs, ls: 2 * (fs / 11), align: 'center' });
     // Step away from the altar without choosing (as Q does).
     this._backButton(g, w / 2, y + 66, 'Back', 'KeyQ');
   }
@@ -2240,11 +2316,16 @@ export class Hud {
       g.fillRect(x + 12, y + 5, cw - 24, 2);
       g.shadowBlur = 0;
       this._text(g, String(k + 1), x + 18, y + 32, { size: 22, weight: 'bold ', color: C.ember, align: 'center', base: 'middle', glow: 'rgba(140,20,0,0.9)' });
-      this._text(g, S.name.toUpperCase(), x + cw / 2, y + 40, { size: 21, ls: 3, color: S.color, align: 'center', glow: 'rgba(0,0,0,1)' });
-      this._text(g, S.text, x + cw / 2, y + 72, { size: 15, color: C.light, align: 'center' });
+      const ns = Math.min(21, (21 * (cw - 70)) / Math.max(1, this._measure(g, S.name.toUpperCase(), { size: 21, ls: 3 })));
+      this._text(g, S.name.toUpperCase(), x + cw / 2, y + 40, { size: ns, ls: 3 * (ns / 21), color: S.color, align: 'center', glow: 'rgba(0,0,0,1)' });
+      // What a point buys, on one line or two, inside the card.
+      const lines = this._wrapLinesOf(g, S.text, cw - 28, 15);
+      const ts = lines.length > 2 ? 12 : 15;
+      const tl = lines.length > 2 ? this._wrapLinesOf(g, S.text, cw - 28, ts) : lines;
+      tl.forEach((ln, i) => this._text(g, ln, x + cw / 2, y + 72 + (i - (tl.length - 1) / 2) * (ts + 3), { size: ts, color: C.light, align: 'center' }));
       const sign = S.id === 'defence' ? '-' : '+';
       const now = Math.round(S.per * S.have * 1000) / 10;
-      this._label(g, S.have ? `Now ${sign}${now}%` : 'Untrained', x + cw / 2, y + 100, { size: 11, align: 'center', color: C.bone });
+      this._label(g, S.have ? `Now ${sign}${now}%` : 'Untrained', x + cw / 2, y + 104, { size: 11, align: 'center', color: C.bone });
       // Ten pips: what has been put in.
       const pw = Math.min(14, (cw - 40) / S.cap - 4);
       let px = x + (cw - (S.cap * (pw + 4) - 4)) / 2;
@@ -2301,9 +2382,17 @@ export class Hud {
     this._sigil(g, w / 2, h * 0.24, Math.min(w, h) * 0.3, this.time * 0.05, `${hue.deep}${0.16 * appear(0, 1.2)})`);
     this._embers(g, w, h, won);
 
-    // The verdict.
+    // The verdict, set as high as it must be for all of it to fit.
     const big = Math.max(40, Math.min(104, w * 0.085));
-    const ty = h * 0.22;
+    const rise = !won && e.rise;
+    const RISE_H = 92;
+    const lift = rise ? RISE_H + 14 : 0;
+    // (A narrow screen stacks the panel: depth on top, the stones in two
+    // columns below.)
+    const narrow = Math.min(900, w - 40) < 620;
+    const ph = narrow ? 446 : 214;
+    const tall = big * 0.24 + 96 + lift + ph + 46 + (won && e.time ? 34 + Math.min(5, Math.max(1, (e.board || []).length)) * 22 + 28 : 0) + 58;
+    const ty = Math.max(big * 0.8 + 6, Math.min(h * 0.22, h - tall));
     g.save();
     g.globalAlpha = appear(0, 0.7);
     this._text(g, won ? 'HELL IS CONQUERED' : 'YOU DIED', w / 2, ty, { size: won ? big * 0.72 : big, ls: big * 0.1, color: hue.main, align: 'center', glow: hue.glow });
@@ -2313,16 +2402,39 @@ export class Hud {
     if (after) this._text(g, after, w / 2, ty + big * 0.24 + 66, { size: 15, color: C.ash, align: 'center' });
     g.restore();
 
+    // What the fallen run leaves the next: the level you rise again at, in
+    // gold, plain to see.
+    if (rise) {
+      const gold = { main: '#ffd28a', deep: 'rgba(255,150,30,', glow: 'rgba(255,130,0,0.9)', accent: '#ffb347', edge: '#9a6a18' };
+      const rw = Math.min(640, w - 40);
+      const rx = (w - rw) / 2;
+      const ry = ty + big * 0.24 + 86;
+      g.save();
+      g.globalAlpha = appear(0.3, 0.6);
+      this._frame(g, rx, ry, rw, RISE_H, gold);
+      const pulse = 0.6 + 0.4 * Math.sin(this.time * 2.4);
+      const head = `YOU RISE AGAIN AT LEVEL ${rise.level}`;
+      const hs = Math.min(28, (28 * (rw - 60)) / Math.max(1, this._measure(g, head, { size: 28, ls: 3 })));
+      this._text(g, head, w / 2, ry + 36, { size: hs, ls: 3, color: '#ffe3a0', align: 'center', glow: `rgba(255,140,0,${0.55 + 0.4 * pulse})` });
+      const S = rise.stats || {};
+      const kept = [`Half of level ${rise.from}`, `Attack ${S.attack || 0}`, `Defence ${S.defence || 0}`, `Agility ${S.agility || 0}`];
+      if (rise.points) kept.push(`${rise.points} to spend`);
+      const sub = kept.join('  ·  ');
+      const ss = Math.min(14, (14 * (rw - 50)) / Math.max(1, this._measure(g, sub, { size: 14 })));
+      this._text(g, sub, w / 2, ry + 60, { size: ss, color: C.bone, align: 'center' });
+      this._label(g, 'Kept while you stay in the game', w / 2, ry + 78, { size: 9, align: 'center', color: C.ash });
+      g.restore();
+    }
+
     // The panel: depth on the left, the stones on the right.
     const pw = Math.min(900, w - 40);
-    const ph = 214;
     const px = (w - pw) / 2;
-    const py = ty + big * 0.24 + 96;
+    const py = ty + big * 0.24 + 96 + lift;
     g.save();
     g.globalAlpha = appear(0.45);
     this._frame(g, px, py, pw, ph, hue);
-    const dw = Math.min(250, pw * 0.3);
-    const dx = px + dw / 2 + 14;
+    const dw = narrow ? Math.min(260, pw - 40) : Math.min(250, pw * 0.3);
+    const dx = narrow ? px + pw / 2 : px + dw / 2 + 14;
     if (won && e.time) {
       // A finished descent: its time, and how it stands against your best.
       this._label(g, 'Descent time', dx, py + 34, { size: 11, align: 'center', color: C.ash });
@@ -2340,15 +2452,18 @@ export class Hud {
     }
     // The rule between the two halves.
     g.fillStyle = `${hue.deep}0.45)`;
-    g.fillRect(px + dw + 26, py + 22, 1, ph - 44);
+    if (narrow) g.fillRect(px + 22, py + 206, pw - 44, 1);
+    else g.fillRect(px + dw + 26, py + 22, 1, ph - 44);
     const stats = e.stats || [];
-    const gx = px + dw + 44;
-    const gw = pw - dw - 66;
-    const tw = (gw - 24) / 3;
-    const th = (ph - 52) / 2;
+    const cols = narrow ? 2 : 3;
+    const gx = narrow ? px + 20 : px + dw + 44;
+    const gw = narrow ? pw - 40 : pw - dw - 66;
+    const tw = (gw - 12 * (cols - 1)) / cols;
+    const th = narrow ? 66 : (ph - 52) / 2;
+    const gy = narrow ? py + 220 : py + 22;
     stats.forEach(([icon, label, value, color], k) => {
-      const tx = gx + (k % 3) * (tw + 12);
-      const tyy = py + 22 + Math.floor(k / 3) * (th + 8);
+      const tx = gx + (k % cols) * (tw + 12);
+      const tyy = gy + Math.floor(k / cols) * (th + 8);
       g.save();
       g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
       this._tile(g, tx, tyy, tw, th, icon, label, value, hue, color);
@@ -2389,8 +2504,7 @@ export class Hud {
       const label = won ? 'Return to the surface' : 'Rise again';
       g.save();
       g.globalAlpha = a;
-      g.font = `bold 20px ${SERIF}`;
-      const bw = Math.max(260, g.measureText(label.toUpperCase()).width + 90);
+      const bw = Math.min(w - 32, Math.max(260, this._measure(g, label.toUpperCase(), { size: 20, weight: 'bold ', ls: 4 }) + 80));
       this._button(g, w / 2 - bw / 2, by - 26, bw, 52, label.toUpperCase(), hot, pulse, hue);
       this._label(g, this.touch ? 'Tap to begin again at the surface' : 'Click, or press Space, to begin again at the surface', w / 2, by + 50, { size: 11, align: 'center', color: C.ash });
       g.restore();
@@ -2560,12 +2674,33 @@ export class Hud {
     g.restore();
     const s = Math.min(34, h * 0.5);
     this._glyph(g, icon, x + 14 + s / 2, y + h / 2, s, hue.accent);
-    // A long value (a weapon's name) shrinks to fit its stone.
+    // A long value (a weapon's name) shrinks to fit its stone, and if even
+    // that is too long, takes two lines.
     const text = String(value);
-    const room = w - (26 + s) - 10;
-    const size = Math.max(13, Math.min(28, (28 * room) / Math.max(1, this._measure(g, text, { size: 28 }))));
-    this._text(g, text, x + 26 + s, y + h / 2 + 4, { size, color: color || C.light, glow: 'rgba(120,20,0,0.7)' });
-    this._label(g, label, x + 26 + s, y + h / 2 + 22, { size: 10, color: C.ash });
+    const room = w - (26 + s) - 12;
+    const fit = (str, max) => Math.min(max, (max * room) / Math.max(1, this._measure(g, str, { size: max })));
+    const size = fit(text, 28);
+    const words = text.split(' ');
+    if (size >= 13 || words.length < 2) {
+      this._text(g, text, x + 26 + s, y + h / 2 + 4, { size: Math.max(10, size), color: color || C.light, glow: 'rgba(120,20,0,0.7)' });
+    } else {
+      // Split where the two halves come out most even.
+      let best = 1;
+      let bestW = Infinity;
+      for (let k = 1; k < words.length; k++) {
+        const wide = Math.max(this._measure(g, words.slice(0, k).join(' '), { size: 14 }), this._measure(g, words.slice(k).join(' '), { size: 14 }));
+        if (wide < bestW) {
+          bestW = wide;
+          best = k;
+        }
+      }
+      const lines = [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+      const ls = Math.max(10, Math.min(fit(lines[0], 16), fit(lines[1], 16)));
+      this._text(g, lines[0], x + 26 + s, y + h / 2 - ls * 0.8, { size: ls, color: color || C.light, glow: 'rgba(120,20,0,0.7)' });
+      this._text(g, lines[1], x + 26 + s, y + h / 2 + ls * 0.35, { size: ls, color: color || C.light, glow: 'rgba(120,20,0,0.7)' });
+    }
+    const lsz = Math.min(10, (10 * room) / Math.max(1, this._measure(g, label.toUpperCase(), { size: 10, ls: 2 })));
+    this._label(g, label, x + 26 + s, y + h / 2 + 22, { size: lsz, ls: 2 * (lsz / 10), color: C.ash });
   }
 
   // The marks on the stones, drawn as small silhouettes.
@@ -2695,7 +2830,9 @@ export class Hud {
     g.strokeStyle = hot ? '#ffb070' : hue.accent;
     g.stroke();
     g.restore();
-    this._text(g, label, x + w / 2, y + h / 2 + 1, { size: 20, weight: 'bold ', ls: 4, color: hot ? '#fff1dc' : C.light, align: 'center', base: 'middle', glow: hue.glow });
+    // (A label too long for the button shrinks to fit inside it.)
+    const size = Math.min(20, (20 * (w - 44)) / Math.max(1, this._measure(g, label, { size: 20, weight: 'bold ', ls: 4 })));
+    this._text(g, label, x + w / 2, y + h / 2 + 1, { size, weight: 'bold ', ls: 4 * (size / 20), color: hot ? '#fff1dc' : C.light, align: 'center', base: 'middle', glow: hue.glow });
   }
 }
 

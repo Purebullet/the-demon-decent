@@ -26,7 +26,7 @@ import { SwingTrail, trailStyle } from '../combat/SwingTrail.js';
 // completes to flow into a Perfect Chain; press any earlier and the swing
 // is fumbled, the next one sluggish and exposed. Nothing is queued. Light
 // swings let you keep walking; a heavy blow roots you and cannot be undone.
-// Blows landed in a demon's windup are counter-hits; blows on a raised guard
+// Blows landed in a demon's windup are counter-hits (they stagger it); blows on a raised guard
 // bounce off (or break it: combat/Styles.js), and every weapon kind has its
 // own personality. Hits can set off procs (combat/Procs.js) from relics.
 
@@ -1213,14 +1213,15 @@ export class Player {
       if (s.perfect) amount *= bonus.damage * (1 + (relicPassive(run, 'perfectDamage') ?? 0));
       if (s.sluggish) amount *= 0.85;
       if (w.type === 'sword') amount *= momentumDamage(this.momentum);
-      if (counter) amount *= heavy ? 2.5 : 2;
       if (guard === 'crash') amount *= 0.6;
       if (this.flameT > 0) amount *= FLAME_DAMAGE;
       const force = (heavy ? 1 + s.power * 0.8 : 0.55) * (counter ? 1.5 : 1) * (w.type === 'mace' ? 1.3 : 1);
-      // Only a heavy blow staggers a demon (any but a lord); a light one
-      // only by chance: a mace's sometimes, and anyone's with points in
-      // Attack (Levels.lightStaggerChance).
-      const staggers = heavy || Math.random() < lightStaggerChance(run, w.type);
+      // Only a heavy blow staggers a demon (any but a lord), or any blow
+      // that catches it winding up (a counter: no harder, but it breaks the
+      // blow off); a light one otherwise only by chance: a mace's
+      // sometimes, and anyone's with points in Attack
+      // (Levels.lightStaggerChance).
+      const staggers = heavy || counter || Math.random() < lightStaggerChance(run, w.type);
       const dealt = e.takeHit(amount, dir, def.knockback * (heavy ? 1.8 : 1) * (counter ? 1.4 : 1), heavy ? HEAVY_STAGGER : 0, ctx, { heavy, contact: h.point, sweep: s.travel, force });
       // The wound the weapon leaves: a cut, a hacked-out chunk, a dent.
       if (dealt > 0) ctx.wounds?.hit(e, w.type, h.point, dir, s.travel, heavy);
@@ -1235,9 +1236,10 @@ export class Player {
         if (w.type === 'axe') e.applySunder?.(heavy ? 2 : 1, ctx);
         // (A lord reels from nothing short of a heavy blow.)
         const reels = (!e.isBoss || heavy) && !armored && e.state !== 'stagger';
-        if (staggers && !heavy && reels && guard !== 'crash') e.stumble?.(ctx, STUMBLE.light, dir);
+        // A counter breaks the blow off: it reels.
+        if (counter && reels) e.interrupt?.(ctx, 0.9);
+        else if (staggers && !heavy && reels && guard !== 'crash') e.stumble?.(ctx, STUMBLE.light, dir);
         else if (staggers && w.type === 'mace' && reels && guard !== 'crash') e.stumble?.(ctx, STUMBLE.heavy, dir);
-        else if (staggers && counter && reels) e.interrupt?.(ctx, 0.9);
         // Struck first by a staggering blow: one already falling but not yet
         // landed is knocked aside.
         else if (staggers && e.state === 'strike' && !e.hitPlayer && reels) e.interrupt?.(ctx, 0.45);

@@ -35,8 +35,8 @@ test('five points at most in each stat, ten levels in all, and what they buy', (
   }
   assert.equal(spent, MAX_LEVEL);
   assert.equal(run.points, 0);
-  assert.ok(Math.abs(damageMul(run) - 1.5) < 1e-9);
-  assert.ok(Math.abs(takenMul(run) - 0.6) < 1e-9);
+  assert.ok(Math.abs(damageMul(run) - 1.3) < 1e-9);
+  assert.ok(Math.abs(takenMul(run) - 0.7) < 1e-9);
   assert.ok(Math.abs(swingSpeedMul(run) - 1) < 1e-9);
   const full = newRun();
   gainXp(full, 1e7);
@@ -78,11 +78,13 @@ test('a run carries 3 potions, the Blood Well raises that to 4 at most, then fil
   assert.equal(run.potions, 4);
 });
 
-test('a fallen run leaves the next half its level, where its points went', async () => {
+test('a fallen run leaves the next half its level (rounded up), where its points went', async () => {
   const { legacyOf } = await import('../src/game/Levels.js');
-  assert.deepEqual(legacyOf({ level: 7, stats: { attack: 4, defence: 2, agility: 1 } }), { level: 3, xp: 0, points: 0, stats: { attack: 2, defence: 1, agility: 0 } });
-  assert.deepEqual(legacyOf({ level: 9, stats: { attack: 3, defence: 3, agility: 3 } }).stats, { attack: 2, defence: 1, agility: 1 });
-  assert.equal(legacyOf({ level: 1, stats: { attack: 1, defence: 0, agility: 0 } }).level, 0);
+  assert.deepEqual(legacyOf({ level: 7, stats: { attack: 4, defence: 2, agility: 1 } }), { level: 4, xp: 0, points: 0, stats: { attack: 2, defence: 1, agility: 1 } });
+  assert.deepEqual(legacyOf({ level: 9, stats: { attack: 3, defence: 3, agility: 3 } }).stats, { attack: 2, defence: 2, agility: 1 });
+  assert.equal(legacyOf({ level: 1, stats: { attack: 1, defence: 0, agility: 0 } }).level, 1);
+  assert.equal(legacyOf({ level: 0, stats: { attack: 0, defence: 0, agility: 0 } }).level, 0);
+  assert.equal(legacyOf({ level: 10, stats: { attack: 5, defence: 5, agility: 0 } }).level, 5);
   // Unspent points come through as points.
   assert.deepEqual(legacyOf({ level: 6, stats: { attack: 0, defence: 0, agility: 0 } }), { level: 3, xp: 0, points: 3, stats: { attack: 0, defence: 0, agility: 0 } });
 });

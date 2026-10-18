@@ -3,7 +3,7 @@
 // all, about one a floor. (Attack also lets a light blow stagger a demon,
 // which otherwise only a heavy one does: see lightStaggerChance.) They come seldom and each one counts: the first
 // floor's demons together make the first, the rest take longer and longer,
-// and each point is a blow a tenth harder, a tenth less hurt, or a twentieth
+// and each point is a blow 6% harder, 6% less hurt, or a twentieth
 // quicker. Bigger demons, elites and the lords below are worth more, and
 // every kind is worth a little more the deeper it is met. A run's levels die
 // with it, like everything else it carried.
@@ -13,8 +13,8 @@ export const STAT_CAP = 5;
 
 // What a point buys.
 export const LEVEL_STATS = {
-  attack: { name: 'Attack', per: 0.1, text: '+10% damage, light blows may stagger', color: '#ff7a3a' },
-  defence: { name: 'Defence', per: 0.08, text: '-8% damage taken', color: '#7ab0ff' },
+  attack: { name: 'Attack', per: 0.06, text: '+6% damage, light blows may stagger', color: '#ff7a3a' },
+  defence: { name: 'Defence', per: 0.06, text: '-6% damage taken', color: '#7ab0ff' },
   agility: { name: 'Agility', per: 0.05, text: '+5% attack speed', color: '#9aff7a' },
 };
 
@@ -78,11 +78,12 @@ export const MACE_LIGHT_STAGGER = 0.3;
 export const ATTACK_STAGGER = 0.05;
 export const lightStaggerChance = (run, weaponType) => (weaponType === 'mace' ? MACE_LIGHT_STAGGER : 0) + ATTACK_STAGGER * (run.stats?.attack || 0);
 
-// What a fallen run leaves the next: half its level (rounded down), kept
-// where its points had gone as nearly as halving allows (each stat halved,
-// the odd points to the stats that lost a half). Experience starts over.
+// What a fallen run leaves the next: half its level (rounded up, so a level
+// is never lost to the halving alone), kept where its points had gone as
+// nearly as halving allows (each stat halved, the odd points to the stats
+// that lost a half). Experience starts over.
 export function legacyOf(run) {
-  const keep = Math.floor((run.level || 0) / 2);
+  const keep = Math.ceil((run.level || 0) / 2);
   const stats = { attack: 0, defence: 0, agility: 0 };
   const halves = STAT_IDS.map((id) => ({ id, half: (run.stats?.[id] || 0) / 2 }));
   let left = keep;

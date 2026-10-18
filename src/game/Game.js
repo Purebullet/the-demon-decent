@@ -32,8 +32,11 @@ import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
 
 // The chance an elite demon carries a relic.
 const ELITE_RELIC = 0.27;
-// The lot's owner (Project 0 name, lower case): never paid a prize.
+// The lot's owner (Project 0 name, lower case): never paid a prize, never
+// on the tables the game shows, and their runs post no scores.
 const OWNER = 'purebullet';
+// A table's rows without the owner's.
+const players = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => r && !r.owner && String(r.name || '').trim().toLowerCase() !== OWNER);
 // What the Deep's first floor says before it lets you in.
 const DEEP_NOTICE = {
   title: 'Still being dug',
@@ -524,13 +527,13 @@ export class Game {
     this.surface.falling(false);
     const s = this._newScene({ fog: 0x0d0606, density: 0.022, background: 0x050203 });
     s.add(this.surface.group);
-    this.surface.setScores({ best: this.best, last: this.lastFloor, top: this.table[0] || null });
+    this.surface.setScores({ best: this.best, last: this.lastFloor, top: players(this.table)[0] || null });
   }
 
   _refreshTitle() {
     this.hud.setTitleInfo({
       best: this.best,
-      table: this.table,
+      table: players(this.table),
       dev: this.devFloor ? `Dev start: floor ${this.devFloor} (scores not recorded)` : '',
       bounty: this._bounty(),
     });
@@ -585,7 +588,10 @@ export class Game {
     // Permadeath: a fresh run every time you stand on the surface, keeping
     // only half the level of the one that fell.
     this.run = newRun();
-    if (this.legacy) Object.assign(this.run, this.legacy);
+    if (this.legacy) {
+      Object.assign(this.run, this.legacy);
+      if (this.legacy.level) setTimeout(() => this.run?.level && this.hud.toast(`You rise again at level ${this.run.level}: half your strength kept`), 2600);
+    }
     this.legacy = null;
     this.bestAtStart = this.best;
     this.player.reset();
@@ -866,7 +872,7 @@ export class Game {
   _onCombat(kind) {
     const r = this.run;
     if (kind === 'clash') this._hint('guard', 'Guarded: wait for the ward to drop, or break it with an <b>axe</b> or a charged <b>mace</b>');
-    else if (kind === 'counter') this._hint('counter', 'Counter-hit: strike a demon <b>while it glows red</b> winding up');
+    else if (kind === 'counter') this._hint('counter', 'Counter: strike a demon <b>while it glows red</b> winding up and it <b>staggers</b>');
     if (kind === 'counter') {
       if (r) r.best.counters++;
       this.hud.callout('COUNTER', { color: '#ffb060', size: 1.15 });
@@ -1002,7 +1008,7 @@ export class Game {
         e.update(dt, ctx);
         if (e.state === 'windup' && e.distToPlayer < 4.5) {
           if (e.attack?.armor) this._hint('armor', ARMOR_HINT);
-          else if (!this.hints?.has('tell')) this._hint('tell', 'It glows red as it winds up: <b>strike now to counter</b>, block, or step away');
+          else if (!this.hints?.has('tell')) this._hint('tell', 'It glows red as it winds up: <b>strike now to stagger it</b>, block, or step away');
         }
       }
     }
@@ -1430,8 +1436,9 @@ export class Game {
   // ------------------------------------------------------- death / victory ---
 
   _setDescent(top) {
-    this.descent = Array.isArray(top) ? top : [];
-    for (const r of this.descent) if (r.you && r.score > 0) this.bestTime = this.bestTime ? Math.min(this.bestTime, r.score) : r.score;
+    const rows = Array.isArray(top) ? top : [];
+    for (const r of rows) if (r.you && r.score > 0) this.bestTime = this.bestTime ? Math.min(this.bestTime, r.score) : r.score;
+    this.descent = players(rows);
     if (this.hud.endInfo?.time) this.hud.setEnd({ ...this.hud.endInfo, board: this.descent });
   }
 
@@ -1442,13 +1449,15 @@ export class Game {
     this.lastFloor = run.floor;
     // The deepest floor reached goes on the lot's weekly table, and a
     // finished descent's time on the table of the fastest.
-    if (!run.dev) this.host.score(run.floor);
+    // (Not the owner's: they stay off the tables.)
+    const posts = !run.dev && !this._isOwner();
+    if (posts) this.host.score(run.floor);
     let time = null;
     if (won && run.finished) {
       const ms = Math.max(1, Math.round(run.time * 1000));
       const prev = this.bestTime;
       const record = !run.dev && (!prev || ms < prev);
-      if (!run.dev) {
+      if (posts) {
         this.pendingTime = ms;
         this.host.score(ms, { board: DESCENT_BOARD, lower: true });
       }
@@ -1467,7 +1476,9 @@ export class Game {
       board: this.descent,
       lines: won
         ? ['Azrakel has fallen. The descent is done.', time ? `${fmtTime(time.ms / 1000, true)} from the first floor to his death.` : 'You climb out of the pit with nothing but the memory of it.']
-        : [`Slain on floor ${run.floor}: ${name}`, kept ? `Everything you carried is lost, but half your strength stays: you rise again at level ${kept}.` : 'Everything you carried is lost.'],
+        : [`Slain on floor ${run.floor}: ${name}`, kept ? 'Everything you carried is lost, but not all your strength.' : 'Everything you carried is lost.'],
+      // Half the level kept (the plaque under the verdict says so).
+      rise: kept ? { level: kept, from: run.level, stats: { ...this.legacy.stats }, points: this.legacy.points } : null,
       floor: run.floor,
       floors: FLOORS.length,
       deepest: Math.max(this.best, run.floor),
