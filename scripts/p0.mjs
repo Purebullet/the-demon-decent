@@ -13,6 +13,11 @@
 //                                                     avatar.glb, avatar-lod1.glb, avatar.json, *.glsl)
 //   npm run p0 -- machine machine [--validate] [--game zer0-g]  your entity for another
 //                                                     lot's game (entity.json, model.glb, picture.png)
+//   npm run p0 -- bounty [--prize 11.12] [--min 600]  the lot's prize for slaying the Sleeper
+//                                                     (a win, once a player); only if the pool covers it
+//   npm run p0 -- event [--days 30]                   the ring of light and searchlights over the
+//                                                     lot that announces it (needs that prize)
+//   npm run p0 -- end-event                           take the ring down
 //   npm run p0 -- check <url>                         poll a `check` URL a send answered with
 //   npm run p0 -- submission <id>                     a review that answered 202
 
@@ -76,8 +81,45 @@ async function lotForm(dir, withManifest) {
   return form;
 }
 
+// The Sleeper's bounty: what the city's ring over the lot says. The prize is
+// set so the player nets 10 tokens after the city's tenth.
+const BOUNTY = {
+  prize: 11.12,
+  title: 'BEAT THE FLOOR 5 BOSS · WIN 10 TOKENS',
+  text: 'Descend into The Demon Descent and slay Vorgrath, the Sleeper, on floor 5 to win 10 tokens. One prize per player.',
+  color: '#ff4a10',
+};
+
+// The lot's prize rules and pool as the city shows them.
+async function gameRules() {
+  const res = await fetch(`${BASE}/api/lots/${LOT}/game`);
+  return (await res.json()).game || {};
+}
+
 const commands = {
   me: () => call('/api/agent/me'),
+  // A prize set above what the pool holds shuts everyone but the owner out,
+  // so this sets it only once the pool covers it.
+  bounty: async () => {
+    const prize = Number(flag('prize', BOUNTY.prize));
+    const G = await gameRules();
+    if (!(G.pool >= prize)) {
+      console.error(`The prize pool holds ${G.pool ?? 0} tokens, less than one prize (${prize}). Fill it first (in the game: your lot, Game & prizes).`);
+      process.exitCode = 1;
+      return;
+    }
+    return call(`/api/agent/lots/${LOT}/game`, { method: 'POST', json: { prize, mode: 'win', perPlayer: 'once', minSeconds: Number(flag('min', 600)), paused: false } });
+  },
+  event: async () => {
+    const G = await gameRules();
+    if (!(G.prize >= 10) || !(G.pool >= G.prize)) {
+      console.error(`An event needs a prize of at least 10 tokens a winner and a pool that covers it (now: prize ${G.prize ?? 0}, pool ${G.pool ?? 0}). Run \`npm run p0 -- bounty\` once the pool is filled.`);
+      process.exitCode = 1;
+      return;
+    }
+    return call(`/api/agent/lots/${LOT}/event`, { method: 'POST', json: { title: BOUNTY.title, text: BOUNTY.text, days: Number(flag('days', 30)), color: BOUNTY.color } });
+  },
+  'end-event': () => call(`/api/agent/lots/${LOT}/event`, { method: 'DELETE' }),
   status: () => call(`/api/agent/lots/${LOT}/status`, { method: 'POST', json: { building: positional[0] !== 'done' } }),
   box: () => {
     const json = {};
