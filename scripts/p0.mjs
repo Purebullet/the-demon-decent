@@ -86,7 +86,7 @@ async function lotForm(dir, withManifest) {
 const BOUNTY = {
   prize: 11.12,
   title: 'BEAT THE FLOOR 5 BOSS · WIN 10 TOKENS',
-  text: 'Descend into The Demon Descent and slay Vorgrath, the Sleeper, on floor 5 to win 10 tokens. One prize per player.',
+  text: 'Fall into the pit and slay Vorgrath, the Sleeper, on floor 5 to win 10 tokens. One prize per player.',
   color: '#ff4a10',
 };
 

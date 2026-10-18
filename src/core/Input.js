@@ -28,6 +28,10 @@ export class Input {
     this.onLockChange = null;
     this._down = null;
     this.menu = null;
+    // The mouse wheel turned this frame (+ down/away, - up/toward).
+    this.wheel = 0;
+    // The on-screen button a tap or click landed on this frame, if any.
+    this.tapButton = null;
 
     host.on('keydown', (e) => {
       if (!e.code || e.repeat) return;
@@ -35,6 +39,9 @@ export class Input {
       this.keys.add(e.code);
     });
     host.on('keyup', (e) => this.keys.delete(e.code));
+    host.on('wheel', (e) => {
+      this.wheel += e.deltaY ?? e.dy ?? 0;
+    });
     host.on('pointerdown', (e) => {
       this.pointer.x = e.x;
       this.pointer.y = e.y;
@@ -144,5 +151,7 @@ export class Input {
     this.pressed.clear();
     this.mouseClicked.fill(false);
     this.taps.length = 0;
+    this.wheel = 0;
+    this.tapButton = null;
   }
 }

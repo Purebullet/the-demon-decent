@@ -46,6 +46,7 @@ export function createBrowserHost(canvas) {
   canvas.addEventListener('pointerdown', pointer('pointerdown'));
   window.addEventListener('pointerup', pointer('pointerup'));
   window.addEventListener('pointermove', pointer('pointermove'));
+  window.addEventListener('wheel', (e) => emit('wheel', { deltaY: e.deltaY }), { passive: true });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('pointerlockchange', () => emit('pointerlock', { locked: document.pointerLockElement === canvas }));
 

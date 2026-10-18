@@ -17,7 +17,7 @@ import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss, Sleeper } from '../entities/Bosses.js';
 import { Archfiend } from '../entities/Archfiend.js';
 import { Pickups } from '../entities/Pickups.js';
-import { rollWeapon, makeWeapon, weaponMemory, WEAPON_MODELS } from '../entities/Weapons.js';
+import { rollWeapon, makeWeapon, rememberWeapons, WEAPON_MODELS } from '../entities/Weapons.js';
 import { AIDirector } from '../ai/AIDirector.js';
 import { PathService } from '../ai/NavGrid.js';
 import { newRun, NODES } from './Progression.js';
@@ -1444,8 +1444,10 @@ export class Game {
 
   _enterEnd(won) {
     const run = this.run;
-    // The best weapon of this run turns up more often in the next.
-    if (run.bestWeapon) weaponMemory.favourite = run.bestWeapon.model;
+    // The weapons this run took in hand turn up more often in the next
+    // (the more runs found one, the more often); the death screen shows
+    // them all.
+    const arsenal = rememberWeapons(run.found);
     this.lastFloor = run.floor;
     // The deepest floor reached goes on the lot's weekly table, and a
     // finished descent's time on the table of the fastest.
@@ -1483,14 +1485,24 @@ export class Game {
       floors: FLOORS.length,
       deepest: Math.max(this.best, run.floor),
       record: !run.dev && run.floor > (this.bestAtStart ?? 0),
-      stats: [
-        ['skull', 'Demons slain', run.kills],
-        ['chain', 'Longest chain', run.best?.chain || 0],
-        ['blades', 'Counters', run.best?.counters || 0],
-        ['shield', 'Parries', run.best?.parries || 0],
-        ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
-        ['blades', 'Best weapon', run.bestWeapon?.name || run.weapon?.name || 'None', run.bestWeapon?.color],
-      ],
+      stats: won
+        ? [
+            ['skull', 'Demons slain', run.kills],
+            ['chain', 'Longest chain', run.best?.chain || 0],
+            ['blades', 'Counters', run.best?.counters || 0],
+            ['shield', 'Parries', run.best?.parries || 0],
+            ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
+            ['blades', 'Best weapon', run.bestWeapon?.name || run.weapon?.name || 'None', run.bestWeapon?.color],
+          ]
+        : [
+            ['skull', 'Demons slain', run.kills],
+            ['chain', 'Longest chain', run.best?.chain || 0],
+            ['shield', 'Parries', run.best?.parries || 0],
+            ['gem', 'Relics', Object.values(run.relics || {}).reduce((a, b) => a + b, 0)],
+          ],
+      // Every weapon found in the runs so far, best first (the death
+      // screen's gallery).
+      arsenal: won ? null : arsenal,
       ready: false,
     });
     this.hud.show(won ? 'victory' : 'death', true);
@@ -1502,7 +1514,19 @@ export class Game {
   _updateEnd(dt) {
     this.endT += dt;
     if (this.endT > 1.2 && !this.hud.endInfo.ready) this.hud.setEnd({ ...this.hud.endInfo, ready: true });
-    const go = this.input.mouseClicked[0] || this.input.taps.length || this.input.wasPressed('Space') || this.input.wasPressed('KeyR');
+    // The weapons gallery scrolls: its arrows, the arrow keys (or A, D), the wheel.
+    const inp = this.input;
+    const step = (inp.wasPressed('ArrowRight') || inp.wasPressed('KeyD') ? 1 : 0) - (inp.wasPressed('ArrowLeft') || inp.wasPressed('KeyA') ? 1 : 0);
+    this.wheelAcc = (this.wheelAcc || 0) + inp.wheel;
+    let turn = 0;
+    if (Math.abs(this.wheelAcc) >= 60) {
+      turn = Math.sign(this.wheelAcc);
+      this.wheelAcc = 0;
+    }
+    if (step || turn) this.hud.scrollArsenal(step || turn);
+    // (A click on one of its arrows is not a click to rise again.)
+    const onOther = inp.tapButton && inp.tapButton !== 'Space';
+    const go = inp.wasPressed('Space') || inp.wasPressed('KeyR') || (!onOther && (inp.mouseClicked[0] || inp.taps.length));
     if (this.endT > 1.2 && !this.busy && go) {
       this.input.requestLock();
       this.goto('surface');
@@ -1525,6 +1549,7 @@ export class Game {
       }
       if (code === 'Mouse0') this.input.mouseClicked[0] = true;
       else this.input.pressed.add(code);
+      this.input.tapButton = code;
       this.input.claimTap?.();
     }
     if (this.input.pressed.size || this.input.mouseClicked[0]) this.audio.init();

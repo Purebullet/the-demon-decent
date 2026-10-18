@@ -618,16 +618,21 @@ export class Hall {
     if (f.near && ctx.input.wasPressed('KeyF') && !ctx.pickups?.nearWeapon && !ctx.pickups?.nearItem) this._drink(ctx);
   }
 
-  // Drunk from, once: two flasks fill.
+  // Drunk from, once: every wound closes and two flasks fill.
   _drink(ctx) {
     const f = this.fountain;
     f.used = true;
     f.near = false;
-    const run = ctx.player.run;
-    if (run) run.potions = Math.min(run.potionCap, run.potions + FOUNTAIN_FLASKS);
+    const p = ctx.player;
+    const run = p.run;
+    if (run) {
+      run.health = run.maxHealth;
+      run.potions = Math.min(run.potionCap, run.potions + FOUNTAIN_FLASKS);
+    }
+    p.healFlash = 1;
     ctx.audio?.drink?.();
     ctx.audio?.relic?.();
-    ctx.toast?.('The blood fills two flasks');
+    ctx.toast?.('The blood closes every wound and fills two flasks');
     burst(ctx.fx.alpha, new THREE.Vector3(f.x, 1.2, f.z), { count: 40, speed: 3.5, color: JET, colorEnd: JET_DARK, size: 0.16, life: 1, gravity: -12 });
   }
 

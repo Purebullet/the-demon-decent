@@ -200,3 +200,32 @@ test('the first demon has a quick, weaker attack besides its rake', () => {
 test('swings reach as far as they look and no further than a few metres', () => {
   for (const [k, t] of Object.entries(WEAPON_TYPES)) assert.ok(t.reach > t.blade[1] + 0.8 && t.reach < 3, k);
 });
+
+test('weapons found in earlier runs drop more often, a fifth more a run, four runs at most', async () => {
+  const W = await import('../src/entities/Weapons.js');
+  W.weaponMemory.found = {};
+  let list = W.rememberWeapons({ axeTwin: W.makeWeapon('axeTwin', 1) });
+  assert.equal(list.length, 1);
+  assert.equal(list[0].runs, 1);
+  assert.ok(Math.abs(list[0].boost - 0.2) < 1e-9);
+  assert.equal(list[0].fresh, true);
+  for (let i = 0; i < 6; i++) list = W.rememberWeapons({ axeTwin: W.makeWeapon('axeTwin', 3) });
+  assert.equal(list[0].runs, W.FOUND_MAX);
+  assert.ok(Math.abs(list[0].boost - 0.8) < 1e-9);
+  assert.equal(list[0].weapon.rarity, 3);
+  // A run that found nothing leaves it as it was, no longer marked new.
+  list = W.rememberWeapons({});
+  assert.equal(list[0].runs, W.FOUND_MAX);
+  assert.equal(list[0].fresh, false);
+  // The sword you start with is never remembered.
+  W.rememberWeapons({ sword: W.makeWeapon('sword') });
+  assert.equal(W.weaponMemory.found.sword, undefined);
+  // It drops about 1.8 times as often as any other.
+  let hits = 0;
+  const N = 20000;
+  for (let i = 0; i < N; i++) if (W.rollWeapon(3).model === 'axeTwin') hits++;
+  const others = Object.keys(W.WEAPON_MODELS).filter((id) => !W.WEAPON_MODELS[id].starter).length - 1;
+  const expect = 1.8 / (others + 1.8);
+  assert.ok(Math.abs(hits / N - expect) < 0.02, `${hits / N} vs ${expect}`);
+  W.weaponMemory.found = {};
+});

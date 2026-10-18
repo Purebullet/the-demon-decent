@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { SPELLS, SPELL_IDS, spellUsesLeft } from '../entities/Spells.js';
-import { WEAPON_TYPES, RARITIES } from '../entities/Weapons.js';
+import { WEAPON_TYPES, RARITIES, buildWeaponMesh, FOUND_MAX } from '../entities/Weapons.js';
 import { xpToNext, MAX_LEVEL, damageMul, swingSpeedMul } from '../game/Levels.js';
 import { makeCanvas } from '../world/Textures.js';
 import { IconAtlas } from './IconAtlas.js';
+import { Assets } from '../assets/AssetLibrary.js';
 import { RELICS, relicPassive } from '../combat/Relics.js';
 import { PROCS, ENCHANTS } from '../combat/Procs.js';
 import { MOMENTUM_MAX } from '../combat/Styles.js';
@@ -341,6 +342,12 @@ export class Hud {
     this.toasts = [];
     this.toastDirty = false;
     this.announcement = null;
+    // The death screen's weapons gallery: the cards drawn this paint (where
+    // _renderShowcase puts each model), how many fit, the window they show
+    // in, and the scroll (first card, and where the slide has got to).
+    this.showcase = { cards: [], fit: 5, clip: null, alpha: 0 };
+    this.arsenalFirst = 0;
+    this.arsenalPos = 0;
     this.buttons = [];
     this.touch = false;
     this.hurt = 0;
@@ -434,7 +441,11 @@ export class Hud {
   }
 
   setEnd(info) {
-    if (!info.ready) this.endShownAt = this.time;
+    if (!info.ready) {
+      this.endShownAt = this.time;
+      this.arsenalFirst = 0;
+      this.arsenalPos = 0;
+    }
     this.endInfo = info;
     this.dirty = true;
   }
@@ -544,6 +555,18 @@ export class Hud {
     this.notice = null;
     if (this.panel === 'notice') this.panel = null;
     this.dirty = true;
+  }
+
+  // The death screen's weapons: a step left (-1) or right (+1) when there
+  // are more than fit.
+  scrollArsenal(d) {
+    const n = this.endInfo?.arsenal?.length || 0;
+    const fit = this.showcase?.fit || 5;
+    const first = Math.max(0, Math.min(Math.max(0, n - fit), (this.arsenalFirst || 0) + d));
+    if (first !== this.arsenalFirst) {
+      this.arsenalFirst = first;
+      this.dirty = true;
+    }
   }
 
   // A level gained: { level, points, stats: [{ id, name, text, color, per,
@@ -948,6 +971,95 @@ export class Hud {
     }
     this._updateLayers(dt);
     renderer.render(this.scene, this.camera);
+    // The death screen's weapons, turning in their cards.
+    if (this.panel === 'death' && this.endInfo?.arsenal?.length) {
+      const to = this.arsenalFirst || 0;
+      const was = this.arsenalPos || 0;
+      this.arsenalPos = Math.abs(to - was) < 0.002 ? to : was + (to - was) * Math.min(1, dt * 9);
+      if (this.arsenalPos !== was) this.dirty = true;
+      this._renderShowcase(renderer, dt);
+    }
+  }
+
+  // Each card's weapon, drawn in 3D into its own corner of the screen (over
+  // the painted card), turning slowly and lit in its rarity's colour.
+  _renderShowcase(renderer) {
+    const sc = this.showcase;
+    if (!sc?.cards?.length || this.fadeValue > 0.02 || sc.alpha < 0.05) return;
+    if (!sc.scene) {
+      sc.scene = new THREE.Scene();
+      sc.scene.add(new THREE.HemisphereLight(0xffe6cc, 0x2a0a06, 1.6));
+      const key = new THREE.DirectionalLight(0xfff0dd, 2.4);
+      key.position.set(1.5, 2, 3);
+      sc.scene.add(key);
+      sc.rim = new THREE.DirectionalLight(0xff6a20, 2.2);
+      sc.rim.position.set(-2, 1, -2.5);
+      sc.scene.add(sc.rim);
+      sc.camera = new THREE.PerspectiveCamera(26, 1, 0.1, 20);
+      sc.camera.position.set(0, 0, 3.2);
+      sc.camera.lookAt(0, 0, 0);
+      sc.models = new Map();
+    }
+    const u = this.u;
+    const H = this.h;
+    const size = renderer.getSize(new THREE.Vector2());
+    renderer.setScissorTest(true);
+    for (const c of sc.cards) {
+      const m = this._showcaseModel(c.entry.weapon);
+      if (!m) continue;
+      // Where the card's window lets it show, in screen pixels.
+      const x0 = Math.max(c.x, sc.clip.x) * u;
+      const x1 = Math.min(c.x + c.w, sc.clip.x + sc.clip.w) * u;
+      if (x1 - x0 < 2) continue;
+      for (const o of sc.models.values()) o.visible = o === m;
+      m.rotation.y = this.time * 0.9 + c.i * 1.3;
+      sc.rim.color.set(c.entry.weapon.color || '#ff6a20');
+      sc.camera.aspect = c.w / c.h;
+      sc.camera.updateProjectionMatrix();
+      renderer.setViewport(c.x * u, H - (c.y + c.h) * u, c.w * u, c.h * u);
+      renderer.setScissor(x0, H - (c.y + c.h) * u, x1 - x0, c.h * u);
+      renderer.clearDepth();
+      renderer.render(sc.scene, sc.camera);
+    }
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, size.x, size.y);
+  }
+
+  // A weapon's model for the gallery: centred, upright and sized to its card
+  // (kept, one per weapon).
+  _showcaseModel(weapon) {
+    const sc = this.showcase;
+    // (Its model may still be loading: a stand-in until it is.)
+    const key = `${weapon.model}|${weapon.rarity}|${weapon.enchant || ''}|${Assets.hasProp(weapon.model) ? 1 : 0}`;
+    let m = sc.models.get(key);
+    if (m) return m;
+    // A stand-in replaced by its model: let the stand-in go.
+    for (const [k, o] of sc.models) {
+      if (k.startsWith(`${weapon.model}|${weapon.rarity}|${weapon.enchant || ''}|`)) {
+        sc.scene.remove(o);
+        sc.models.delete(k);
+      }
+    }
+    let mesh;
+    try {
+      mesh = buildWeaponMesh(weapon, { rim: 0.9 });
+    } catch {
+      return null;
+    }
+    const box = new THREE.Box3().setFromObject(mesh);
+    const dim = box.getSize(new THREE.Vector3());
+    const mid = box.getCenter(new THREE.Vector3());
+    mesh.position.sub(mid);
+    m = new THREE.Group();
+    const tilt = new THREE.Group();
+    tilt.add(mesh);
+    // A little leaned, so it reads as it turns.
+    tilt.rotation.z = -0.18;
+    m.add(tilt);
+    m.scale.setScalar(1.45 / Math.max(dim.x, dim.y, dim.z, 1e-3));
+    sc.scene.add(m);
+    sc.models.set(key, m);
+    return m;
   }
 
   _lowHealth() {
@@ -2390,7 +2502,11 @@ export class Hud {
     // (A narrow screen stacks the panel: depth on top, the stones in two
     // columns below.)
     const narrow = Math.min(900, w - 40) < 620;
-    const ph = narrow ? 446 : 214;
+    // On a death: the weapons every run so far has found, beside the depth,
+    // and the run's stones in a row beneath.
+    const gallery = !won && Array.isArray(e.arsenal);
+    if (!gallery) this.showcase.cards = [];
+    const ph = gallery ? (narrow ? 568 : 296) : narrow ? 446 : 214;
     const tall = big * 0.24 + 96 + lift + ph + 46 + (won && e.time ? 34 + Math.min(5, Math.max(1, (e.board || []).length)) * 22 + 28 : 0) + 58;
     const ty = Math.max(big * 0.8 + 6, Math.min(h * 0.22, h - tall));
     g.save();
@@ -2433,7 +2549,7 @@ export class Hud {
     g.save();
     g.globalAlpha = appear(0.45);
     this._frame(g, px, py, pw, ph, hue);
-    const dw = narrow ? Math.min(260, pw - 40) : Math.min(250, pw * 0.3);
+    const dw = narrow ? Math.min(260, pw - 40) : gallery ? Math.min(210, pw * 0.26) : Math.min(250, pw * 0.3);
     const dx = narrow ? px + pw / 2 : px + dw / 2 + 14;
     if (won && e.time) {
       // A finished descent: its time, and how it stands against your best.
@@ -2453,22 +2569,43 @@ export class Hud {
     // The rule between the two halves.
     g.fillStyle = `${hue.deep}0.45)`;
     if (narrow) g.fillRect(px + 22, py + 206, pw - 44, 1);
-    else g.fillRect(px + dw + 26, py + 22, 1, ph - 44);
+    else g.fillRect(px + dw + 26, py + 22, 1, (gallery ? 200 : ph) - 44);
     const stats = e.stats || [];
-    const cols = narrow ? 2 : 3;
-    const gx = narrow ? px + 20 : px + dw + 44;
-    const gw = narrow ? pw - 40 : pw - dw - 66;
-    const tw = (gw - 12 * (cols - 1)) / cols;
-    const th = narrow ? 66 : (ph - 52) / 2;
-    const gy = narrow ? py + 220 : py + 22;
-    stats.forEach(([icon, label, value, color], k) => {
-      const tx = gx + (k % cols) * (tw + 12);
-      const tyy = gy + Math.floor(k / cols) * (th + 8);
-      g.save();
-      g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
-      this._tile(g, tx, tyy, tw, th, icon, label, value, hue, color);
-      g.restore();
-    });
+    if (gallery) {
+      // The weapons, then the stones in a row (two by two on a narrow screen).
+      const ax = narrow ? px + 20 : px + dw + 44;
+      const aw = narrow ? pw - 40 : pw - dw - 66;
+      this._paintArsenal(g, ax, narrow ? py + 218 : py + 16, aw, 186, e.arsenal, hue, appear(0.55));
+      g.fillStyle = `${hue.deep}0.45)`;
+      g.fillRect(px + 22, py + (narrow ? 412 : 212), pw - 44, 1);
+      const cols = narrow ? 2 : 4;
+      const sx0 = px + 20;
+      const tw = (pw - 40 - 12 * (cols - 1)) / cols;
+      const th = 62;
+      stats.forEach(([icon, label, value, color], k) => {
+        const tx = sx0 + (k % cols) * (tw + 12);
+        const tyy = py + (narrow ? 424 : 222) + Math.floor(k / cols) * (th + 8);
+        g.save();
+        g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
+        this._tile(g, tx, tyy, tw, th, icon, label, value, hue, color);
+        g.restore();
+      });
+    } else {
+      const cols = narrow ? 2 : 3;
+      const gx = narrow ? px + 20 : px + dw + 44;
+      const gw = narrow ? pw - 40 : pw - dw - 66;
+      const tw = (gw - 12 * (cols - 1)) / cols;
+      const th = narrow ? 66 : (ph - 52) / 2;
+      const gy = narrow ? py + 220 : py + 22;
+      stats.forEach(([icon, label, value, color], k) => {
+        const tx = gx + (k % cols) * (tw + 12);
+        const tyy = gy + Math.floor(k / cols) * (th + 8);
+        g.save();
+        g.globalAlpha *= appear(0.6 + k * 0.08, 0.4);
+        this._tile(g, tx, tyy, tw, th, icon, label, value, hue, color);
+        g.restore();
+      });
+    }
     g.restore();
 
     // A finished descent: the week's fastest, under the panel.
@@ -2509,6 +2646,142 @@ export class Hud {
       this._label(g, this.touch ? 'Tap to begin again at the surface' : 'Click, or press Space, to begin again at the surface', w / 2, by + 50, { size: 11, align: 'center', color: C.ash });
       g.restore();
       this.buttons.push({ x: (w / 2) * this.u, y: by * this.u, w: bw * this.u, h: 52 * this.u, code: 'Space', rect: true });
+    }
+  }
+
+  // The weapons found in every run so far, as cards in a window: the name
+  // above, the weapon itself turning in the middle (drawn in 3D over the
+  // card by _renderShowcase), and below how much more often it drops and
+  // in how many runs it was found. More than fit: arrows, and it scrolls.
+  _paintArsenal(g, x, y, w, h, list, hue, alpha) {
+    const sc = this.showcase;
+    sc.cards = [];
+    sc.alpha = alpha;
+    g.save();
+    g.globalAlpha *= alpha;
+    const top = y + 24;
+    const ch = h - 24;
+    this._label(g, 'Weapons found · all runs', x, y + 12, { size: 11, color: C.ash });
+    if (!list.length) {
+      this._text(g, 'No weapon found yet', x + w / 2, top + ch / 2 - 10, { size: 16, color: C.bone, align: 'center' });
+      const lines = this._wrapLinesOf(g, 'Take one from a fallen demon. Each run that finds a weapon makes it drop more often.', w - 40, 12);
+      lines.forEach((ln, i) => this._text(g, ln, x + w / 2, top + ch / 2 + 14 + i * 16, { size: 12, color: C.ash, align: 'center' }));
+      g.restore();
+      return;
+    }
+    const gap = 8;
+    const minW = 102;
+    const fits = (room) => Math.max(1, Math.min(5, Math.floor((room + gap) / (minW + gap))));
+    let n = fits(w);
+    const scroll = list.length > n;
+    const aw = scroll ? 26 : 0;
+    const wx = x + aw;
+    const ww = w - aw * 2;
+    if (scroll) n = fits(ww);
+    sc.fit = n;
+    const most = Math.max(0, list.length - n);
+    if (this.arsenalFirst > most) this.arsenalFirst = most;
+    const pos = Math.min(this.arsenalPos || 0, most);
+    const cw = (ww - gap * (n - 1)) / n;
+    const pitch = cw + gap;
+    // Which ones show, at the header's right; or what the cards mean.
+    const right = scroll ? `${this.arsenalFirst + 1} to ${this.arsenalFirst + n} of ${list.length}` : 'Each run that finds one makes it drop more often';
+    const rs = Math.min(10, (10 * (w * 0.5)) / Math.max(1, this._measure(g, right.toUpperCase(), { size: 10, ls: 2 })));
+    this._label(g, right, x + w, y + 12, { size: rs, ls: 2 * (rs / 10), color: C.bone, align: 'right' });
+    sc.clip = { x: wx, y: top, w: ww, h: ch };
+    g.save();
+    g.beginPath();
+    g.rect(wx - 1, top - 1, ww + 2, ch + 2);
+    g.clip();
+    list.forEach((entry, i) => {
+      const cx = wx + (i - pos) * pitch;
+      if (cx + cw < wx - 1 || cx > wx + ww + 1) return;
+      this._arsenalCard(g, cx, top, cw, ch, entry);
+      sc.cards.push({ x: cx, y: top + 36, w: cw, h: ch - 36 - 42, entry, i });
+    });
+    g.restore();
+    if (scroll) {
+      // The arrows, either side of the window.
+      for (const [ax, d, code] of [[x, -1, 'ArrowLeft'], [x + w - aw + 4, 1, 'ArrowRight']]) {
+        const live = d < 0 ? this.arsenalFirst > 0 : this.arsenalFirst < most;
+        const hot = live && this.hoverCode === code;
+        g.fillStyle = hot ? 'rgba(90,20,8,0.9)' : 'rgba(30,8,5,0.8)';
+        g.fillRect(ax, top, aw - 4, ch);
+        g.strokeStyle = live ? hue.accent : 'rgba(120,50,30,0.4)';
+        g.lineWidth = 1;
+        g.strokeRect(ax + 0.5, top + 0.5, aw - 5, ch - 1);
+        g.fillStyle = live ? (hot ? '#fff1dc' : hue.accent) : 'rgba(120,50,30,0.5)';
+        const mx = ax + (aw - 4) / 2;
+        const my = top + ch / 2;
+        g.beginPath();
+        g.moveTo(mx + d * 5, my);
+        g.lineTo(mx - d * 4, my - 9);
+        g.lineTo(mx - d * 4, my + 9);
+        g.closePath();
+        g.fill();
+        if (live) this.buttons.push({ x: (ax + (aw - 4) / 2) * this.u, y: my * this.u, w: (aw - 4) * this.u, h: ch * this.u, code, rect: true });
+      }
+    }
+    g.restore();
+  }
+
+  // One weapon's card (the model itself is drawn over it in 3D).
+  _arsenalCard(g, x, y, w, h, entry) {
+    const W = entry.weapon;
+    const col = W.color || '#a89f94';
+    g.save();
+    g.fillStyle = 'rgba(20,6,4,0.92)';
+    g.fillRect(x, y, w, h);
+    g.strokeStyle = hexA(col, 0.5);
+    g.lineWidth = 1;
+    g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    g.fillStyle = col;
+    g.shadowColor = col;
+    g.shadowBlur = 8;
+    g.fillRect(x + 6, y + 2, w - 12, 2);
+    g.shadowBlur = 0;
+    // A pool of its colour behind where the weapon turns.
+    const my = y + 36 + (h - 78) / 2;
+    const glow = g.createRadialGradient(x + w / 2, my, 2, x + w / 2, my, Math.min(w, h - 78) * 0.62);
+    glow.addColorStop(0, hexA(col, 0.32));
+    glow.addColorStop(1, hexA(col, 0));
+    g.fillStyle = glow;
+    g.fillRect(x + 1, y + 34, w - 2, h - 76);
+    g.restore();
+    // Its name, on a line or two.
+    let size = 12;
+    let lines = this._wrapLinesOf(g, W.name, w - 10, size);
+    if (lines.length > 2) {
+      size = 10;
+      lines = this._wrapLinesOf(g, W.name, w - 10, size).slice(0, 2);
+    }
+    lines.forEach((ln, i) => {
+      const fs = Math.min(size, (size * (w - 10)) / Math.max(1, this._measure(g, ln, { size })));
+      this._text(g, ln, x + w / 2, y + 17 + i * (size + 3) - (lines.length - 1) * 4, { size: fs, color: col, align: 'center', glow: 'rgba(0,0,0,1)' });
+    });
+    // Found this run: marked.
+    if (entry.fresh) {
+      g.save();
+      g.fillStyle = 'rgba(255,200,90,0.92)';
+      g.fillRect(x + w - 34, y + h - 58, 30, 13);
+      g.restore();
+      this._text(g, 'NEW', x + w - 19, y + h - 51, { size: 8, weight: 'bold ', ls: 1, color: '#2a0a04', align: 'center', base: 'middle' });
+    }
+    // How much more often it drops, and the runs that found it.
+    const pct = `+${Math.round(entry.boost * 100)}% drop chance`;
+    const ps = Math.min(12, (12 * (w - 10)) / Math.max(1, this._measure(g, pct, { size: 12 })));
+    this._text(g, pct, x + w / 2, y + h - 24, { size: ps, color: '#ffd36a', align: 'center', glow: 'rgba(160,80,0,0.8)' });
+    const pip = 7;
+    const pg = 5;
+    let px = x + w / 2 - (FOUND_MAX * pip + (FOUND_MAX - 1) * pg) / 2;
+    for (let k = 0; k < FOUND_MAX; k++) {
+      g.save();
+      g.translate(px + pip / 2, y + h - 11);
+      g.rotate(Math.PI / 4);
+      g.fillStyle = k < entry.runs ? '#ffb347' : 'rgba(90,30,16,0.8)';
+      g.fillRect(-pip / 2.8, -pip / 2.8, pip / 1.4, pip / 1.4);
+      g.restore();
+      px += pip + pg;
     }
   }
 
@@ -2672,8 +2945,8 @@ export class Hud {
     g.fillStyle = hue.accent;
     g.fillRect(x, y, 3, h);
     g.restore();
-    const s = Math.min(34, h * 0.5);
-    this._glyph(g, icon, x + 14 + s / 2, y + h / 2, s, hue.accent);
+    const s = Math.min(48, h * 0.74);
+    this._glyph(g, icon, x + 12 + s / 2, y + h / 2, s, hue.accent);
     // A long value (a weapon's name) shrinks to fit its stone, and if even
     // that is too long, takes two lines.
     const text = String(value);
@@ -2705,106 +2978,20 @@ export class Hud {
 
   // The marks on the stones, drawn as small silhouettes.
   _glyph(g, kind, cx, cy, s, color) {
-    g.save();
-    g.translate(cx, cy);
-    g.scale(s / 32, s / 32);
-    g.fillStyle = color;
-    g.strokeStyle = color;
-    g.lineWidth = 2.6;
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    if (kind === 'skull') {
-      g.beginPath();
-      g.arc(0, -3, 11, Math.PI * 0.9, Math.PI * 2.1);
-      g.lineTo(7, 10);
-      g.lineTo(-7, 10);
-      g.closePath();
-      g.fill();
-      g.fillStyle = 'rgba(30,8,5,1)';
-      g.beginPath();
-      g.arc(-4.5, -2, 3.2, 0, Math.PI * 2);
-      g.arc(4.5, -2, 3.2, 0, Math.PI * 2);
-      g.fill();
-      g.fillRect(-0.8, 3, 1.6, 4);
-      g.fillRect(-4, 8, 1.2, 3);
-      g.fillRect(2.8, 8, 1.2, 3);
-    } else if (kind === 'chain') {
-      for (const [dx, dy] of [[-6, 5], [6, -5]]) {
-        g.save();
-        g.translate(dx, dy);
-        g.rotate(-Math.PI / 4);
-        g.beginPath();
-        g.ellipse(0, 0, 9, 5, 0, 0, Math.PI * 2);
-        g.stroke();
-        g.restore();
-      }
-    } else if (kind === 'blades') {
-      for (const sgn of [-1, 1]) {
-        g.save();
-        g.rotate((sgn * Math.PI) / 4);
-        g.beginPath();
-        g.moveTo(0, -14);
-        g.lineTo(2.5, -10);
-        g.lineTo(2.5, 6);
-        g.lineTo(-2.5, 6);
-        g.lineTo(-2.5, -10);
-        g.closePath();
-        g.fill();
-        g.fillRect(-6, 6, 12, 2.5);
-        g.fillRect(-1.2, 8.5, 2.4, 6);
-        g.restore();
-      }
-    } else if (kind === 'shield') {
-      g.beginPath();
-      g.moveTo(0, -13);
-      g.lineTo(11, -9);
-      g.lineTo(10, 2);
-      g.quadraticCurveTo(7, 10, 0, 14);
-      g.quadraticCurveTo(-7, 10, -10, 2);
-      g.lineTo(-11, -9);
-      g.closePath();
-      g.fill();
-      g.fillStyle = 'rgba(30,8,5,1)';
-      g.fillRect(-1, -9, 2, 18);
-      g.fillRect(-7, -2, 14, 2);
-    } else if (kind === 'gem') {
-      g.beginPath();
-      g.moveTo(-11, -4);
-      g.lineTo(-6, -11);
-      g.lineTo(6, -11);
-      g.lineTo(11, -4);
-      g.lineTo(0, 13);
-      g.closePath();
-      g.fill();
-      g.strokeStyle = 'rgba(30,8,5,0.9)';
-      g.lineWidth = 1.4;
-      g.beginPath();
-      g.moveTo(-11, -4);
-      g.lineTo(11, -4);
-      g.moveTo(-4, -4);
-      g.lineTo(0, 13);
-      g.lineTo(4, -4);
-      g.stroke();
-    } else if (kind === 'glass') {
-      g.fillRect(-10, -14, 20, 3);
-      g.fillRect(-10, 11, 20, 3);
-      g.beginPath();
-      g.moveTo(-7, -11);
-      g.lineTo(7, -11);
-      g.lineTo(1.5, 0);
-      g.lineTo(7, 11);
-      g.lineTo(-7, 11);
-      g.lineTo(-1.5, 0);
-      g.closePath();
-      g.stroke();
-      g.beginPath();
-      g.moveTo(-4, 11);
-      g.lineTo(4, 11);
-      g.lineTo(0, 5);
-      g.closePath();
-      g.fill();
+    // Drawn once at the size it shows (per kind and colour), then reused.
+    const px = Math.max(16, Math.round(s * this.u * this.scale));
+    const key = `${kind}|${color}|${px}`;
+    const cache = (this._glyphCache ||= new Map());
+    let c = cache.get(key);
+    if (!c) {
+      c = makeCanvas(px, px);
+      const cg = c.getContext('2d');
+      cg.translate(px / 2, px / 2);
+      cg.scale(px / 64, px / 64);
+      drawMedal(cg, kind, color);
+      cache.set(key, c);
     }
-    g.restore();
+    g.drawImage(c, cx - s / 2, cy - s / 2, s, s);
   }
 
   // A forged button: hammered plate, a glowing rim, the word in the middle.
@@ -2904,3 +3091,321 @@ function splatAtlas() {
   g.globalCompositeOperation = 'source-over';
   return c;
 }
+
+// ---- The stones' medals ------------------------------------------------------
+// Each mark on the end screen's stones is a small forged medal: a dark,
+// bevelled disc rimmed in the screen's colour, and on it the emblem in its
+// own material (bone, iron, steel, a ruby), outlined and lit from the top
+// left. Drawn on a 64 x 64 square centred on 0, 0.
+
+const TAU2 = Math.PI * 2;
+
+function drawMedal(g, kind, accent) {
+  // Its shadow, the disc, the bevelled rim and an inner ring.
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.beginPath();
+  g.arc(0, 2, 30.5, 0, TAU2);
+  g.fill();
+  const disc = g.createRadialGradient(-9, -11, 2, 0, 0, 30);
+  disc.addColorStop(0, '#3c140b');
+  disc.addColorStop(0.65, '#1a0604');
+  disc.addColorStop(1, '#080202');
+  g.fillStyle = disc;
+  g.beginPath();
+  g.arc(0, 0, 29.5, 0, TAU2);
+  g.fill();
+  const rim = g.createLinearGradient(-24, -24, 24, 24);
+  rim.addColorStop(0, '#ffe2b8');
+  rim.addColorStop(0.35, accent);
+  rim.addColorStop(1, '#2a0804');
+  g.lineWidth = 3;
+  g.strokeStyle = rim;
+  g.beginPath();
+  g.arc(0, 0, 28, 0, TAU2);
+  g.stroke();
+  g.lineWidth = 1;
+  g.strokeStyle = hexA(accent, 0.35);
+  g.beginPath();
+  g.arc(0, 0, 23.5, 0, TAU2);
+  g.stroke();
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  const draw = MEDALS[kind];
+  if (draw) draw(g, accent);
+}
+
+// Fill a path outlined in near-black: the outline first, wide, then the fill.
+function inked(g, path, fill, width = 2.6) {
+  g.save();
+  path(g);
+  g.lineWidth = width;
+  g.strokeStyle = 'rgba(8,2,1,0.92)';
+  g.stroke();
+  g.fillStyle = fill;
+  g.fill();
+  g.restore();
+}
+
+function vgrad(g, y0, y1, stops) {
+  const gr = g.createLinearGradient(0, y0, 0, y1);
+  stops.forEach(([k, c]) => gr.addColorStop(k, c));
+  return gr;
+}
+
+const MEDALS = {
+  // A horned skull, its sockets lit from inside.
+  skull(g) {
+    const bone = vgrad(g, -20, 18, [[0, '#fff6e4'], [0.45, '#e6cfa6'], [1, '#8a6a46']]);
+    // Horns first, behind the head.
+    for (const sx of [-1, 1]) {
+      inked(g, (c) => {
+        c.beginPath();
+        c.moveTo(sx * 11, -13);
+        c.bezierCurveTo(sx * 19, -16, sx * 22, -22, sx * 19, -27);
+        c.bezierCurveTo(sx * 18, -21, sx * 15, -18, sx * 13, -17);
+        c.closePath();
+      }, vgrad(g, -27, -12, [[0, '#d8c4a4'], [1, '#6a4a30']]), 2.2);
+    }
+    inked(g, (c) => {
+      c.beginPath();
+      c.moveTo(-15, 2);
+      c.bezierCurveTo(-17, -12, -9, -20, 0, -20);
+      c.bezierCurveTo(9, -20, 17, -12, 15, 2);
+      c.bezierCurveTo(14.5, 6, 12, 8, 10, 9);
+      c.lineTo(10, 12);
+      c.bezierCurveTo(10, 16, 7, 18, 4, 18);
+      c.lineTo(-4, 18);
+      c.bezierCurveTo(-7, 18, -10, 16, -10, 12);
+      c.lineTo(-10, 9);
+      c.bezierCurveTo(-12, 8, -14.5, 6, -15, 2);
+      c.closePath();
+    }, bone);
+    // Sockets, and the fire in them.
+    g.fillStyle = '#140402';
+    for (const sx of [-1, 1]) {
+      g.beginPath();
+      g.ellipse(sx * 6.4, 1.5, 4.6, 5.4, sx * -0.3, 0, TAU2);
+      g.fill();
+      const eye = g.createRadialGradient(sx * 6.2, 2.4, 0, sx * 6.2, 2.4, 4.2);
+      eye.addColorStop(0, 'rgba(255,220,120,1)');
+      eye.addColorStop(0.35, 'rgba(255,90,20,0.95)');
+      eye.addColorStop(1, 'rgba(120,10,0,0)');
+      g.fillStyle = eye;
+      g.beginPath();
+      g.arc(sx * 6.2, 2.4, 4.2, 0, TAU2);
+      g.fill();
+      g.fillStyle = '#140402';
+    }
+    // The nose, the teeth, a crack, and the light on the brow.
+    g.beginPath();
+    g.moveTo(0, 6.5);
+    g.lineTo(-2.4, 11);
+    g.lineTo(2.4, 11);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = '#2a1406';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(-8.5, 13.6);
+    g.lineTo(8.5, 13.6);
+    for (const x of [-5.5, -2, 2, 5.5]) {
+      g.moveTo(x, 12);
+      g.lineTo(x, 17.5);
+    }
+    g.moveTo(4, -19.5);
+    g.lineTo(6.2, -14.5);
+    g.lineTo(4.2, -11.5);
+    g.lineTo(7, -8);
+    g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(0, -5, 12.5, Math.PI * 1.12, Math.PI * 1.42);
+    g.stroke();
+  },
+
+  // Two iron links, one through the other.
+  chain(g, accent) {
+    const iron = vgrad(g, -20, 20, [[0, '#f2ece2'], [0.4, '#a49c94'], [1, '#3a3330']]);
+    const link = (c, x, y) => {
+      c.save();
+      c.translate(x, y);
+      c.rotate(-Math.PI / 4);
+      c.beginPath();
+      for (const [len, r] of [[26, 8.5], [14, 3.4]]) {
+        const h = len / 2 - r;
+        c.moveTo(-h, -r);
+        c.lineTo(h, -r);
+        c.arc(h, 0, r, -Math.PI / 2, Math.PI / 2);
+        c.lineTo(-h, r);
+        c.arc(-h, 0, r, Math.PI / 2, Math.PI * 1.5);
+        c.closePath();
+      }
+      c.restore();
+    };
+    const ring = (x, y) => {
+      g.save();
+      link(g, x, y);
+      g.lineWidth = 2.4;
+      g.strokeStyle = 'rgba(8,2,1,0.92)';
+      g.stroke();
+      g.fillStyle = iron;
+      g.fill('evenodd');
+      g.restore();
+    };
+    ring(-6.5, 6.5);
+    ring(6.5, -6.5);
+    // Where the first passes over the second: drawn again on top.
+    g.save();
+    g.beginPath();
+    g.rect(-6, -3, 9, 9);
+    g.clip();
+    ring(-6.5, 6.5);
+    g.restore();
+    // A glint of the screen's colour on each.
+    g.strokeStyle = hexA(accent, 0.7);
+    g.lineWidth = 1.4;
+    for (const [x, y] of [[-6.5, 6.5], [6.5, -6.5]]) {
+      g.save();
+      g.translate(x, y);
+      g.rotate(-Math.PI / 4);
+      g.beginPath();
+      g.moveTo(-5, -7);
+      g.lineTo(4, -7);
+      g.stroke();
+      g.restore();
+    }
+  },
+
+  // An iron-rimmed heater shield, its field blood-red, a gold boss.
+  shield(g) {
+    const shape = (k) => (c) => {
+      c.beginPath();
+      c.moveTo(0, -20 * k);
+      c.bezierCurveTo(6 * k, -17 * k, 12 * k, -17 * k, 17 * k, -18 * k);
+      c.lineTo(17 * k, -2 * k);
+      c.bezierCurveTo(17 * k, 10 * k, 9 * k, 17 * k, 0, 21 * k);
+      c.bezierCurveTo(-9 * k, 17 * k, -17 * k, 10 * k, -17 * k, -2 * k);
+      c.lineTo(-17 * k, -18 * k);
+      c.bezierCurveTo(-12 * k, -17 * k, -6 * k, -17 * k, 0, -20 * k);
+      c.closePath();
+    };
+    inked(g, shape(1), vgrad(g, -20, 21, [[0, '#ece4da'], [0.45, '#8a827a'], [1, '#2e2826']]));
+    g.save();
+    shape(0.78)(g);
+    g.fillStyle = vgrad(g, -16, 16, [[0, '#d0301a'], [0.55, '#6a0c06'], [1, '#2a0402']]);
+    g.fill();
+    g.restore();
+    // A band across, and the boss on it.
+    g.fillStyle = vgrad(g, -3, 3, [[0, '#ffe7a0'], [1, '#a8640c']]);
+    g.fillRect(-13, -2.2, 26, 4.4);
+    inked(g, (c) => {
+      c.beginPath();
+      c.moveTo(0, -7);
+      c.lineTo(6, 0);
+      c.lineTo(0, 7);
+      c.lineTo(-6, 0);
+      c.closePath();
+    }, vgrad(g, -7, 7, [[0, '#fff2c0'], [0.5, '#f0a830'], [1, '#7a4006']]), 1.6);
+    // Rivets, and the gloss down its left side.
+    g.fillStyle = '#f4ead8';
+    for (const [x, y] of [[-13, -14], [13, -14], [-12, 4], [12, 4], [0, 16]]) {
+      g.beginPath();
+      g.arc(x, y, 1.3, 0, TAU2);
+      g.fill();
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.5)';
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.moveTo(-14.5, -15);
+    g.lineTo(-14.5, -3);
+    g.stroke();
+  },
+
+  // A cut ruby, each facet its own shade, and a glint.
+  gem(g) {
+    const P = { a: [-16, -4], b: [-9, -13], c: [9, -13], d: [16, -4], e: [5, -4], f: [-5, -4], o: [0, 18] };
+    const facet = (pts, fill) => {
+      g.beginPath();
+      pts.forEach((k, i) => (i ? g.lineTo(...P[k]) : g.moveTo(...P[k])));
+      g.closePath();
+      g.fillStyle = fill;
+      g.fill();
+    };
+    inked(g, (c) => {
+      c.beginPath();
+      ['a', 'b', 'c', 'd', 'o'].forEach((k, i) => (i ? c.lineTo(...P[k]) : c.moveTo(...P[k])));
+      c.closePath();
+    }, '#7a0816', 3);
+    facet(['b', 'c', 'e', 'f'], '#ff9c8c');
+    facet(['a', 'b', 'f'], '#ff4a3c');
+    facet(['d', 'c', 'e'], '#c8142a');
+    facet(['a', 'f', 'o'], '#a40c20');
+    facet(['f', 'e', 'o'], '#d8202e');
+    facet(['e', 'd', 'o'], '#5c0612');
+    g.strokeStyle = 'rgba(40,0,6,0.55)';
+    g.lineWidth = 0.9;
+    g.beginPath();
+    for (const [p, q] of [['b', 'f'], ['c', 'e'], ['a', 'd'], ['f', 'o'], ['e', 'o']]) {
+      g.moveTo(...P[p]);
+      g.lineTo(...P[q]);
+    }
+    g.stroke();
+    // The glint: a four-pointed star.
+    g.fillStyle = 'rgba(255,255,255,0.95)';
+    g.beginPath();
+    const [sx, sy, r] = [-5, -9, 4.5];
+    g.moveTo(sx, sy - r);
+    g.quadraticCurveTo(sx, sy, sx + r, sy);
+    g.quadraticCurveTo(sx, sy, sx, sy + r);
+    g.quadraticCurveTo(sx, sy, sx - r, sy);
+    g.quadraticCurveTo(sx, sy, sx, sy - r);
+    g.fill();
+  },
+
+  // Two swords crossed, steel blades and gilt hilts.
+  blades(g) {
+    for (const sgn of [-1, 1]) {
+      g.save();
+      g.rotate(sgn * 0.74);
+      inked(g, (c) => {
+        c.beginPath();
+        c.moveTo(0, -22);
+        c.lineTo(2.6, -17);
+        c.lineTo(2.2, 6);
+        c.lineTo(-2.2, 6);
+        c.lineTo(-2.6, -17);
+        c.closePath();
+      }, (() => {
+        const st = g.createLinearGradient(-3, 0, 3, 0);
+        st.addColorStop(0, '#ffffff');
+        st.addColorStop(0.5, '#b8b4b0');
+        st.addColorStop(1, '#4a4644');
+        return st;
+      })(), 2.2);
+      g.strokeStyle = 'rgba(40,36,34,0.7)';
+      g.lineWidth = 0.8;
+      g.beginPath();
+      g.moveTo(0, -15);
+      g.lineTo(0, 4);
+      g.stroke();
+      inked(g, (c) => {
+        c.beginPath();
+        c.moveTo(-8, 5.5);
+        c.quadraticCurveTo(0, 8.5, 8, 5.5);
+        c.lineTo(8, 8.5);
+        c.quadraticCurveTo(0, 10.5, -8, 8.5);
+        c.closePath();
+      }, vgrad(g, 5, 10, [[0, '#ffe7a0'], [1, '#9a5a0a']]), 1.8);
+      inked(g, (c) => {
+        c.beginPath();
+        c.rect(-1.6, 9, 3.2, 7);
+      }, '#3a1a0c', 1.6);
+      inked(g, (c) => {
+        c.beginPath();
+        c.arc(0, 18, 2.6, 0, TAU2);
+      }, vgrad(g, 15, 21, [[0, '#ffe7a0'], [1, '#9a5a0a']]), 1.6);
+      g.restore();
+    }
+  },
+};

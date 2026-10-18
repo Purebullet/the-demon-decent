@@ -145,17 +145,51 @@ export function rollRarity(floor, luck = 0) {
   return 0;
 }
 
-// A weapon a demon drops (or a chest holds) on a given floor: any model but
-// the one you started with, its rarity rolled for the depth (`luck` tips the
-// odds further: chests, bosses).
-// The best weapon of the last run ended: the next runs turn it up more often.
-export const weaponMemory = { favourite: null };
-const FAVOURITE_ODDS = 0.35;
+// What the runs so far have found: for each weapon (by its model) the best
+// copy taken in hand, and in how many runs one was taken (FOUND_MAX at
+// most). Each such run makes it turn up more often: FOUND_BOOST more likely
+// a run. (Kept while the game stays open: Project 0 gives games no storage.)
+export const FOUND_MAX = 4;
+export const FOUND_BOOST = 0.2;
+export const weaponMemory = { found: {} };
 
+// The better of two copies: rarer, then harder hitting.
+export const betterWeapon = (a, b) => !b || (a.rarity ?? -1) > (b.rarity ?? -1) || ((a.rarity ?? -1) === (b.rarity ?? -1) && a.damage > b.damage);
+
+// How much more likely a model is to drop, for the runs it was found in.
+export const foundBoost = (model) => FOUND_BOOST * Math.min(FOUND_MAX, weaponMemory.found[model]?.runs || 0);
+
+// A run's finds (model -> the best copy it took) into the memory; returns
+// every weapon remembered, best first ({ model, weapon, runs, boost, fresh }).
+export function rememberWeapons(found) {
+  for (const m of Object.values(weaponMemory.found)) m.fresh = false;
+  for (const [model, w] of Object.entries(found || {})) {
+    if (!WEAPON_MODELS[model] || WEAPON_MODELS[model].starter) continue;
+    const m = (weaponMemory.found[model] ||= { runs: 0, weapon: w });
+    m.runs = Math.min(FOUND_MAX, m.runs + 1);
+    if (betterWeapon(w, m.weapon)) m.weapon = w;
+    m.fresh = true;
+  }
+  return Object.entries(weaponMemory.found)
+    .map(([model, m]) => ({ model, weapon: m.weapon, runs: m.runs, boost: foundBoost(model), fresh: m.fresh }))
+    .sort((a, b) => (betterWeapon(a.weapon, b.weapon) ? -1 : betterWeapon(b.weapon, a.weapon) ? 1 : b.runs - a.runs));
+}
+
+// A weapon a demon drops (or a chest holds) on a given floor: any model but
+// the one you started with (those found in earlier runs more often), its
+// rarity rolled for the depth (`luck` tips the odds further: chests,
+// bosses).
 export function rollWeapon(floor, luck = 0) {
   const ids = Object.keys(WEAPON_MODELS).filter((id) => !WEAPON_MODELS[id].starter);
-  const fav = weaponMemory.favourite;
-  const model = fav && ids.includes(fav) && Math.random() < FAVOURITE_ODDS ? fav : ids[Math.floor(Math.random() * ids.length)];
+  const weights = ids.map((id) => 1 + foundBoost(id));
+  let x = Math.random() * weights.reduce((a, b) => a + b, 0);
+  let model = ids[ids.length - 1];
+  for (let i = 0; i < ids.length; i++) {
+    if ((x -= weights[i]) < 0) {
+      model = ids[i];
+      break;
+    }
+  }
   const rarity = rollRarity(floor, luck);
   const en = Object.keys(ENCHANTS);
   const enchant = Math.random() < RARITIES[rarity].enchant ? en[Math.floor(Math.random() * en.length)] : null;

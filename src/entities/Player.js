@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OBB } from '../physics/OBB.js';
 import { queryHurtboxes } from '../physics/Hitbox.js';
-import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc, weaponReach, applyRim } from './Weapons.js';
+import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc, weaponReach, applyRim, betterWeapon } from './Weapons.js';
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
 import { TorchFire } from '../world/TorchFire.js';
@@ -278,6 +278,12 @@ export class Player {
     this.run.weapon = weapon;
     // The best blade the run has held, for the end of it.
     if (!this.run.bestWeapon || weapon.damage > this.run.bestWeapon.damage) this.run.bestWeapon = weapon;
+    // Every weapon the run takes in hand (its best copy of each), for the
+    // memory the next runs draw on (Weapons.rememberWeapons).
+    if (weapon.rarity >= 0) {
+      const found = (this.run.found ||= {});
+      if (betterWeapon(weapon, found[weapon.model])) found[weapon.model] = weapon;
+    }
     this.weaponDef = WEAPON_TYPES[weapon.type];
     // Where this one's blade (or head) is, from its own model.
     const { blade, steel } = weaponReach(weapon);
