@@ -32,6 +32,14 @@ import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
 
 // The chance an elite demon carries a relic.
 const ELITE_RELIC = 0.27;
+// The lot's owner (Project 0 name, lower case): never paid a prize.
+const OWNER = 'purebullet';
+// What the Deep's first floor says before it lets you in.
+const DEEP_NOTICE = {
+  title: 'Still being dug',
+  lines: ['Floors 6 to 10 are in development.', 'You can play on to the end, but expect rough edges: layouts, demons and the last lord may still change, and some parts are unfinished.', 'Thank you for descending this far.'],
+  button: 'Descend',
+};
 
 const ARMOR_HINT = 'A <b>gold</b> glow is an armoured blow: light hits won\u2019t stop it. <b>Block, dodge</b> or hit it heavy';
 
@@ -148,6 +156,14 @@ export class Game {
 
     // Scores live in the host (the lot's weekly table on Project 0).
     host.on('reward', (r2) => {
+      // The Sleeper's bounty, paid.
+      if (r2?.kind === 'win') {
+        if (r2.ok && r2.tokens > 0) {
+          this.hud.toast(`The Sleeper's bounty: ${r2.tokens} tokens are yours`);
+          this.audio.levelUp?.();
+        }
+        return;
+      }
       if (r2?.kind !== 'score') return;
       // The answer to a descent's time, or to a floor reached.
       if (r2.board === DESCENT_BOARD || (this.pendingTime && r2.score === this.pendingTime)) {
@@ -516,7 +532,26 @@ export class Game {
       best: this.best,
       table: this.table,
       dev: this.devFloor ? `Dev start: floor ${this.devFloor} (scores not recorded)` : '',
+      bounty: this._bounty(),
     });
+  }
+
+  // The prize for slaying the Sleeper, as the lot's rules set it: what the
+  // player receives (the city keeps its fee, a tenth), or 0 when there is
+  // none (or this player is the lot's owner).
+  _bounty() {
+    const G = this.host.game;
+    if (!G || G.mode !== 'win' || !(G.prize > 0) || G.paused || this._isOwner()) return 0;
+    return Math.round(G.prize * (1 - (G.fee ?? 0.1)) * 10) / 10;
+  }
+
+  // The lot's owner plays for nothing: known by name, or by a row of the
+  // week's tables that is both theirs and the owner's.
+  _isOwner() {
+    const name = this.host.me?.()?.name;
+    if (typeof name === 'string' && name.trim().toLowerCase() === OWNER) return true;
+    const rows = [...(this.host.table || []), ...Object.values(this.host.boards || {}).flatMap((b) => b || [])];
+    return rows.some((r) => r?.you && r?.owner);
   }
 
   _enterTitle() {
@@ -728,18 +763,20 @@ export class Game {
     this.floorTitle = [`Floor ${floor}`, def.boss ? def.name : `${def.name}${inDeep ? ', in the Deep' : ''}`, hold];
     this.intro = null;
     this.renderer.toneMappingExposure = 1.2;
-    if (arrival) this._beginArrival(level);
+    // The Deep is still being dug: its first floor opens on a notice that
+    // says so, and the floor's title waits until it has been read.
+    this.notice = null;
+    if (floor === DEEP_FROM && !arrival) {
+      this.notice = { floor, hold };
+      this.hud.showNotice(DEEP_NOTICE);
+      this._openMenu();
+    } else if (arrival) this._beginArrival(level);
     else this.hud.announce(...this.floorTitle);
     if (this.newRecord) {
       this.newRecord = false;
       setTimeout(() => this.hud.toast('New deepest descent!'), 1500);
     }
-    // The first step into the Deep: say what has changed.
-    if (floor === DEEP_FROM) {
-      setTimeout(() => {
-        if (this.run?.floor === floor) this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates', hold);
-      }, (arrival ? 9 : hold - 0.2) * 1000);
-    } else if (floor > DEEP_FROM && !def.boss) {
+    if (floor > DEEP_FROM && !def.boss) {
       // Each floor below that: they grow worse again.
       setTimeout(() => {
         if (this.run?.floor === floor) this.hud.toast('Deeper still: the demons grow stronger and quicker');
@@ -929,6 +966,12 @@ export class Game {
     if ((e.elite && Math.random() < ELITE_RELIC) || e.isBoss) this.pickups.addRelic(x + off(), z + off(), rollRelic(run));
     if (e.isBoss) {
       this.hud.announce(`${e.name.split(',')[0]} is slain`, 'The seal breaks');
+      // Slaying the Sleeper is the lot's win: its prize goes to the player
+      // (never to the lot's owner, nor on a dev start).
+      if (e.bossKey === 'sleeper' && !run.dev && !run.won && !this._isOwner()) {
+        run.won = true;
+        this.host.win?.();
+      }
       this.pickups.addPotion(x + 1.2, z);
       // The Sleeper's hall falls quiet for his last words; its gate goes up
       // and its fountain of blood rises.
@@ -940,6 +983,8 @@ export class Game {
   }
 
   _updateFloor(dt) {
+    // A notice up (the Deep's first floor): the floor holds still meanwhile.
+    if (this._updateNotice(dt)) return;
     // Choosing what a level brings: the floor holds still meanwhile.
     if (this._updateLevelUp(dt)) return;
     const ctx = this.ctx;
@@ -1117,6 +1162,34 @@ export class Game {
     return true;
   }
 
+  // The notice on the Deep's first floor: Enter, Space, F or its button
+  // closes it, then the floor's title and what the Deep holds are shown.
+  // Returns true while it is up.
+  _updateNotice(dt) {
+    const n = this.notice;
+    if (!n) return false;
+    this.hud.update(dt, this.player, this.run, { floorLabel: `Floor ${this.run.floor} / ${FLOOR_COUNT}: ${this.level.def.name}`, enemyLabel: '', best: this.best, prompt: '' });
+    // (A pause over it takes the screen; back from the pause, it returns.)
+    if (!this.hud.panel) {
+      this.hud.showNotice(DEEP_NOTICE);
+      this._openMenu();
+      return true;
+    }
+    const go = ['Enter', 'Space', 'KeyF', 'NumpadEnter'].some((k) => this.input.wasPressed(k));
+    this.input.consumeMouse();
+    if (!go) return true;
+    this.notice = null;
+    this.hud.hideNotice();
+    this._closeMenu();
+    this.audio.choose?.();
+    this.hud.announce(...this.floorTitle);
+    const floor = n.floor;
+    setTimeout(() => {
+      if (this.run?.floor === floor && this.fsm.currentName === 'floor') this.hud.announce('Into the Deep', 'Its demons are quicker, hunt in packs, lie in ambush; champions guard the gates', n.hold);
+    }, (n.hold - 0.2) * 1000);
+    return true;
+  }
+
   // A menu over the game takes the mouse: with the pointer locked it moves
   // a cursor of the game's own from near the top of the screen (clear of the
   // choices, so a stray click picks nothing); without a lock, the page's.
@@ -1273,6 +1346,10 @@ export class Game {
   }
 
   _exitFloor() {
+    if (this.notice) {
+      this.notice = null;
+      this.hud.hideNotice();
+    }
     this.effects?.clear();
     this.pickups?.clear();
     this.level?.dispose();

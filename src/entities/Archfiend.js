@@ -41,6 +41,8 @@ const QUICK = [1, 0.85, 0.72];
 const FAST = [1, 1.1, 1.2];
 // How far off he likes to circle.
 const RING = 6.2;
+// He lies still until you have come this near (into the arena), or struck him.
+const WAKE_RANGE = 12;
 const OPEN_COL = new THREE.Color(1, 0.45, 0.06);
 const _v = new THREE.Vector3();
 
@@ -67,9 +69,10 @@ export class Archfiend extends Boss {
     return this._atk || (this._atk = Object.fromEntries(this.type.attacks.map((a) => [a.name, a])));
   }
 
-  // He wakes with a roar before he moves.
+  // He wakes with a roar before he moves: once you have come in to him.
   becomeAlert(ctx) {
     if (this.state !== 'dormant') return;
+    if (!this.struck && this.distToPlayer > WAKE_RANGE) return;
     super.becomeAlert(ctx);
     this.setState('intro', 2.1);
     ctx.audio?.bossRoar?.(this.position);
@@ -131,6 +134,7 @@ export class Archfiend extends Boss {
 
   takeHit(amount, dir, knockback, stagger, ctx, opts = {}) {
     if (!this.alive) return 0;
+    this.struck = true;
     const mul = this.damageTakenMul();
     if (mul <= 0) {
       if (!opts.proc) this._glance(ctx, opts.contact, true);
@@ -255,7 +259,8 @@ export class Archfiend extends Boss {
     if (this.cooldown > 0) return;
     if (!this.plan) {
       const can = (a) => (!a.minPhase || this.phase >= a.minPhase) && (a.weight || 0) > 0;
-      const opts = this.type.attacks.filter((a) => can(a) && !a.comboOnly && !a.behind && dist <= a.maxRange + (a.name === 'rake' ? 6 : 0) && dist >= a.minRange - (a.name === 'rake' ? 99 : 0));
+      const near = (a) => a.name === 'rake' || a.close;
+      const opts = this.type.attacks.filter((a) => can(a) && !a.comboOnly && !a.behind && dist <= a.maxRange + (near(a) ? 6 : 0) && dist >= a.minRange - (near(a) ? 99 : 0));
       if (!opts.length) return;
       let roll = Math.random() * opts.reduce((s, a) => s + a.weight, 0);
       this.plan = opts[opts.length - 1];
@@ -267,10 +272,10 @@ export class Archfiend extends Boss {
     }
     this.planT += dt;
     const a = this.plan;
-    if (a.name === 'rake') {
+    if (a.name === 'rake' || a.close) {
       // Close in for the claws (a sprint), and strike once in reach.
       this.closing = true;
-      if (dist <= 3.1 && off < 0.6) this._go(a, ctx, quick);
+      if (dist <= (a.close ? 3.4 : 3.1) && off < (a.close ? 1.2 : 0.6)) this._go(a, ctx, quick);
       else if (this.planT > 2.6) this.plan = null;
       return;
     }
@@ -290,6 +295,8 @@ export class Archfiend extends Boss {
     this.closing = false;
     this.chain = 0;
     this._startAttack(a, ctx, quick);
+    // His whirl's reach marked round him as it winds up.
+    if (a.around) ctx.effects?.telegraph(this.position.x, this.position.z, a.maxRange, this.stateDur, null);
   }
 
   // A rake's string runs one blow longer in the last phase.
@@ -298,6 +305,15 @@ export class Archfiend extends Boss {
     if (a.name === 'pounce') return this._updatePounce(dt, ctx);
     if (a.spin) return this._updateTail(dt, ctx);
     if (a.wave) return this._updateHowl(dt, ctx);
+    if (a.waves) {
+      // Hellfire's later waves: wherever you are by then.
+      const n = Math.floor((this.stateT / this.stateDur) * a.waves);
+      while ((this.wavesDone ?? 1) <= Math.min(n, a.waves - 1)) {
+        this.wavesDone = (this.wavesDone ?? 1) + 1;
+        this._erupt(ctx, a);
+        ctx.audio?.fireball?.(this.position);
+      }
+    }
     const c = a.combo;
     if (c && this.phase === 3) {
       const saved = c.max;
@@ -337,6 +353,7 @@ export class Archfiend extends Boss {
       this.spinFrom = this.yaw;
       ctx.audio?.whoosh?.(this.position);
     }
+    if (a.waves) this.wavesDone = 1;
   }
 
   _updatePounce(dt, ctx) {
@@ -378,10 +395,10 @@ export class Archfiend extends Boss {
     this.yaw = this.spinFrom + Math.PI * 2 * (k * k * (3 - 2 * k));
     this.root.rotation.y = this.yaw;
     const player = ctx.player;
-    if (!this.hitPlayer && k > 0.25 && k < 0.85 && this.distToPlayer < a.maxRange + player.radius) {
-      // The tail sweeps past where you stand.
+    if (!this.hitPlayer && k > (a.around ? 0.12 : 0.25) && k < 0.85 && this.distToPlayer < a.maxRange + player.radius) {
+      // The tail sweeps past where you stand (the whirl's claws, all round).
       const toP = Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z);
-      if (Math.abs(angleDelta(this.yaw + Math.PI, toP)) < 0.9) {
+      if (a.around || Math.abs(angleDelta(this.yaw + Math.PI, toP)) < 0.9) {
         this.hitPlayer = true;
         player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
         if (this.state !== 'strike') return;

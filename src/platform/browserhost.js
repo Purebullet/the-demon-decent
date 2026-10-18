@@ -204,6 +204,11 @@ export function createBrowserHost(canvas) {
     get boards() {
       return boards;
     },
+    // No prizes outside Project 0: a win is answered as a game without one.
+    win() {
+      emit('reward', { kind: 'win', ok: false });
+    },
+    game: null,
     me: () => ({ name: 'You' }),
     exit: () => {},
   };

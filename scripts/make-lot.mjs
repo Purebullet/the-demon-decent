@@ -70,7 +70,7 @@ for (const [name, l] of Object.entries(lods)) {
 // Live build: the pit pulses with hellfire, cracks glow near the lip, fog
 // billows up out of the hole and lava spits out of it onto the slopes, all
 // on the world clock so every viewer sees the same.
-const { rc, rb, hm, pool, hole, waves, lavaY } = lods.lod0.dims;
+const { rc, rb, hm, pool, hole, waves, lavaY, banner } = lods.lod0.dims;
 // A gob's splash: it opens as it lands, glows and crusts over, then sinks away.
 const SPLAT = 0.15;
 const REST = 3;
@@ -83,7 +83,7 @@ await writeFile(
   `${JSON.stringify(
     {
       materials: {
-        Glow: { surface: 'glow.glsl', glow: 2 },
+        Glow: { surface: 'glow.glsl', glow: 2, uniforms: { bannerY: +(banner.y - 0.1).toFixed(2), bannerR: +((banner.r + banner.inner) / 2).toFixed(3) } },
         Smoke: { vertex: 'fog-vertex.glsl', surface: 'fog.glsl', include: ['fog-common.glsl'], transparent: true, doubleSided: true, glow: 0.3, uniforms: { rise: +(height * 0.62).toFixed(2), spread: +(rc * 1.1).toFixed(2), puff: 1.6 } },
         Rock: { surface: 'rock.glsl', glow: 1, uniforms: { lip: +rc.toFixed(2), reach: +(rc * 2.1).toFixed(2), mound: +hm.toFixed(2), lake: +lavaY.toFixed(2), pool: +pool.toFixed(2) } },
         Lava: {
@@ -168,8 +168,27 @@ void p0Surface(inout P0Surface s) {
 );
 await writeFile(
   join(out, 'glow.glsl'),
-  `// Hellfire: bands of heat climbing the vortex, pulsing with the world clock.
+  `// Hellfire: bands of heat climbing the lava's gobs and the lake's rim,
+// pulsing with the world clock. Up above bannerY, the rewards banner: its
+// words (the material's texture) burn and flicker on a near-black ribbon
+// whose inner lining stays dark.
 void p0Surface(inout P0Surface s) {
+  if (s.position.y > bannerY) {
+    if (length(s.position.xz) < bannerR) {
+      s.color = vec3(0.02, 0.006, 0.004);
+      s.emissive = vec3(0.0);
+      return;
+    }
+    vec3 t = s.color;
+    float ink = smoothstep(0.02, 0.35, max(t.r, max(t.g, t.b)));
+    float a = atan(s.position.z, s.position.x);
+    float flick = 0.88 + 0.12 * sin(p0Time * 7.3 + a * 17.0) * sin(p0Time * 3.1 + s.position.y * 5.0);
+    float sweep = pow(0.5 + 0.5 * sin(a * 3.0 - p0Time * 1.7), 6.0);
+    s.color = mix(vec3(0.025, 0.007, 0.005), t * 0.25, ink);
+    s.emissive = t * (1.25 + sweep * 0.9 + p0Near * 0.35) * flick;
+    s.roughness = 0.85;
+    return;
+  }
   float band = pow(0.5 + 0.5 * sin(s.position.y * 1.3 - p0Time * 2.2), 4.0);
   float pulse = 0.78 + 0.22 * sin(p0Time * 1.4) + p0Near * 0.25;
   vec3 hot = mix(vec3(1.0, 0.22, 0.03), vec3(1.0, 0.72, 0.3), band);
@@ -432,8 +451,12 @@ const hash = (n) => {
 const LIFE = FLIGHT + SPLAT + REST + FADE
 const GONE = [0.001, 0.001, 0.001]
 const NONE = [0, 0, 0, -1]
+// The rewards banner turns slowly round the sky over the pit (its words
+// travel right to left as you face it), on the world clock.
+const BANNER_SPIN = 0.11
 export default function build(b) {
   b.loop((dt, t) => {
+    b.node('Banner', { rotation: [0, -((t * BANNER_SPIN) % (Math.PI * 2)), 0] })
     for (let i = 0; i < LAVA; i++) {
       // Gob i flies on throws i, i + LAVA, ...; a throw starts every PERIOD s.
       const slot = Math.floor((t / PERIOD - i) / LAVA)

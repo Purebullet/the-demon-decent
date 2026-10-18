@@ -16,7 +16,8 @@ import { mulberry32, fbm2 } from '../core/rng.js';
 //
 // Three levels of detail, as Project 0 asks (skill.md section 3):
 //   LOD0  materials Rock (the mound and the pieces), Lava, Glow, Smoke; the Fog
-//         shader and the Lava nodes move (lot.json)
+//         shader and the Lava nodes move (lot.json), and the rewards Banner
+//         turns round the sky over it
 //   LOD1  every piece again, cut down by meshoptimizer, static: Rock and Glow
 //         (the same shaders, as Project 0 gives LOD1 the materials it shares
 //         by name with LOD0)
@@ -655,27 +656,187 @@ function pitFloor(dims, segs) {
   return g;
 }
 
-function glowTexture(size = 64) {
-  const c = makeCanvas(size, size);
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, '#ffe2a0');
-  grad.addColorStop(0.5, '#ff6a18');
-  grad.addColorStop(1, '#a01404');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, size, size);
-  const t = new THREE.CanvasTexture(c);
+// The rewards banner: a dark ribbon ringing the sky over the hell-mouth,
+// its words burning, turning slowly (build.js) so everyone round the lot
+// reads it. It shares the Glow material (the lot has its four already): the
+// words are that material's texture, and glow.glsl lights them above
+// `bannerY` (the lava's gobs never climb that high).
+export const BANNER_TEXT = ['BEAT THE FLOOR 5 BOSS', 'WIN 10 TOKENS'];
+// The words go round twice; each time round they run along ROWS rows of the
+// texture (one long strip cut in pieces), for letters four times as sharp.
+const BANNER_COPIES = 2;
+const BANNER_ROWS = 4;
+const BANNER_PAD = 4;
+export function bannerDims(width, depth, height) {
+  const r = Math.min(width, depth) / 2 - 1.2;
+  const h = 2.6;
+  return { r, y: height - 1.4 - h, h, inner: r - 0.08 };
+}
+
+// The words once round: fiery letters on near-black between two ember
+// rules, a burning mark after each phrase, drawn on one long strip (as wide
+// as the texture's rows end to end) and cut into the texture's rows, each
+// with a dark margin above and below. Letters are drawn squeezed by the
+// strip's own stretch round the ring, so they stand true on it.
+function bannerTexture(dims, w = 1024, rowH = 128) {
+  const n = BANNER_ROWS;
+  const pad = BANNER_PAD;
+  const sw = w * n;
+  const sh = rowH - pad * 2;
+  const strip = makeCanvas(sw, sh);
+  const g = strip.getContext('2d');
+  g.fillStyle = '#060101';
+  g.fillRect(0, 0, sw, sh);
+  const k = sh / 120;
+  for (const y of [7 * k, sh - 7 * k]) {
+    g.fillStyle = '#7a1606';
+    g.fillRect(0, y - 2.5 * k, sw, 5 * k);
+    g.fillStyle = '#ff7a24';
+    g.fillRect(0, y - 1 * k, sw, 2 * k);
+  }
+  // Pixels per metre along the ring and up it: how wide to draw a letter.
+  const along = sw / ((TAU * dims.r) / BANNER_COPIES);
+  const up = sh / dims.h;
+  const sx = along / up;
+  const parts = [];
+  for (const t of BANNER_TEXT) parts.push({ t }, { mark: true });
+  const font = (size) => `bold ${size}px "DejaVu Serif", "Liberation Serif", Georgia, serif`;
+  const markW = 26 * k;
+  const gap = 40 * k;
+  const natural = (size) => {
+    g.font = font(size);
+    return parts.reduce((a, p) => a + (p.mark ? markW : g.measureText(p.t).width) + gap * 2, 0) * sx;
+  };
+  // As tall as the ribbon allows, or smaller if the words must fit round.
+  let size = Math.round(66 * k);
+  while (size > 20 && natural(size) > sw * 0.92) size -= 2;
+  g.font = font(size);
+  // (The room left over spreads out between the phrases.)
+  const extra = (sw - natural(size)) / (parts.length * 2);
+  g.textBaseline = 'middle';
+  g.textAlign = 'center';
+  let x = 0;
+  const cy = sh / 2 + 3 * k;
+  for (const p of parts) {
+    const pw = (p.mark ? markW : g.measureText(p.t).width) * sx;
+    x += gap * sx + extra;
+    const mid = x + pw / 2;
+    g.save();
+    g.translate(mid, cy);
+    g.scale(sx, 1);
+    if (p.mark) {
+      // A burning diamond.
+      g.shadowColor = 'rgba(255,90,10,0.9)';
+      g.shadowBlur = 10 * k;
+      g.fillStyle = '#ffb040';
+      g.beginPath();
+      g.moveTo(0, -16 * k);
+      g.lineTo(9 * k, 0);
+      g.lineTo(0, 16 * k);
+      g.lineTo(-9 * k, 0);
+      g.closePath();
+      g.fill();
+    } else {
+      // A red halo, then the letters hot at their core.
+      g.shadowColor = 'rgba(255,60,0,0.95)';
+      g.shadowBlur = 12 * k;
+      g.fillStyle = '#c42a08';
+      g.fillText(p.t, 0, 0);
+      g.shadowBlur = 0;
+      const grad = g.createLinearGradient(0, -size / 2, 0, size / 2);
+      grad.addColorStop(0, '#fff0b8');
+      grad.addColorStop(0.45, '#ffb04a');
+      grad.addColorStop(1, '#ff4a0c');
+      g.fillStyle = grad;
+      g.fillText(p.t, 0, 0);
+    }
+    g.restore();
+    x += pw + gap * sx + extra;
+  }
+  // Cut into rows, top row first.
+  const c = makeCanvas(w, rowH * n);
+  const o = c.getContext('2d');
+  o.fillStyle = '#060101';
+  o.fillRect(0, 0, w, rowH * n);
+  for (let i = 0; i < n; i++) o.drawImage(strip, i * w, 0, w, sh, 0, i * rowH + pad, w, sh);
+  return c;
+}
+
+function canvasTexture(c, w, h) {
+  let img = c;
+  if (w !== c.width || h !== c.height) {
+    img = makeCanvas(w, h);
+    const g = img.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(c, 0, 0, w, h);
+  }
+  const t = new THREE.CanvasTexture(img);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
   return t;
 }
 
-function materials() {
+// The ribbon: an open ring facing out, the words BANNER_COPIES times round
+// it, each time along the texture's rows in turn (each piece its own run of
+// u from 0 to 1, so the texture never wraps), and a plain lining just inside
+// facing in, on the texture's dark top margin (glow.glsl keeps it dark too).
+function bannerGeometry({ r, y, h, inner }, segs) {
+  const pieces = BANNER_COPIES * BANNER_ROWS;
+  const per = Math.max(2, Math.round(segs / pieces));
+  const total = BANNER_ROWS * 128;
+  const pos = [];
+  const nor = [];
+  const uv = [];
+  const idx = [];
+  const ring = (rad, out) => {
+    for (let c = 0; c < pieces; c++) {
+      const row = c % BANNER_ROWS;
+      const top = 1 - (row * 128 + BANNER_PAD) / total;
+      const bottom = 1 - ((row + 1) * 128 - BANNER_PAD) / total;
+      const base = pos.length / 3;
+      for (let j = 0; j <= per; j++) {
+        const a = ((c * per + j) / (per * pieces)) * TAU;
+        const sx = Math.sin(a);
+        const cz = Math.cos(a);
+        for (const [yy, v] of [[y, bottom], [y + h, top]]) {
+          pos.push(rad * sx, yy, rad * cz);
+          nor.push(out * sx, 0, out * cz);
+          if (out > 0) uv.push(j / per, v);
+          else uv.push(0.5, 1 - 1 / total);
+        }
+      }
+      for (let j = 0; j < per; j++) {
+        const a0 = base + j * 2;
+        const b0 = a0 + 2;
+        // Bottom-left, bottom-right, top-right, top-left as seen from the
+        // side the face looks toward.
+        if (out > 0) idx.push(a0, b0, b0 + 1, a0, b0 + 1, a0 + 1);
+        else idx.push(a0, b0 + 1, b0, a0, a0 + 1, b0 + 1);
+      }
+    }
+  };
+  ring(r, 1);
+  ring(inner, -1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+// `banner`: the banner's size (bannerDims), `scale`: its texture's size
+// (1 near, 0.5 for LOD1).
+function materials(banner, scale = 1) {
   const rock = rockTextures(265, [58, 46, 44]);
-  const glowMap = glowTexture();
+  const words = bannerTexture(banner);
+  const glowMap = canvasTexture(words, words.width * scale, words.height * scale);
   return {
     rock: new THREE.MeshStandardMaterial({ name: 'Rock', map: rock.map, roughness: 0.95, metalness: 0 }),
     smoke: new THREE.MeshStandardMaterial({ name: 'Smoke', color: 0x2a2224, roughness: 1, metalness: 0, transparent: true, opacity: 0.6, depthWrite: false }),
-    glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1.6, roughness: 0.6, color: 0x220400 }),
+    // (The gobs and the lake's rim are coloured wholly by glow.glsl; the
+    // texture is the banner's.)
+    glow: new THREE.MeshStandardMaterial({ name: 'Glow', map: glowMap, emissive: 0xffffff, emissiveMap: glowMap, emissiveIntensity: 1, roughness: 0.6, color: 0xffffff }),
     // The lake: its crust, seams and ripples are all its shader's (lava.glsl).
     lava: new THREE.MeshStandardMaterial({ name: 'Lava', color: 0x140302, emissive: 0xff5010, emissiveIntensity: 1, roughness: 0.9 }),
   };
@@ -691,7 +852,8 @@ export async function buildLod0(width, depth, height, models) {
   const dims = shape(width, depth, height);
   const rnd = mulberry32(265);
   const K = await kit(models);
-  const M = materials();
+  const banner = bannerDims(width, depth, height);
+  const M = materials(banner);
   const root = new THREE.Group();
   root.name = 'HellMouth';
   const groundGeo = mound(dims, { segs: 160, rings: 18, lift: 0.1 });
@@ -720,13 +882,16 @@ export async function buildLod0(width, depth, height, models) {
     m.scale.setScalar(0.001);
     root.add(m);
   }
+  // The rewards banner (build.js turns it).
+  root.add(mesh('Banner', bannerGeometry(banner, 96), M.glow));
   return { root, dims, landing };
 }
 
 export async function buildLod1(width, depth, height, models) {
   const dims = shape(width, depth, height);
   const K = await kit(models);
-  const M = materials();
+  const banner = bannerDims(width, depth, height);
+  const M = materials(banner, 0.5);
   const root = new THREE.Group();
   root.name = 'HellMouth';
   // The mound and every piece in one mesh, on the rock texture.
@@ -736,7 +901,8 @@ export async function buildLod1(width, depth, height, models) {
   const pieces = piecesGeometry(list, K.pieces, 'low', dims);
   const hole = throat(dims, 32).map(prep);
   root.add(mesh('Ground', mergeGeometries([ground, ...(pieces ? [pieces] : []), ...hole, ...boulders(dims, 1).map(prep)]), M.rock));
-  root.add(mesh('Glow', prep(lakeRing(dims, 32)), M.glow));
+  // The lake's rim and the banner (still, this far off) in one mesh.
+  root.add(mesh('Glow', mergeGeometries([prep(lakeRing(dims, 32)), prep(bannerGeometry(banner, 48))]), M.glow));
   return { root, dims };
 }
 
@@ -883,7 +1049,7 @@ export async function buildLot({ width, depth, height }, models = globalThis.lot
     let s = '';
     const b = new Uint8Array(buf);
     for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
-    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, hole: dims.hole, waves: HOLE_WAVES, lavaY: dims.lavaY }, landing };
+    out[name] = { glb: btoa(s), stats: stats(root), dims: { rc: dims.rc, rb: dims.rb, hm: dims.hm, pool: dims.pool, hole: dims.hole, waves: HOLE_WAVES, lavaY: dims.lavaY, banner: bannerDims(width, depth, height) }, landing };
   }
   return out;
 }

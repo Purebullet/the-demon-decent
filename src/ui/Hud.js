@@ -529,6 +529,23 @@ export class Hud {
     this.dirty = true;
   }
 
+  // A notice that holds the game until it is read: { title, lines: [text],
+  // button }. Its button acts as Enter.
+  showNotice(notice) {
+    this.notice = notice;
+    this.panel = 'notice';
+    // (Nothing announced before it shows through behind it.)
+    this.announcement = null;
+    this._paintAnnouncementLayer();
+    this.dirty = true;
+  }
+
+  hideNotice() {
+    this.notice = null;
+    if (this.panel === 'notice') this.panel = null;
+    this.dirty = true;
+  }
+
   // A level gained: { level, points, stats: [{ id, name, text, color, per,
   // have, cap }] } (Game._levelUpInfo).
   showLevelUp(info) {
@@ -573,7 +590,7 @@ export class Hud {
     c.on = on;
     c.x = x;
     c.y = y;
-    const code = on && (this.panel === 'choice' || this.panel === 'levelup' || this.panel === 'pause' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
+    const code = on && (this.panel === 'choice' || this.panel === 'notice' || this.panel === 'levelup' || this.panel === 'pause' || this.panel === 'death' || this.panel === 'victory') ? this.buttonAt(x, y) : null;
     if (code !== this.hoverCode) {
       this.hoverCode = code;
       this.dirty = true;
@@ -919,7 +936,7 @@ export class Hud {
     this.blow = Math.max(0, (this.blow || 0) - dt * 1.6);
     V.uBlow.value = this.playing ? this.blow : 0;
 
-    const animating = this.panel === 'title' || this.panel === 'death' || this.panel === 'victory' || this.relicFlash;
+    const animating = this.panel === 'title' || this.panel === 'notice' || this.panel === 'death' || this.panel === 'victory' || this.relicFlash;
     const sig = this._signature();
     this.paintT -= dt;
     if ((this.dirty || sig !== this.lastSig || animating) && this.paintT <= 0) {
@@ -1265,6 +1282,7 @@ export class Hud {
     if (this.panel === 'title') this._paintTitle(g);
     else if (this.panel === 'pause') this._paintPause(g);
     else if (this.panel === 'choice' && this.choice) this._paintChoice(g);
+    else if (this.panel === 'notice' && this.notice) this._paintNotice(g);
     else if (this.panel === 'levelup' && this.levelInfo) this._paintLevelUp(g);
     else if (this.panel === 'death' || this.panel === 'victory') this._paintEnd(g);
   }
@@ -1769,6 +1787,11 @@ export class Hud {
       this._text(g, t.dev, w / 2, y, { size: 13, color: '#c9a0ff', align: 'center' });
       y += 20;
     }
+    // The lot's prize for slaying the Sleeper, when there is one.
+    if (t.bounty) {
+      this._text(g, `Slay the Sleeper on floor 5: win ${t.bounty} tokens`, w / 2, y, { size: 14, color: '#ffd36a', align: 'center', glow: 'rgba(200,110,0,0.8)' });
+      y += 22;
+    }
     // This week's deepest descents.
     const table = (t.table || []).slice(0, 5);
     if (table.length) {
@@ -2116,6 +2139,54 @@ export class Hud {
     this._label(g, this.touch ? 'Tap a blessing · only one altar may be woken' : 'Click one (or press its number) · Q to step back · only one altar may be woken', w / 2, y + 22, { size: 11, align: 'center' });
     // Step away from the altar without choosing (as Q does).
     this._backButton(g, w / 2, y + 66, 'Back', 'KeyQ');
+  }
+
+  // A framed notice: a title, a few lines of text, and one button to go on.
+  _paintNotice(g) {
+    const { vw: w, vh: h } = this;
+    const n = this.notice;
+    this._dim(g, 0.78);
+    const pw = Math.min(560, w - 32);
+    const size = 15;
+    // Lay the lines out first, so the frame fits them.
+    g.font = `${size}px ${SERIF}`;
+    const rows = [];
+    for (const text of n.lines) {
+      if (rows.length) rows.push(null);
+      let line = '';
+      for (const word of text.split(' ')) {
+        const test = line ? `${line} ${word}` : word;
+        if (g.measureText(test).width > pw - 56 && line) {
+          rows.push(line);
+          line = word;
+        } else line = test;
+      }
+      if (line) rows.push(line);
+    }
+    const lh = size + 6;
+    const ph = 96 + rows.reduce((a, r) => a + (r ? lh : 8), 0) + (this.touch ? 96 : 110);
+    const x0 = (w - pw) / 2;
+    const y0 = Math.max(16, (h - ph) / 2);
+    this._box(g, x0, y0, pw, ph, C.panel, C.edge);
+    const ty = y0 + 52;
+    this._text(g, n.title.toUpperCase(), w / 2, ty, { size: Math.min(30, w * 0.06), ls: 3, color: C.light, align: 'center', glow: 'rgba(190,30,0,0.9)' });
+    this._divider(g, w / 2, ty + 14, pw * 0.7);
+    let y = ty + 50;
+    for (const r of rows) {
+      if (!r) {
+        y += 8;
+        continue;
+      }
+      this._text(g, r, w / 2, y, { size, color: C.bone, align: 'center' });
+      y += lh;
+    }
+    const by = y0 + ph - (this.touch ? 50 : 64);
+    const bw = 220;
+    const bh = 46;
+    const hot = this.hoverCode === 'Enter';
+    this._button(g, w / 2 - bw / 2, by - bh / 2, bw, bh, (n.button || 'Continue').toUpperCase(), hot, 0.5 + 0.5 * Math.sin(this.time * 3), BACK_HUE);
+    this.buttons.push({ x: (w / 2) * this.u, y: by * this.u, w: bw * this.u, h: bh * this.u, code: 'Enter', rect: true });
+    if (!this.touch) this._label(g, 'Click, or press Enter', w / 2, by + 40, { size: 11, align: 'center' });
   }
 
   // A forged button that takes you back, centred on x, y: pressing it acts

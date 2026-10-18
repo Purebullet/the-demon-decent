@@ -108,3 +108,11 @@ test('the Blood Well fills two flasks; the Sigil blesses each way once', async (
   NODES.sigil.options(run)[0].apply(run);
   assert.equal(NODES.sigil.options(run).length, 0);
 });
+
+test('no long dash anywhere in the game’s words', async () => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const walk = async (dir) => (await Promise.all((await readdir(dir, { withFileTypes: true })).map((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)])))).flat();
+  const files = (await walk(new URL('../src', import.meta.url).pathname)).filter((f) => f.endsWith('.js'));
+  for (const f of files) assert.ok(!(await readFile(f, 'utf8')).includes('—'), `${f} has a long dash`);
+});

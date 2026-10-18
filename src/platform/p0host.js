@@ -2,7 +2,8 @@ import * as THREE from 'three';
 
 // The game talks to its surroundings through a small "host" object. This one
 // wraps Project 0's `p0` sandbox: its renderer and camera, its input events,
-// sound files, the lot's weekly score table, and package asset URLs.
+// sound files, the lot's weekly score table, its prize, and package asset
+// URLs.
 //
 // The camera trick: Project 0 clips a game to the lot's box on screen when
 // its camera is outside the box. The descent spans caverns 90 m across, so
@@ -79,6 +80,12 @@ export function createP0Host(p0) {
     },
     get boards() {
       return p0.boards || {};
+    },
+    // A win (the Sleeper slain): the prize, if the lot has one, follows its
+    // rules; the answer comes as a 'reward' of kind 'win'.
+    win: () => p0.win(),
+    get game() {
+      return p0.game || null;
     },
     me: () => p0.me,
     exit: () => p0.exit(),

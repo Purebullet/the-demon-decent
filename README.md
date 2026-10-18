@@ -65,7 +65,7 @@ Before publishing a new version, run it in Project 0's own sandbox: `npm run dev
 - **Icons** (`npm run icons`): the skill, relic and weapon icons are generated 3D models rendered into one atlas (`assets/icons/atlas.webp`).
 - **Demons** (`src/entities/EnemyTypes.js`, `Enemy.js`): every kind fights its own way. Stalkers snap and rake and spring clear when stung; hounds bite in burning flurries and feint their pounces; fiends string a backhand after a sweep and blink behind you; brutes swing armoured blows (a gold glow: block or dodge, don't counter), bull-rush you into the walls and go berserk when wounded; witches parry-able fireballs, erupt the ground under you and blink away when cornered. Waiting demons circle you rather than queue.
 - **Enemy AI** (`src/ai`): A* on the tile grid with terrain costs, a per-frame search budget in time, and string-pulled paths. A director hands out attack tokens and sends flankers to points behind the player, routed by A* with a penalty on tiles inside the player's view cone. On deep floors, stalker packs take slots on a ring around you and lunge in sequence.
-- **Street view** (`src/lot/buildLot.js`, `scripts/make-lot.mjs`): three LODs made for the lot's box, plus `lot.json` with shaders for the hellfire and the molten cracks, and a script that turns the vortex.
+- **Street view** (`src/lot/buildLot.js`, `scripts/make-lot.mjs`): three LODs made for the lot's box, plus `lot.json` with shaders for the hellfire and the molten cracks, and a script that throws the lava and turns the rewards banner ("Beat the floor 5 boss, win 10 tokens") round the sky over the pit.
 
 ## The player's avatar: the Storm Round
 
