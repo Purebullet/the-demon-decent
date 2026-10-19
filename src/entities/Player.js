@@ -148,6 +148,10 @@ export class Player {
     // Held fast in a giant's fist ({ by, at }), or flung through the air
     // ({ vx, vy, vz }): see seize/toss.
     this.held = null;
+    // Jaws locked on you (a hound's maul): { by }; and how hard the view
+    // thrashes with it (eases off once it lets go).
+    this.pinned = null;
+    this.thrash = 0;
     this.air = null;
     this.run = null;
     this.blade = new OBB();
@@ -331,6 +335,8 @@ export class Player {
 
   spawnAt(x, z, yaw) {
     this.held = null;
+    this.pinned = null;
+    this.thrash = 0;
     this.air = null;
     this.position.set(x, 0, z);
     this.yaw = yaw;
@@ -375,6 +381,8 @@ export class Player {
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.5);
     this.healFlash = Math.max(0, this.healFlash - dt * 2);
     this.shakeT = Math.max(0, this.shakeT - dt * 2.2);
+    if (this.pinned && (!this.pinned.by.alive || this.pinned.by.state !== 'latched')) this.pinned = null;
+    this.thrash = this.pinned ? Math.min(1, this.thrash + dt * 8) : Math.max(0, this.thrash - dt * 3.5);
     this.siphonT = Math.max(0, this.siphonT - dt);
     this.staggerT = Math.max(0, this.staggerT - dt);
     this.wrathT = Math.max(0, this.wrathT - dt);
@@ -419,7 +427,8 @@ export class Player {
         else if (this.run.spells[id]) ctx.onSpellDenied?.(id);
       }
       if (input.wasPressed('KeyE') && this.drinkT <= 0 && this.staggerT <= 0) this.drinkPotion(ctx);
-      this._dodgeInput(ctx);
+      // Held by its jaws: no dodging out, but you can strike it off.
+      if (!this.pinned) this._dodgeInput(ctx);
       this._attackInput(dt, ctx);
     }
 
@@ -432,7 +441,8 @@ export class Player {
       this.heal((this.drinkHeal * step) / DRINK_TIME);
     }
 
-    this._move(real, ctx);
+    if (this.pinned) this.vel.set(0, 0, 0);
+    else this._move(real, ctx);
     this._updateCamera(real);
     this._updateWeapon(dt, ctx);
     this._updateBladeFx(real);
@@ -451,6 +461,35 @@ export class Player {
     this.press = null;
     this.blocking = false;
     this.dash = null;
+  }
+
+  // Latched on to (Enemy._latch): held where you stand, the view thrashing.
+  pin(by) {
+    this.pinned = { by };
+    this.dash = null;
+    this.blocking = false;
+    this.knock.set(0, 0, 0);
+  }
+
+  unpin() {
+    this.pinned = null;
+  }
+
+  // Bitten while held: straight through any guard, but it does not break
+  // your swing (strike it off).
+  maul(amount, from, ctx) {
+    if (this.dead) return;
+    const armor = relicPassive(this.run, 'armor') ?? 0;
+    amount = Math.max(1, Math.round(amount * (1 - armor) * takenMul(this.run)));
+    this.run.health -= amount;
+    this.hurtFlash = Math.min(1, 0.4 + amount / 40);
+    this.jolt = Math.min(1, this.jolt + 0.35);
+    const fx = this.position.x - from.x;
+    const fz = this.position.z - from.z;
+    const angle = Math.atan2(-fx * Math.cos(this.yaw) + fz * Math.sin(this.yaw), fx * Math.sin(this.yaw) + fz * Math.cos(this.yaw));
+    ctx.audio?.hurt();
+    ctx.onPlayerHurt?.(amount, angle);
+    if (this.run.health <= 0) this._die(ctx);
   }
 
   release() {
@@ -587,7 +626,19 @@ export class Player {
     cam.position.set(this.position.x + n2 * j * 0.03, this.position.y + eye + n1 * j * 0.03, this.position.z);
     const sh = this.shakeT * this.shakeT;
     const t = performance.now() * 0.05;
-    cam.rotation.set(this.pitch + kk.x + Math.sin(t * 1.3) * sh * 0.06 + n1 * j * 0.05, this.yaw + Math.sin(t * 1.7) * sh * 0.06 + n2 * j * 0.05, roll + kk.z + Math.sin(t) * sh * 0.04 + n3 * j * 0.07, 'YXZ');
+    // Jaws on you: the view wrenched from side to side as it thrashes, and
+    // pulled down to the thing hanging off you.
+    const th = this.thrash;
+    const tt = tj * 17;
+    const thYaw = th > 0 ? (Math.sin(tt) * 0.085 + Math.sin(tt * 2.3 + 1) * 0.02) * th : 0;
+    const thRoll = th > 0 ? Math.sin(tt + 0.7) * 0.11 * th : 0;
+    if (th > 0) {
+      const side = Math.sin(tt) * 0.06 * th;
+      cam.position.x += Math.cos(this.yaw) * side;
+      cam.position.z -= Math.sin(this.yaw) * side;
+      cam.position.y -= 0.08 * th;
+    }
+    cam.rotation.set(this.pitch - 0.3 * th + kk.x + Math.sin(t * 1.3) * sh * 0.06 + n1 * j * 0.05, this.yaw + thYaw + Math.sin(t * 1.7) * sh * 0.06 + n2 * j * 0.05, roll + thRoll + kk.z + Math.sin(t) * sh * 0.04 + n3 * j * 0.07, 'YXZ');
     cam.updateMatrixWorld();
     // The viewmodel scene mirrors the camera so weapon and torch stay in hand.
     this.viewRoot.position.copy(cam.position);
@@ -723,11 +774,13 @@ export class Player {
     this.comboIndex++;
     const from = this._currentPose();
     this._endSwing(true);
-    this.chain = chain;
+    // On the beat is not yet a Perfect hit: it becomes one only if it lands
+    // on a demon (_applyHits); a swing off the beat breaks the chain.
+    if (!perfect) this.chain = 0;
     this.fumbleNext = false;
-    this.swing = { arc, heavy: false, power: 0, ...T, perfect, chain, sluggish, from };
+    this.swing = { arc, heavy: false, power: 0, ...T, perfect: false, onBeat: perfect, chain, sluggish, from };
     this._swingCommon(ctx);
-    ctx.onRhythm?.(perfect ? 'perfect' : sluggish ? 'sluggish' : 'swing', chain);
+    ctx.onRhythm?.(perfect ? 'beat' : sluggish ? 'sluggish' : 'swing', chain);
   }
 
   _beginCharge(ctx) {
@@ -1210,6 +1263,14 @@ export class Player {
         }
       }
 
+      // On the beat and it landed: now it is a Perfect hit (and the chain
+      // grows).
+      if (s.onBeat && !s.perfect) {
+        s.perfect = true;
+        this.chain = s.chain;
+        ctx.onRhythm?.('perfect', s.chain);
+      }
+
       // Caught winding up: a counter-hit (the Wrathful Brand makes any blow one).
       const counter = !guard && (e.isWindingUp?.() || this.wrathT > 0);
       if (this.wrathT > 0 && counter) this.wrathT = 0;
@@ -1340,7 +1401,9 @@ export class Player {
     this.torch.getWorldPosition(_v);
     this.torchLight.position.copy(_v).add(_v2.set(0, this.flameY + 0.1, 0));
     const burning = this.bladeFx.heat;
-    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit * (1 + 0.6 * burning);
+    // (Dimmed while a hound hangs off you: its head is right at the flame
+    // and would otherwise burn out white.)
+    this.torchLight.intensity = (ctx.torchIntensity ?? 30) * f * lit * (1 + 0.6 * burning) * (1 - 0.6 * this.thrash);
     this.torchLight.distance = (ctx.torchRange ?? 16) * (relicPassive(this.run || { relics: {} }, 'light') ?? 1) * (1 + (FLAME_LIGHT - 1) * burning);
     const fl = this.flashFx;
     const k = fl.t > 0 ? fl.t / fl.dur : 0;

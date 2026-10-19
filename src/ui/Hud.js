@@ -148,27 +148,32 @@ const RING_FRAG = `
 // ready, and a red flinch when pressed too soon.
 const SLOT_FRAG = `
   varying vec2 vUv;
-  uniform float uCd; uniform float uFlash; uniform float uReady; uniform float uDenied; uniform vec3 uColor;
+  uniform float uCd; uniform float uFlash; uniform float uReady; uniform float uDenied; uniform vec3 uColor; uniform float uAspect;
   #define PI 3.14159265
   void main(){
     vec2 p = vUv - 0.5;
     float ang = atan(p.x, p.y);
     float u = fract(ang / (2.0 * PI) + 1.0);
     float inside = step(abs(p.x), 0.5) * step(abs(p.y), 0.5);
+    // A wide slot (Shade Step's) refills left to right instead of round.
+    bool wide = uAspect > 1.5;
+    float sweep = wide ? vUv.x : u;
     vec3 col = vec3(0.0);
     float a = 0.0;
     if (uCd > 0.0) {
-      float dark = step(1.0 - uCd, u) * inside;
+      float dark = step(1.0 - uCd, sweep) * inside;
       a += dark * 0.72;
-      float edge = smoothstep(0.02, 0.0, abs(u - (1.0 - uCd))) * step(0.05, length(p)) * inside;
+      float edge = (wide ? smoothstep(0.012, 0.0, abs(sweep - (1.0 - uCd))) : smoothstep(0.02, 0.0, abs(u - (1.0 - uCd))) * step(0.05, length(p))) * inside;
       col += edge * vec3(1.0, 0.5, 0.2) * 0.9;
       a += edge * 0.6;
     }
-    float r = length(p);
+    // In the slot's own proportions, so a wide one glows and rims evenly.
+    vec2 q = vec2(p.x * uAspect, p.y);
+    float r = length(vec2(max(abs(q.x) - (uAspect - 1.0) * 0.5, 0.0), q.y));
     float glow = smoothstep(0.75, 0.0, r) * uFlash;
     col += glow * uColor * 1.6;
     a += glow * 0.9;
-    float rim = smoothstep(0.06, 0.0, abs(max(abs(p.x), abs(p.y)) - 0.47)) * uReady;
+    float rim = smoothstep(0.06, 0.0, abs(max(abs(q.x) - (uAspect - 1.0) * 0.5, abs(q.y)) - 0.47)) * uReady;
     col += rim * mix(uColor, vec3(1.0), 0.4) * 1.5;
     a += rim;
     col = mix(col, vec3(0.8, 0.05, 0.02), uDenied * 0.7);
@@ -285,7 +290,7 @@ export class Hud {
       return m;
     };
     this.ring = shader(RING_FRAG, { uProg: { value: 0 }, uWin: { value: 0 }, uChain: { value: 0 }, uFumble: { value: 0 }, uPerfect: { value: 0 }, uAlpha: { value: 0 }, uTime: { value: 0 }, uHeavy: { value: 0 } }, 5);
-    this.slotFx = SLOTS.map(() => ({ mesh: shader(SLOT_FRAG, { uCd: { value: 0 }, uFlash: { value: 0 }, uReady: { value: 0 }, uDenied: { value: 0 }, uColor: { value: new THREE.Color(1, 0.5, 0.2) } }, 4), ready: 0, denied: 0, lastCd: 0 }));
+    this.slotFx = SLOTS.map(() => ({ mesh: shader(SLOT_FRAG, { uCd: { value: 0 }, uFlash: { value: 0 }, uReady: { value: 0 }, uDenied: { value: 0 }, uColor: { value: new THREE.Color(1, 0.5, 0.2) }, uAspect: { value: 1 } }, 4), ready: 0, denied: 0, lastCd: 0 }));
     this.healthFx = shader(HEALTH_FRAG, { uFrac: { value: 1 }, uChip: { value: 1 }, uHeal: { value: 0 }, uLow: { value: 0 }, uTime: { value: 0 }, uHit: { value: 0 } }, 3);
     this.chip = 1;
     this.chipHold = 0;
@@ -1180,6 +1185,7 @@ export class Hud {
       U.uFlash.value = Math.max(clamp01(cast), learn * 0.7);
       U.uReady.value = Math.max(f.ready * (0.6 + 0.4 * Math.sin(this.time * 20)), learn);
       U.uDenied.value = f.denied;
+      U.uAspect.value = rect.w / Math.max(1, rect.h);
       U.uColor.value.set(slot.id === 'nova' ? '#ff7a24' : slot.id === 'step' ? '#b080ff' : slot.id === 'siphon' ? '#ff3a2a' : '#c8b8ff');
       // A cast swells the slot for a moment.
       const bump = 1 + 0.12 * clamp01(cast) + 0.1 * learn;
@@ -1636,7 +1642,9 @@ export class Hud {
     // ---- Bottom centre: skills, then health beneath ----
     const sz = 66;
     const gap = 22;
-    const total = SLOTS.length * sz + (SLOTS.length - 1) * gap;
+    // Shade Step sits on Space, and its slot is as wide as the bar.
+    const slotW = (slot) => (SPELLS[slot.id].label === 'SPACE' ? sz * 3 : sz);
+    const total = SLOTS.reduce((a, sl) => a + slotW(sl), 0) + (SLOTS.length - 1) * gap;
     const hy = h - pad - 26;
     // The vial centred under the skills, the potions and their key to its
     // left. On Project 0 its chat sits bottom left: all of it keeps to the
@@ -1664,19 +1672,22 @@ export class Hud {
     const sy = hy - 30 - sz - (this.touch ? 80 : 0);
     for (const slot of SLOTS) {
       const lvl = r.spells[slot.id];
+      const sw = slotW(slot);
       g.save();
-      this._box(g, sx, sy, sz, sz, C.panel, lvl ? C.edge : '#2a0c08');
+      this._box(g, sx, sy, sw, sz, C.panel, lvl ? C.edge : '#2a0c08');
       g.globalAlpha = lvl ? 1 : 0.22;
-      if (!IconAtlas.draw(g, slot.icon, sx + 4, sy + 4, sz - 8)) {
+      // (In a wide slot, the icon in the middle of it.)
+      const ix = sx + (sw - sz) / 2;
+      if (!IconAtlas.draw(g, slot.icon, ix + 4, sy + 4, sz - 8)) {
         const words = SPELLS[slot.id].name.toUpperCase().split(' ');
-        words.forEach((wd2, k) => this._text(g, wd2, sx + sz / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: 8, ls: 1, align: 'center', base: 'middle' }));
+        words.forEach((wd2, k) => this._text(g, wd2, sx + sw / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: 8, ls: 1, align: 'center', base: 'middle' }));
       }
       g.globalAlpha = 1;
       const left = lvl ? spellUsesLeft(r, slot.id) : 0;
       if (!lvl || left <= 0) {
         // Not yet learned, or spent for this floor: a dark seal over it.
         g.fillStyle = lvl ? 'rgba(6,2,2,0.62)' : 'rgba(6,2,2,0.45)';
-        g.fillRect(sx + 3, sy + 3, sz - 6, sz - 6);
+        g.fillRect(sx + 3, sy + 3, sw - 6, sz - 6);
       }
       g.restore();
       // Key (on a small dark plate inside the frame's corner), level and name.
@@ -1686,7 +1697,7 @@ export class Hud {
       g.fillStyle = 'rgba(14,4,3,0.88)';
       g.fillRect(sx + 4, sy + 4, kw, 16);
       this._text(g, key, sx + 4 + kw / 2, sy + 12.5, { size: ks, ls: key.length > 1 ? 0.5 : 0, color: C.ember, glow: 'rgba(140,20,0,0.9)', weight: 'bold ', align: 'center', base: 'middle' });
-      if (lvl) this._text(g, 'I'.repeat(lvl), sx + sz - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
+      if (lvl) this._text(g, 'I'.repeat(lvl), sx + sw - 7, sy + sz - 7, { size: 11, color: C.light, align: 'right' });
       // Uses left on this floor, one pip each.
       if (lvl && Number.isFinite(left)) {
         for (let u = 0; u < lvl; u++) {
@@ -1697,10 +1708,10 @@ export class Hud {
         }
       }
       const name = SPELLS[slot.id].name;
-      this._text(g, name.toUpperCase(), sx + sz / 2, sy + sz + 13, { size: 8, ls: 0.5, color: lvl ? C.bone : C.ash, align: 'center' });
-      L.slots.push({ x: sx + 3, y: sy + 3, w: sz - 6, h: sz - 6 });
-      if (this.touch && lvl) this.buttons.push({ x: (sx + sz / 2) * this.u, y: (sy + sz / 2) * this.u, r: (sz / 2) * this.u, code: SPELLS[slot.id].key });
-      sx += sz + gap;
+      this._text(g, name.toUpperCase(), sx + sw / 2, sy + sz + 13, { size: 8, ls: 0.5, color: lvl ? C.bone : C.ash, align: 'center' });
+      L.slots.push({ x: sx + 3, y: sy + 3, w: sw - 6, h: sz - 6 });
+      if (this.touch && lvl) this.buttons.push({ x: (sx + sw / 2) * this.u, y: (sy + sz / 2) * this.u, w: sw * this.u, h: sz * this.u, rect: true, code: SPELLS[slot.id].key });
+      sx += sw + gap;
     }
 
     // Health: an iron-framed vial of blood centred under the skills; the

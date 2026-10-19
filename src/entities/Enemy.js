@@ -15,7 +15,15 @@ const TELL = new THREE.Color(1, 0.22, 0.04);
 const ARMOR_TELL = new THREE.Color(0.95, 0.55, 0.08);
 const ICE = new THREE.Color(0.45, 0.8, 1);
 const BROKEN = new THREE.Color(1, 0.55, 0.1);
+// A burning demon's glow, and the colours of the shadow fiend's lash.
+const BURN = new THREE.Color(1, 0.42, 0.06);
+// (Particle colours are linear: these come out a deep violet-black.)
+const SHADOW = new THREE.Color(0.035, 0.006, 0.06);
+const SOOT = new THREE.Color(0.012, 0.009, 0.009);
+const SHADOW_DEEP = new THREE.Color(0.01, 0.0, 0.02);
+const SHADOW_GLOW = new THREE.Color(0.85, 0.35, 1.0);
 const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
 const tmpC = new THREE.Color();
 const DORMANT = new Set(['dormant', 'burrowed', 'emerging', 'dying']);
 
@@ -187,6 +195,13 @@ export class Enemy {
 
   setState(s, dur = 0) {
     if (this.leapH && s !== 'evade') this._land();
+    // Let go of a latched player, whatever ends it (a blow, death, ice).
+    if (this.state === 'latched' && s !== 'latched') {
+      if (this.latchedOn?.pinned?.by === this) this.latchedOn.unpin();
+      this.latchedOn = null;
+      this.root.position.y = 0;
+      this.pose = null;
+    }
     this.state = s;
     this.stateT = 0;
     this.stateDur = dur;
@@ -262,14 +277,21 @@ export class Enemy {
         this._considerAttack(dt, ctx, dist);
         break;
       case 'windup': {
-        // Track the player while telegraphing; deep floors track harder.
-        if (!this.type.lockOnAttack) this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.8 * this.tuning.speed);
+        // Track the player while telegraphing; deep floors track harder. A
+        // blow with a cone stops turning near its end (`lockAt` of the
+        // wind-up), so a step aside at the last moment clears it.
+        const locked = this.attack?.lockAt && this.stateT > this.stateDur * this.attack.lockAt;
+        if (!this.type.lockOnAttack && !locked) this._turnToward(Math.atan2(dx, dz), dt, this.type.turnRate * 0.8 * this.tuning.speed);
+        if (this.attack?.shadow) this._shadowGather(dt, ctx);
         this.moveBlend = Math.max(0, this.moveBlend - dt * 6);
         if (this.stateT >= this.stateDur) this._beginStrike(ctx);
         break;
       }
       case 'strike':
         this._updateStrike(dt, ctx);
+        break;
+      case 'latched':
+        this._updateLatch(dt, ctx);
         break;
       case 'evade':
         this._updateEvade(dt, ctx, dx, dz);
@@ -351,6 +373,12 @@ export class Enemy {
     } else if (this.brokenT > 0 && this.alive) {
       col = BROKEN;
       k = 0.35 + 0.15 * Math.sin(time * 10);
+    } else if (this.status.burn && this.alive) {
+      // Firelight flickering over the skin under the flames (kept low: the
+      // flames themselves carry it, a strong tint only gilds the whole body).
+      col = BURN;
+      k = 0.09 + 0.05 * Math.sin(time * 23 + this.seed * 5) + 0.03 * Math.sin(time * 37);
+      boost = 0.7;
     }
     if (this.flash > 0) {
       // The flash of a hit: a warm, quick, partial glare, not a white cut-out.
@@ -554,7 +582,8 @@ export class Enemy {
     if (this.cooldown > 0) return;
     // Behind it, or pressed right up against it: what only that answers.
     const behind = off > 1.6 || dist < 1.3;
-    const options = this.type.attacks.filter((a) => !a.comboOnly && dist >= a.minRange && dist <= a.maxRange && (!a.behind || behind));
+    const now = ctx.time ?? 0;
+    const options = this.type.attacks.filter((a) => !a.comboOnly && dist >= a.minRange && dist <= a.maxRange && (!a.behind || behind) && !(a.rest && now < (this.restUntil?.[a.name] ?? -1)));
     if (!options.length) return;
     // Needs to be roughly facing (unless it strikes behind) and a clear line.
     const back = options.filter((a) => a.behind);
@@ -567,6 +596,8 @@ export class Enemy {
 
   // `chained`: the next blow of a string (keeps its attack token).
   _startAttack(a, ctx, windupScale = 1, chained = false) {
+    // (An attack with a `rest` is not chosen again for that long.)
+    if (a.rest) (this.restUntil ||= {})[a.name] = (ctx.time ?? 0) + a.rest;
     if (!chained) {
       this.comboN = 0;
       this.feinted = false;
@@ -578,6 +609,9 @@ export class Enemy {
     const rage = this.enraged ? this.type.enrage.windup : 1;
     this.setState('windup', a.windup * this.tuning.windup * windupScale * rage * WINDUP_SCALE * (this.windupMul || 1));
     ctx.audio?.telegraph(this.typeKey, this.position);
+    // A blow that carries forward shows where on the ground.
+    if (a.cone) ctx.effects?.cone?.(this, { range: a.cone.range * (this.type.scale || 1), half: a.cone.half });
+    if (a.shadow) ctx.effects?.shadowOrb?.(this, this._lashHand(), { size: 0.55 * (this.type.scale || 1) });
   }
 
   // Is it in the middle of a blow that cannot be interrupted?
@@ -602,6 +636,7 @@ export class Enemy {
     }
     if (a.projectile) this._throw(ctx, a);
     else ctx.audio?.enemySwing(this.typeKey, this.position);
+    if (a.shadow) this._shadowLash(ctx, a);
   }
 
   // Fireballs from the staff tip at the player's chest, fanned when several.
@@ -645,8 +680,15 @@ export class Enemy {
       this.root.updateMatrixWorld(true);
       if (player.overlapsOBB(this.strike.update())) {
         this.hitPlayer = true;
+        const blocked = player.blocking;
         const landed = player.takeDamage(this.damage * a.dmg, this.position, a.knockback, ctx, this);
         if (landed === true && a.ignite && !player.blocking) player.ignite?.(this.damage * a.ignite.dps, a.ignite.dur, ctx);
+        // Its jaws closed on you (not on a raised guard): it hangs on.
+        if (landed === true && a.latch && !blocked && !player.dead && !player.held && !player.air) {
+          this._latch(ctx, a);
+          return;
+        }
+        if (a.shadow && landed === true) this._shadowHit(ctx);
         // Parried: the blow is thrown back and the string is broken.
         if (this.state !== 'strike') return;
       }
@@ -875,6 +917,149 @@ export class Enemy {
     }
   }
 
+  // ------------------------------------------------- latch & shadow ---
+
+  // Its jaws locked on the player: it hangs on, thrashing its head, biting
+  // over and over, until its hold gives (`latch.dur`) or a blow throws it
+  // off. The player is held in place meanwhile (Player.pin).
+  _latch(ctx, a) {
+    const p = ctx.player;
+    let ox = this.position.x - p.position.x;
+    let oz = this.position.z - p.position.z;
+    const l = Math.hypot(ox, oz) || 1;
+    // Its jaws at your chest, its body out in front of you (not around the
+    // camera): you look down on it thrashing.
+    const reach = p.radius + this.radius * (this.type.latchReach ?? 1.8);
+    ox = (ox / l) * reach;
+    oz = (oz / l) * reach;
+    this.latchOff = { x: ox, z: oz };
+    this.latchTick = 0.18;
+    this.setState('latched', a.latch.dur);
+    this.latchedOn = p;
+    p.pin(this);
+    ctx.shake?.(0.4);
+    ctx.audio?.telegraph?.(this.typeKey, this.position);
+    ctx.onCombat?.('latched', tmpV.set(p.position.x, 1.2, p.position.z).clone());
+  }
+
+  _updateLatch(dt, ctx) {
+    const p = ctx.player;
+    const a = this.attack;
+    if (!a?.latch || p.dead || p.pinned?.by !== this) {
+      this.setState('recover', 0.6);
+      return;
+    }
+    if (this.stateT >= this.stateDur) {
+      // Its hold gives: it drops off and springs clear.
+      this._evade(ctx, { away: 1, speed: 8, dur: 0.32 });
+      return;
+    }
+    // Hanging off the player, its head thrashing side to side.
+    const t = this.stateT;
+    this.position.set(p.position.x + this.latchOff.x, 0, p.position.z + this.latchOff.z);
+    this.yaw = Math.atan2(-this.latchOff.x, -this.latchOff.z) + Math.sin(t * 17) * 0.32;
+    this.root.position.y = 0.32 + 0.06 * Math.sin(t * 34);
+    this.pose = { name: 'bite', u: 0.45 + 0.25 * Math.sin(t * 17), rate: 30 };
+    this.moveBlend = 0;
+    this.latchTick -= dt;
+    if (this.latchTick <= 0) {
+      this.latchTick = 0.3;
+      p.maul(this.damage * a.latch.dps * 0.3, this.position, ctx);
+      const at = tmpV.set(p.position.x + this.latchOff.x * 0.5, 1.05, p.position.z + this.latchOff.z * 0.5);
+      for (let i = 0; i < 14; i++) ctx.fx.alpha.emit({ x: at.x, y: at.y, z: at.z, vx: rand(-2, 2), vy: rand(0, 2.5), vz: rand(-2, 2), life: rand(0.4, 0.8), size: rand(0.06, 0.12), sizeEnd: 0.03, color: C.blood, colorEnd: C.bloodDark, gravity: -9, drag: 1 });
+    }
+  }
+
+  // Shadow gathering into it as it winds up a lash: dark smoke drawn in
+  // from all round to the striking arm, violet sparks spiralling with it,
+  // and shadow seeping up out of the ground at its feet.
+  _shadowGather(dt, ctx) {
+    const sc = this.type.scale || 1;
+    const k = Math.min(1, this.stateT / Math.max(0.01, this.stateDur));
+    const hand = this._handAt(tmpV2);
+    const hx = hand.x;
+    const hy = hand.y;
+    const hz = hand.z;
+    const n = Math.floor(dt * (50 + 90 * k) + Math.random());
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const e = rand(-0.6, 0.9);
+      const r = rand(1.2, 2.2) * sc;
+      const x = hx + Math.cos(a) * Math.cos(e) * r;
+      const y = hy + Math.sin(e) * r;
+      const z = hz + Math.sin(a) * Math.cos(e) * r;
+      const life = rand(0.35, 0.55);
+      // Dark smoke drawn in, curling round as it comes.
+      const sw = rand(1.5, 3);
+      ctx.fx.alpha.emit({ x, y, z, vx: (hx - x) / life - Math.sin(a) * sw, vy: (hy - y) / life, vz: (hz - z) / life + Math.cos(a) * sw, life, size: rand(0.3, 0.55) * sc, sizeEnd: 0.06, color: SHADOW, colorEnd: SHADOW_DEEP, drag: 0.4, turbulence: 0.8 });
+      if (Math.random() < 0.45) {
+        const sp = rand(2.5, 4);
+        ctx.fx.add.emit({ x, y, z, vx: (hx - x) / life - Math.sin(a) * sp, vy: (hy - y) / life, vz: (hz - z) / life + Math.cos(a) * sp, life, size: rand(0.04, 0.08), sizeEnd: 0.01, color: SHADOW_GLOW, colorEnd: C.violetDark, drag: 1.2 });
+      }
+    }
+    // Shadow seeping up out of the ground round its feet.
+    if (Math.random() < dt * 30) {
+      const a = Math.random() * Math.PI * 2;
+      const r = rand(0.2, 1.1) * sc;
+      ctx.fx.alpha.emit({ x: this.position.x + Math.cos(a) * r, y: 0.1, z: this.position.z + Math.sin(a) * r, vx: 0, vy: rand(0.6, 1.4), vz: 0, life: rand(0.8, 1.3), size: rand(0.5, 0.9) * sc, sizeEnd: 0.2, color: SHADOW_DEEP, colorEnd: SHADOW, drag: 0.6, turbulence: 1.4 });
+    }
+  }
+
+  // The striking hand (the right), and where it is now.
+  _lashHand() {
+    if (this._lashBone === undefined) this._lashBone = this.model.bones?.find((b) => /^right_?hand$/i.test(b.name)) || null;
+    return this._lashBone;
+  }
+
+  _handAt(out) {
+    const b = this._lashHand();
+    if (b) return b.getWorldPosition(out);
+    const sc = this.type.scale || 1;
+    return out.set(this.position.x - Math.cos(this.yaw) * 0.55 * sc, 1.45 * sc, this.position.z + Math.sin(this.yaw) * 0.55 * sc);
+  }
+
+  // The lash itself: a whip of shadow torn out along the cone, writhing
+  // tendrils splitting off it, a violet core of sparks down its length and
+  // a burst of shadow where it ends.
+  _shadowLash(ctx, a) {
+    const sc = this.type.scale || 1;
+    const len = (a.cone?.range || 4.5) * sc;
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    const from = this._handAt(tmpV2);
+    // Thrown from the hand to the far end of the cone, down its middle.
+    const tx = this.position.x + fx * len - from.x;
+    const tz = this.position.z + fz * len - from.z;
+    const run = Math.hypot(tx, tz) || len;
+    const dx = tx / run;
+    const dz = tz / run;
+    // The whip itself: a ribbon of living shadow (world/Effects.js).
+    ctx.effects?.shadowWhip?.(from, { x: dx, z: dz }, run, { bone: this._lashHand(), endY: 0.9, width: 0.6 * sc });
+    // Smoke torn off it along its run, sparks shed from it.
+    const steps = 18;
+    for (let i = 1; i <= steps; i++) {
+      const k = i / steps;
+      const x = from.x + dx * run * k;
+      const z = from.z + dz * run * k;
+      const y = from.y + (0.9 - from.y) * k * k;
+      const delay = k * 0.16;
+      for (let j = 0; j < 2; j++) ctx.fx.alpha.emit({ x: x + rand(-0.2, 0.2), y: y + rand(-0.2, 0.2), z: z + rand(-0.2, 0.2), vx: rand(-0.7, 0.7), vy: rand(0, 0.9), vz: rand(-0.7, 0.7), life: rand(0.5, 0.95) + delay, size: rand(0.3, 0.6) * (1 - k * 0.4), sizeEnd: 0.08, color: SHADOW, colorEnd: SHADOW_DEEP, drag: 1.4, turbulence: 1.6 });
+      if (i % 2 === 0) ctx.fx.add.emit({ x, y, z, vx: dx * 4 + rand(-1, 1), vy: rand(-0.3, 1.2), vz: dz * 4 + rand(-1, 1), life: rand(0.25, 0.5), size: rand(0.06, 0.12), sizeEnd: 0.02, color: SHADOW_GLOW, colorEnd: C.violetDark, drag: 2 });
+    }
+    // Where it ends: a burst of shadow and violet sparks.
+    const at = tmpV.set(from.x + dx * run, 0.9, from.z + dz * run);
+    burst(ctx.fx.alpha, at, { count: 22, speed: 3.2, color: SHADOW, colorEnd: SHADOW_DEEP, size: 0.65, life: 0.9, gravity: 0.5 });
+    burst(ctx.fx.add, at, { count: 18, speed: 5, color: SHADOW_GLOW, colorEnd: C.violetDark, size: 0.08, life: 0.45, gravity: -2 });
+  }
+
+  // The lash caught you: shadow clings and drags.
+  _shadowHit(ctx) {
+    const p = ctx.player.position;
+    const at = tmpV.set(p.x, 1.1, p.z);
+    burst(ctx.fx.alpha, at, { count: 30, speed: 2.5, color: SHADOW, colorEnd: SHADOW_DEEP, size: 0.6, life: 0.8, gravity: 0.3 });
+    burst(ctx.fx.add, at, { count: 26, speed: 4, color: SHADOW_GLOW, colorEnd: C.violetDark, size: 0.1, life: 0.4 });
+  }
+
   _endAttack(ctx) {
     ctx.director.releaseToken(this);
     this.attack = null;
@@ -894,6 +1079,12 @@ export class Enemy {
   //         sweep (blade travel direction, world), force (0..1+) }
   takeHit(amount, dir, knockback, stagger, ctx, opts = {}) {
     if (!this.alive || this.state === 'burrowed' || this.hidden) return 0;
+    // Hanging on you: a blow throws it off, reeling.
+    if (this.state === 'latched' && !opts.proc) {
+      this.interrupt(ctx, 0.9);
+      this.stumbling = true;
+      ctx.onCombat?.('shakenOff', tmpV.set(this.position.x, 1.1, this.position.z).clone());
+    }
     amount *= this.damageTakenMul();
     if (this.state === 'frozen' && !opts.proc) {
       // The blow shatters the ice.
@@ -1130,7 +1321,7 @@ export class Enemy {
         continue;
       }
       const h = (this.model.height || 1.6) * 0.6 * (this.type.scale || 1);
-      if (kind === 'burn' && Math.random() < dt * 20) ctx.fx.add.emit({ x: this.position.x + rand(-0.3, 0.3), y: rand(0.3, h * 1.4), z: this.position.z + rand(-0.3, 0.3), vy: 1.6, life: 0.5, size: 0.3, sizeEnd: 0.05, color: C.fireCore, colorEnd: C.fireEdge, drag: 1.2 });
+      if (kind === 'burn') this._burnFx(dt, ctx);
       if (kind === 'bleed' && Math.random() < dt * 8) ctx.fx.alpha.emit({ x: this.position.x + rand(-0.2, 0.2), y: h, z: this.position.z + rand(-0.2, 0.2), vx: rand(-0.5, 0.5), vy: 0.5, vz: rand(-0.5, 0.5), life: 0.8, size: 0.09, color: C.blood, colorEnd: C.bloodDark, gravity: -9 });
       if (tick && this.alive) {
         const dealt = this.takeHit(st.dps * 0.5, tmpV.set(0, 0, 0), 0, 0, ctx, { proc: true });
@@ -1138,6 +1329,60 @@ export class Enemy {
         if (!this.alive) return;
       }
     }
+  }
+
+  // Ablaze: flames licking up all over it (from its bones, so they move
+  // with it), bigger and hotter at its core, sparks spiralling up out of
+  // the fire and a column of smoke above it.
+  _burnFx(dt, ctx) {
+    if (!this._bones) {
+      this._bones = [];
+      this.root.traverse((o) => {
+        if (o.isBone) this._bones.push(o);
+      });
+    }
+    const sc = this.type.scale || 1;
+    const h = (this.model.height || 1.6) * sc;
+    const bones = this._bones;
+    // Real flames on its body: on the bones spread up it (no fingers, toes
+    // or end nubs), from the hips to the head (world/Effects.js bodyFire).
+    if (!this._fireBones) {
+      const body = bones.filter((b) => !/finger|thumb|index|middle|ring|pinky|toe|end|tip|nub|jaw|eye|tongue|teeth|ear/i.test(b.name));
+      this.root.updateMatrixWorld(true);
+      const ys = body.map((b) => [b, b.getWorldPosition(tmpV).y - this.position.y]).sort((a, c) => a[1] - c[1]);
+      const pickAt = [0.97, 0.35, 0.55, 0.7, 0.82, 0.45];
+      const chosen = [];
+      for (const q of pickAt) {
+        const b = ys[Math.min(ys.length - 1, Math.floor(q * ys.length))]?.[0];
+        if (b && !chosen.includes(b)) chosen.push(b);
+      }
+      this._fireBones = chosen;
+    }
+    ctx.effects?.bodyFire?.(this, this._fireBones, h * 0.62);
+    const at = tmpV;
+    const pick = () => {
+      if (bones.length) {
+        bones[Math.floor(Math.random() * bones.length)].getWorldPosition(at);
+        at.x += rand(-0.12, 0.12) * sc;
+        at.z += rand(-0.12, 0.12) * sc;
+      } else at.set(this.position.x + rand(-0.3, 0.3) * sc, rand(0.2, h), this.position.z + rand(-0.3, 0.3) * sc);
+      return at;
+    };
+    // Licks of flame shed off it, reddening as they rise.
+    let n = Math.floor(dt * 36 + Math.random());
+    for (let i = 0; i < n; i++) {
+      const p = pick();
+      ctx.fx.add.emit({ x: p.x, y: p.y, z: p.z, vx: rand(-0.3, 0.3), vy: rand(1.6, 2.8), vz: rand(-0.3, 0.3), life: rand(0.3, 0.55), size: rand(0.16, 0.3) * sc, sizeEnd: 0.03, color: C.fireEdge, colorEnd: C.emberRed, drag: 1.4, turbulence: 2.2 });
+    }
+    // Sparks thrown up, spiralling.
+    n = Math.floor(dt * 30 + Math.random());
+    for (let i = 0; i < n; i++) {
+      const p = pick();
+      const a = Math.random() * Math.PI * 2;
+      ctx.fx.add.emit({ x: p.x, y: p.y, z: p.z, vx: Math.cos(a) * rand(0.6, 1.6), vy: rand(2.5, 4.5), vz: Math.sin(a) * rand(0.6, 1.6), life: rand(0.6, 1.1), size: rand(0.035, 0.07), sizeEnd: 0.01, color: C.spark, colorEnd: C.emberRed, drag: 0.8, gravity: 1.5, turbulence: 3 });
+    }
+    // Black smoke rolling up off it.
+    if (Math.random() < dt * 10) ctx.fx.alpha.emit({ x: this.position.x + rand(-0.3, 0.3) * sc, y: h * rand(0.9, 1.15), z: this.position.z + rand(-0.3, 0.3) * sc, vx: rand(-0.2, 0.2), vy: rand(1, 1.8), vz: rand(-0.2, 0.2), life: rand(1, 1.6), size: rand(0.4, 0.7) * sc, sizeEnd: 1.2 * sc, color: SOOT, colorEnd: SOOT, drag: 0.6, turbulence: 1.2 });
   }
 
   interrupt(ctx, dur) {

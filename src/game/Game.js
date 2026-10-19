@@ -795,7 +795,7 @@ export class Game {
   _separate(level) {
     const list = (this._sepList ||= []);
     list.length = 0;
-    for (const e of this.enemies) if (e.alive && e.state !== 'burrowed' && !e.hidden && e.root.position.y < 1) list.push(e);
+    for (const e of this.enemies) if (e.alive && e.state !== 'burrowed' && e.state !== 'latched' && !e.hidden && e.root.position.y < 1) list.push(e);
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       for (let j = i + 1; j < list.length; j++) {
@@ -879,6 +879,10 @@ export class Game {
       this.player.flash(0xffa040, 30, 0.18);
     } else if (kind === 'clash') this.hud.callout('GUARDED', { color: '#c05040', size: 0.85 });
     else if (kind === 'guardBreak') this.hud.callout('GUARD SHATTERED', { color: '#ff8a3a', size: 1.0 });
+    else if (kind === 'latched') {
+      this.hud.callout('STRIKE IT OFF', { color: '#ff5a3a', size: 1.0 });
+      this._hint('latched', 'A hound has its jaws in you: <b>strike it</b> to throw it off, or step out of its <b>red cone</b> before it leaps');
+    } else if (kind === 'shakenOff') this.hud.callout('THROWN OFF', { color: '#ffb060', size: 0.9 });
     else if (kind === 'crash') this.hud.callout('CRUSHED THROUGH', { color: '#ffa060', size: 0.95 });
     else if (kind === 'parry') {
       if (r) r.best.parries = (r.best.parries || 0) + 1;
@@ -1020,7 +1024,7 @@ export class Game {
     // or held in a giant's fist).
     if (!p.dash && !p.dead && !p.held && !p.air) {
       for (const e of this.enemies) {
-        if (!e.alive || e.state === 'burrowed' || e.root.position.y > 1) continue;
+        if (!e.alive || e.state === 'burrowed' || e.state === 'latched' || e.root.position.y > 1) continue;
         pushOutOfCircle(p.position, p.radius, e.position.x, e.position.z, e.radius);
       }
       level.world.resolve(p.position, p.radius);

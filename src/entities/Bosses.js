@@ -403,8 +403,12 @@ export class Sleeper extends Boss {
     const holder = new THREE.Group();
     holder.scale.setScalar(1 / hand.getWorldScale(_v).x);
     // In the hook of his four curled fingers, under the palm by the
-    // knuckles (hand-local, his height being 1).
-    holder.position.set(-0.08, -0.045, -0.025);
+    // knuckles (hand-local, his height being 1). Set out from his body and
+    // tipped head-down a little, so the haft runs through the hole his
+    // fingers leave rather than along their inner edge (fitted against the
+    // skinned fist in every clip; his grip is the same in all of them).
+    holder.position.set(-0.069, -0.014, -0.024);
+    holder.rotation.set(-0.094, -0.267, -0.004);
     // Turned so its bigger blade leads (faces the way he swings). The prop
     // stands on its butt, so it is slid down through the fist: the pommel
     // shows below it and he holds the handle a little above the end.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
-import { rockTextures, fogPuffTexture, textTexture, emberVeinTexture, softDotTexture, makeCanvas } from './Textures.js';
+import { rockTextures, fogPuffTexture, emberVeinTexture, softDotTexture, makeCanvas } from './Textures.js';
 import { makeFlame, abyssMaterial } from './Shaders.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
@@ -354,6 +354,27 @@ export class Surface {
   }
 
   _wall(x, z, len, h, rotY) {
+    // What is left of a wall: broken columns and slabs of layered rock along
+    // its line (stacked blocks only without those models).
+    if (Assets.hasProp('column') && Assets.hasProp('slab')) {
+      const c = Math.cos(rotY);
+      const sn = Math.sin(rotY);
+      const n = Math.max(2, Math.round(len / 2.2));
+      for (let i = 0; i < n; i++) {
+        const lx = -len / 2 + (len * (i + 0.5)) / n + (this.rand() - 0.5) * 0.6;
+        const px = x + c * lx;
+        const pz = z - sn * lx;
+        const column = i % 2 === 0 || this.rand() < 0.3;
+        const o = Assets.instanceProp(column ? 'column' : 'slab');
+        const hh = h * (0.45 + this.rand() * 0.55) * (i === 0 || i === n - 1 ? 0.7 : 1);
+        o.scale.multiplyScalar(column ? hh / 5.5 : hh / 3);
+        o.position.set(px, this.heightAt(px, pz) - 0.15, pz);
+        o.rotation.set((this.rand() - 0.5) * 0.08, rotY + this.rand() * Math.PI * 2, (this.rand() - 0.5) * 0.08);
+        this.group.add(o);
+        this.circles.push({ x: px, z: pz, r: column ? 0.8 : 1.0 });
+      }
+      return;
+    }
     const g = new THREE.Group();
     const blocks = Math.ceil(len / 1.2);
     for (let i = 0; i < blocks; i++) {
@@ -401,10 +422,24 @@ export class Surface {
       const z = Math.sin(a) * rad;
       if (Math.abs(x) < 3 && z > 8) continue;
       const len = 3 + r() * 3;
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, len, 24), this.stone);
-      c.rotation.set(0, r() * 6, Math.PI / 2);
-      c.position.set(x, this.heightAt(x, z) + 0.35, z);
-      this.group.add(c);
+      const gen = Assets.instanceProp('column');
+      if (gen) {
+        // A broken column toppled over, half sunk in the ash.
+        gen.scale.multiplyScalar(len / 5.5);
+        const yaw = r() * 6;
+        const lie = new THREE.Group();
+        gen.rotation.z = Math.PI / 2;
+        gen.position.set(len * 0.5, 0, 0);
+        lie.add(gen);
+        lie.rotation.y = yaw;
+        lie.position.set(x - Math.cos(yaw) * len * 0.5, this.heightAt(x, z) + 0.2, z + Math.sin(yaw) * len * 0.5);
+        this.group.add(lie);
+      } else {
+        const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, len, 24), this.stone);
+        c.rotation.set(0, r() * 6, Math.PI / 2);
+        c.position.set(x, this.heightAt(x, z) + 0.35, z);
+        this.group.add(c);
+      }
       this.circles.push({ x, z, r: 0.9 });
     }
     const blockGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -415,11 +450,21 @@ export class Surface {
       const z = Math.sin(a) * rad;
       if (Math.abs(x) < 3 && z > 8) continue;
       const s = 0.3 + r() * 0.8;
-      const b = new THREE.Mesh(blockGeo, r() > 0.5 ? this.stone : this.darkStone);
-      b.scale.set(s * (1 + r()), s, s * (1 + r() * 0.5));
-      b.position.set(x, this.heightAt(x, z) + s * 0.3, z);
-      b.rotation.set(r() * 0.4, r() * 6, r() * 0.4);
-      this.group.add(b);
+      // Boulders and the odd jagged shard (plain blocks only without them).
+      const shard = r() < 0.25;
+      const gen = Assets.instanceProp(shard ? 'shard' : 'rock');
+      if (gen) {
+        gen.scale.multiplyScalar(shard ? (s * 1.6) / 4 : (s * 1.5) / 2.6);
+        gen.position.set(x, this.heightAt(x, z) - s * 0.15, z);
+        gen.rotation.set((r() - 0.5) * 0.5, r() * 6, (r() - 0.5) * 0.5);
+        this.group.add(gen);
+      } else {
+        const b = new THREE.Mesh(blockGeo, r() > 0.5 ? this.stone : this.darkStone);
+        b.scale.set(s * (1 + r()), s, s * (1 + r() * 0.5));
+        b.position.set(x, this.heightAt(x, z) + s * 0.3, z);
+        b.rotation.set(r() * 0.4, r() * 6, r() * 0.4);
+        this.group.add(b);
+      }
       if (s > 0.7) this.circles.push({ x, z, r: s * 0.7 });
     }
     // Gravestones near the gate.
@@ -473,13 +518,29 @@ export class Surface {
   }
 
   _gate() {
-    // A ruined gateway frames the first view of the pit.
+    // A gateway frames the first view of the pit: the horned hell-gate the
+    // floors below end in, here standing open in the ash (two stone piers
+    // and a lintel only without its model).
     const z = 19;
+    const horned = Assets.hasProp('gate');
+    if (horned) {
+      const SCALE = 1.55;
+      const gate = Assets.instanceProp('gate');
+      gate.scale.multiplyScalar(SCALE);
+      // Its front (the skulls, -X) toward you as you come, the arch across.
+      gate.rotation.y = Math.PI / 2;
+      gate.position.set(0, this.heightAt(0, z) - 0.1, z);
+      this.group.add(gate);
+      const W = Assets.props.get('gate').entry.size * SCALE * 0.42;
+      for (const s of [-1, 1]) this.circles.push({ x: s * (W / 2 + 1.0), z, r: 1.1 });
+    }
     for (const s of [-1, 1]) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(1.3, 6.5, 1.3), this.stone);
-      p.position.set(s * 3, 3.1 + this.heightAt(s * 3, z), z);
-      this.group.add(p);
-      this.circles.push({ x: s * 3, z, r: 1.0 });
+      if (!horned) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(1.3, 6.5, 1.3), this.stone);
+        p.position.set(s * 3, 3.1 + this.heightAt(s * 3, z), z);
+        this.group.add(p);
+        this.circles.push({ x: s * 3, z, r: 1.0 });
+      }
       // Braziers either side.
       const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.3, 0.4, 28, 1, true), new THREE.MeshStandardMaterial({ color: 0x221e1c, metalness: 0.8, roughness: 0.5 }));
       bowl.position.set(s * 4.6, 1.3 + this.heightAt(s * 4.6, z - 1), z - 1);
@@ -500,6 +561,7 @@ export class Surface {
       this.flames = this.flames || [];
       this.flames.push(flame);
     }
+    if (horned) return;
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.9, 1.4), this.darkStone);
     lintel.position.set(-0.3, 6.6 + this.heightAt(0, z), z);
     lintel.rotation.z = 0.08;
@@ -510,17 +572,35 @@ export class Surface {
     const x = 6.5;
     const z = 22.5;
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 4.4, 0.7), this.darkStone);
-    body.position.y = 2.2;
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.0, 4), this.darkStone);
-    tip.position.y = 4.9;
-    tip.rotation.y = Math.PI / 4;
-    tip.scale.set(1, 1, 0.45);
-    this.plaque = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    this.plaque.position.set(0, 2.4, 0.36);
-    g.add(body, tip, this.plaque);
+    // A cracked black obelisk carved with glowing runes, the week's deepest
+    // inscribed on an iron-framed tablet bolted to its face (a plain stone
+    // block and cap only without its model).
+    let face = 0.36;
+    let at = 2.4;
+    const gen = Assets.instanceProp('obelisk');
+    if (gen) {
+      gen.scale.multiplyScalar(5.2 / 3.6);
+      g.add(gen);
+      g.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(gen);
+      face = box.max.z + 0.04;
+      at = Math.min(2.5, box.max.y * 0.5);
+    } else {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 4.4, 0.7), this.darkStone);
+      body.position.y = 2.2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1.0, 4), this.darkStone);
+      tip.position.y = 4.9;
+      tip.rotation.y = Math.PI / 4;
+      tip.scale.set(1, 1, 0.45);
+      g.add(body, tip);
+    }
+    this.plaque = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.9), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
+    this.plaque.position.set(0, at, face);
+    g.add(this.plaque);
     g.position.set(x, this.heightAt(x, z) - 0.1, z);
-    g.rotation.y = -0.5;
+    // The tablet (on its plain face, the runes on its broad sides) turned
+    // to where you wake, so the scores read straight on.
+    g.rotation.y = Math.atan2(this.spawn.x - x, this.spawn.z - z);
     this.group.add(g);
     this.circles.push({ x, z, r: 1.1 });
   }
@@ -528,13 +608,7 @@ export class Surface {
   // The obelisk carries the week's deepest descent and your own.
   setScores({ best = 0, last = 0, top = null } = {}) {
     const old = this.plaque.material.map;
-    this.plaque.material.map = textTexture([
-      { text: "THIS WEEK'S DEEPEST", size: 36 },
-      { text: top ? `Floor ${top.score}` : 'None yet', size: 92, gap: 82 },
-      { text: top ? String(top.name).slice(0, 18) : 'no soul yet', size: 34, gap: 64 },
-      { text: `Your best: ${best ? `floor ${best}` : 'none yet'}`, size: 32 },
-      { text: last ? `Last run: floor ${last}` : '', size: 30 },
-    ]);
+    this.plaque.material.map = scoreTablet({ best, last, top });
     this.plaque.material.needsUpdate = true;
     old?.dispose();
   }
@@ -654,4 +728,126 @@ export class Surface {
       fx.alpha.emit({ x: (Math.random() - 0.5) * 50, y: 12, z: (Math.random() - 0.5) * 50, vx: 0.4, vy: -0.6, life: 14, size: 0.08, color: C.smoke, colorEnd: C.smoke, alpha: 0.8, drag: 0, turbulence: 0.6 });
     }
   }
+}
+
+// The score tablet: a slab of dark iron in a riveted frame with spiked
+// corners, a skull at its crown, the week's deepest descent engraved in
+// molten gold and your own below a rule.
+function scoreTablet({ best, last, top }) {
+  const W = 480;
+  const H = 608;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const serif = "Georgia, 'Times New Roman', serif";
+  // The frame: a dark iron border, bevelled, with a spike at each corner.
+  const frame = g.createLinearGradient(0, 0, W, H);
+  frame.addColorStop(0, '#5a4a44');
+  frame.addColorStop(0.5, '#2a201e');
+  frame.addColorStop(1, '#141010');
+  g.fillStyle = frame;
+  g.beginPath();
+  const cut = 34;
+  g.moveTo(cut, 0);
+  g.lineTo(W - cut, 0);
+  g.lineTo(W, cut);
+  g.lineTo(W, H - cut);
+  g.lineTo(W - cut, H);
+  g.lineTo(cut, H);
+  g.lineTo(0, H - cut);
+  g.lineTo(0, cut);
+  g.closePath();
+  g.fill();
+  // The slab inside, scorched toward its edges.
+  const inset = 30;
+  const slab = g.createRadialGradient(W / 2, H * 0.42, 20, W / 2, H / 2, H * 0.7);
+  slab.addColorStop(0, '#2c0e08');
+  slab.addColorStop(0.6, '#160605');
+  slab.addColorStop(1, '#080202');
+  g.fillStyle = slab;
+  g.fillRect(inset, inset, W - inset * 2, H - inset * 2);
+  g.strokeStyle = '#8a3a14';
+  g.lineWidth = 3;
+  g.strokeRect(inset + 8, inset + 8, W - (inset + 8) * 2, H - (inset + 8) * 2);
+  g.strokeStyle = 'rgba(255,120,40,0.35)';
+  g.lineWidth = 1;
+  g.strokeRect(inset + 14, inset + 14, W - (inset + 14) * 2, H - (inset + 14) * 2);
+  // Rivets round the frame.
+  for (let i = 0; i < 6; i++) {
+    for (const [x, y] of [[14 + ((W - 28) * i) / 5, 15], [14 + ((W - 28) * i) / 5, H - 15], [15, 14 + ((H - 28) * i) / 5], [W - 15, 14 + ((H - 28) * i) / 5]]) {
+      const rv = g.createRadialGradient(x - 2, y - 2, 0, x, y, 6);
+      rv.addColorStop(0, '#d8c8b8');
+      rv.addColorStop(1, '#3a2a24');
+      g.fillStyle = rv;
+      g.beginPath();
+      g.arc(x, y, 5, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  // A skull at its crown.
+  g.save();
+  g.translate(W / 2, inset + 52);
+  g.fillStyle = '#d8c4a4';
+  g.shadowColor = 'rgba(255,90,20,0.8)';
+  g.shadowBlur = 14;
+  g.beginPath();
+  g.arc(0, -4, 20, Math.PI, 0);
+  g.lineTo(14, 16);
+  g.lineTo(-14, 16);
+  g.closePath();
+  g.fill();
+  g.shadowBlur = 0;
+  g.fillStyle = '#ff6a1a';
+  for (const sx of [-1, 1]) {
+    g.beginPath();
+    g.arc(sx * 8, 0, 5.5, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+  // The engraving: gold that glows like metal fresh from the forge.
+  const gold = (text, y, size, opts = {}) => {
+    g.font = `${opts.bold ? 'bold ' : ''}${size}px ${serif}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const fit = Math.min(1, (W - inset * 2 - 40) / Math.max(1, g.measureText(text).width));
+    g.save();
+    g.translate(W / 2, y);
+    g.scale(fit, 1);
+    g.shadowColor = opts.glow || 'rgba(255,100,10,0.95)';
+    g.shadowBlur = opts.blur ?? 18;
+    const grad = g.createLinearGradient(0, -size / 2, 0, size / 2);
+    grad.addColorStop(0, opts.top || '#fff2c4');
+    grad.addColorStop(0.55, opts.mid || '#ffb347');
+    grad.addColorStop(1, opts.bottom || '#c4560c');
+    g.fillStyle = grad;
+    g.fillText(text, 0, 0);
+    g.restore();
+  };
+  const rule = (y) => {
+    const rg = g.createLinearGradient(inset + 30, 0, W - inset - 30, 0);
+    rg.addColorStop(0, 'rgba(255,120,30,0)');
+    rg.addColorStop(0.5, 'rgba(255,140,40,0.9)');
+    rg.addColorStop(1, 'rgba(255,120,30,0)');
+    g.fillStyle = rg;
+    g.fillRect(inset + 30, y - 1, W - (inset + 30) * 2, 2);
+    g.fillStyle = '#ffb347';
+    g.beginPath();
+    g.moveTo(W / 2, y - 6);
+    g.lineTo(W / 2 + 6, y);
+    g.lineTo(W / 2, y + 6);
+    g.lineTo(W / 2 - 6, y);
+    g.closePath();
+    g.fill();
+  };
+  gold("THIS WEEK'S DEEPEST", inset + 112, 30, { blur: 10 });
+  rule(inset + 136);
+  gold(top ? `FLOOR ${top.score}` : 'NONE YET', inset + 205, top ? 78 : 56, { bold: true, blur: 26 });
+  gold(top ? String(top.name).slice(0, 18) : 'no soul has returned', inset + 270, 34, { top: '#ffe6c8', mid: '#e8c8a0', bottom: '#a8805a', glow: 'rgba(200,80,10,0.7)', blur: 10 });
+  rule(inset + 318);
+  gold('YOUR DEEPEST', inset + 362, 24, { blur: 8 });
+  gold(best ? `Floor ${best}` : 'none yet', inset + 404, 42, { bold: true, blur: 14 });
+  if (last) gold(`Last descent: floor ${last}`, inset + 458, 26, { top: '#f0d8b8', mid: '#d0a878', bottom: '#8a6040', glow: 'rgba(160,60,10,0.6)', blur: 6 });
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }

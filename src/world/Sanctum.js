@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { rockTextures, runeCircleTexture } from './Textures.js';
-import { bloodMaterial, portalMaterial } from './Shaders.js';
+import { bloodMaterial, portalMaterial, gateVeilMaterial } from './Shaders.js';
+import { sceneryMaterial } from './Dressing.js';
 import { C, spawnFlame } from './Particles.js';
 import { mulberry32 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
@@ -176,7 +177,14 @@ export class Sanctum {
     return n;
   }
 
+  // The way down: the same hell-gate the floors end in, facing you across
+  // the sanctum, a veil of hellfire waking in its arch once an altar is
+  // chosen, embers drawn into it. (Without its model: a plain stone arch.)
   _portal() {
+    if (Assets.hasProp('gate')) {
+      this._gate();
+      return;
+    }
     const g = new THREE.Group();
     g.position.copy(this.portalPos);
     this.portalMat = portalMaterial();
@@ -197,6 +205,55 @@ export class Sanctum {
     this.portalLight.position.y = 1.5;
     g.add(this.portalLight);
     this.group.add(g);
+  }
+
+  _gate() {
+    const g = new THREE.Group();
+    g.position.copy(this.portalPos);
+    // The model's front (its skulls) is its -X and the arch spans its Z:
+    // turned to face the way in (+Z), the arch across.
+    g.rotation.y = Math.PI / 2;
+    const SCALE = 0.85;
+    const gate = Assets.instanceProp('gate');
+    const src = Assets.propGeometry('gate');
+    const mat = src ? sceneryMaterial(src.material, { tint: [0.95, 0.85, 0.82] }) : null;
+    if (mat) {
+      gate.traverse((o) => {
+        if (o.isMesh) o.material = mat;
+      });
+    }
+    gate.scale.multiplyScalar(SCALE);
+    g.add(gate);
+    const H = Assets.props.get('gate').entry.size * SCALE;
+    const W = H * 0.42;
+    const A = H * 0.58;
+    const shape = new THREE.Shape();
+    shape.moveTo(-W / 2, 0);
+    shape.lineTo(W / 2, 0);
+    shape.lineTo(W / 2, A - W / 2);
+    shape.absarc(0, A - W / 2, W / 2, 0, Math.PI, false);
+    shape.lineTo(-W / 2, 0);
+    const geo = new THREE.ShapeGeometry(shape, 24);
+    const p = geo.attributes.position;
+    const uv = [];
+    for (let i = 0; i < p.count; i++) uv.push(p.getX(i) / W + 0.5, p.getY(i) / A);
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.rotateY(Math.PI / 2);
+    this.portalMat = gateVeilMaterial(W, A);
+    const veil = new THREE.Mesh(geo, this.portalMat);
+    veil.renderOrder = 3;
+    g.add(veil);
+    // A rune circle on the floor before it.
+    const rune = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), new THREE.MeshBasicMaterial({ map: runeCircleTexture('#ff3a1a'), transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
+    rune.rotation.x = -Math.PI / 2;
+    rune.position.set(-2.1, 0.07, 0);
+    g.add(rune);
+    this.gateRune = rune;
+    this.portalLight = new THREE.PointLight(0xff3010, 0, 11, 1.5);
+    this.portalLight.position.set(-0.8, A * 0.5, 0);
+    g.add(this.portalLight);
+    this.group.add(g);
+    this.gateFx = { w: W, h: A };
   }
 
   // The node the player is looking at, within reach.
@@ -238,6 +295,24 @@ export class Sanctum {
     this.portalMat.uniforms.uOpen.value = this.portalT;
     this.portalLight.intensity = this.portalT * 22;
     const ps = ctx.fx.add;
+    if (this.gateFx) {
+      // Embers circling into the veil's eye (a storm once it wakes), and
+      // the rune turning faster.
+      const G = this.gateFx;
+      this.gateRune.rotation.z = t * (0.1 + this.portalT * 0.6);
+      this.gateRune.material.opacity = 0.2 + this.portalT * 0.6;
+      let n = (this.portalOpen ? 50 : 8) * dt;
+      while (n > 0 && (n >= 1 || Math.random() < n)) {
+        n--;
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.35 + Math.random() * 0.65;
+        const lx = Math.cos(a) * r * G.w * 0.5;
+        const ly = G.h * 0.48 + Math.sin(a) * r * G.w * 0.55;
+        if (ly < 0.1 || ly > G.h) continue;
+        const sp = (this.portalOpen ? 1.8 : 0.6) * (0.6 + Math.random() * 0.6);
+        ps.emit({ x: this.portalPos.x + lx, y: ly, z: this.portalPos.z + 0.1, vx: -Math.sin(a) * sp - Math.cos(a) * sp * 0.4, vy: Math.cos(a) * sp - Math.sin(a) * sp * 0.4, vz: (Math.random() - 0.3) * 0.5, life: 0.7 + Math.random() * 0.6, size: 0.08, sizeEnd: 0.02, color: C.emberHot, colorEnd: C.emberRed, drag: 0.6 });
+      }
+    }
     for (const n of this.nodes) {
       const target = n.alive ? n.baseLight * (n === focused ? 1.6 : 1) : 0;
       n.light.intensity += (target * (0.9 + Math.sin(t * 6 + n.pos.x) * 0.1) - n.light.intensity) * Math.min(1, dt * 4);

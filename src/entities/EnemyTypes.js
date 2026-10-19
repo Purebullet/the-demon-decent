@@ -7,7 +7,8 @@
 //
 //   Gaunt Stalker  hit and run: a quick snap that may run on into a full
 //                  rake; two blows landed on it and it springs clear.
-//   Cinder Hound   flurries of burning bites; pounces that may be feints.
+//   Cinder Hound   flurries of burning bites; pounces that may be feints;
+//                  a maul down a red cone that latches on and thrashes.
 //   Shadow Fiend   a sweep and the backhand after it; blinks behind you
 //                  when you watch it from afar.
 //   Brute          armoured blows (gold, not red: they can't be countered
@@ -32,6 +33,11 @@
 //   charge     runs on through the strike; a wall stops it, stunned
 //   behind     used only when the player is behind it or pressed against it
 //   ignite     { dps, dur } sets the player alight
+//   cone       { range, half } a wedge on the ground shows where it lands
+//   lockAt     fraction of the wind-up after which it stops turning
+//   latch      { dur, dps } jaws that hang on (Enemy._latch)
+//   rest       seconds before it will choose this attack again
+//   shadow     the shadow fiend's lash (Enemy._shadowGather, _shadowLash)
 //
 // Kind fields: `guard` (raises a guard against swings it sees coming:
 // chance, how long, seconds between), `skittish` (springs clear after
@@ -94,7 +100,9 @@ export const ENEMY_TYPES = {
       { name: 'sweep', windup: 0.65, strike: 0.22, recover: 0.7, dmg: 1, minRange: 0, maxRange: 3.0, volume: { c: [0, 1.0, 1.5], h: [1.7, 0.6, 1.4] }, lunge: 0, knockback: 3.5, combo: { next: 'backhand', chance: 0.5, windup: 0.55 } },
       // The arm comes back the other way: block twice, or be clear of both.
       { name: 'backhand', clip: 'sweep', windup: 0.45, strike: 0.2, recover: 0.9, dmg: 0.8, minRange: 0, maxRange: 3.2, volume: { c: [0, 1.0, 1.5], h: [1.7, 0.6, 1.4] }, lunge: 1.5, knockback: 6, comboOnly: true },
-      { name: 'lash', windup: 0.75, strike: 0.2, recover: 0.75, dmg: 0.85, minRange: 2.4, maxRange: 4.6, volume: { c: [0, 1.1, 2.8], h: [0.4, 0.45, 2.0] }, lunge: 0, knockback: -7, combo: { next: 'sweep', chance: 0.45, windup: 0.6 } },
+      // A whip of shadow from afar: a cone on the ground shows its reach
+      // as shadow gathers into its arm, then it lashes out and drags you in.
+      { name: 'lash', windup: 0.75, strike: 0.2, recover: 0.75, dmg: 0.85, minRange: 2.4, maxRange: 4.6, volume: { c: [0, 1.1, 2.8], h: [0.4, 0.45, 2.0] }, lunge: 0, knockback: -7, cone: { range: 4.9, half: 0.2 }, lockAt: 0.7, shadow: true, combo: { next: 'sweep', chance: 0.45, windup: 0.6 } },
     ],
   },
   brute: {
@@ -126,8 +134,9 @@ export const ENEMY_TYPES = {
   },
   hound: {
     // Fast pack hunter of the hotter floors: darts in with a flurry of
-    // burning bites, and pounces from range, sometimes a feint to draw your
-    // dodge. Too quick to outrun; parry the bites or punish the landing.
+    // burning bites, pounces from range (sometimes a feint to draw your
+    // dodge), and mauls: a leap down a red cone that latches on. It never
+    // springs away: too quick to outrun, it stays on you.
     name: 'Cinder Hound',
     asset: 'hound',
     hp: 65,
@@ -141,12 +150,16 @@ export const ENEMY_TYPES = {
     cooldown: 0.8,
     turnRate: 10,
     stride: 2.2,
-    skittish: { hits: 1, window: 1, chance: 0.35 },
-    dodge: { chance: 0.4, range: 3.4, cooldown: [1.2, 2.4], pounce: 0.45 },
     loot: { potion: 0.12, weapon: 0.04, spell: 0.012 },
     attacks: [
       { name: 'bite', windup: 0.3, strike: 0.12, recover: 0.42, dmg: 0.75, minRange: 0, maxRange: 2.0, volume: { c: [0, 0.6, 1.1], h: [0.4, 0.4, 0.6] }, lunge: 4, knockback: 1.5, ignite: { dps: 0.12, dur: 2 }, combo: { next: 'bite', chance: 0.5, windup: 0.65, max: 2 } },
-      { name: 'pounce', windup: 0.5, strike: 0.38, recover: 0.7, dmg: 1.4, minRange: 3.5, maxRange: 7.5, volume: { c: [0, 0.7, 0.9], h: [0.45, 0.5, 0.7] }, lunge: 13, knockback: 5, feint: 0.35 },
+      { name: 'pounce', windup: 0.5, strike: 0.38, recover: 0.7, dmg: 1.4, minRange: 3.5, maxRange: 7.5, volume: { c: [0, 0.7, 0.9], h: [0.45, 0.5, 0.7] }, lunge: 13, knockback: 5, feint: 0.35, weight: 0.6 },
+      // The maul: it crouches, a red cone on the ground shows where it will
+      // go, it leaps along it and, if its jaws find you (not your guard),
+      // hangs on and thrashes until its hold gives or a blow throws it off.
+      // From up close as well as at range (it never springs back to make
+      // room), but not again within `rest` seconds.
+      { name: 'maul', clip: 'pounce', windup: 0.8, strike: 0.42, recover: 0.75, dmg: 0.45, minRange: 1.0, maxRange: 6, rest: 7, volume: { c: [0, 0.7, 0.9], h: [0.5, 0.55, 0.75] }, lunge: 13, knockback: 0, cone: { range: 6.6, half: 0.36 }, lockAt: 0.6, latch: { dur: 1.8, dps: 1.2 }, weight: 1.4 },
     ],
   },
   witch: {
