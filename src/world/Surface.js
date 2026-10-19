@@ -979,7 +979,7 @@ function scoreTablet({ rows, mine, last }) {
   };
   // Header.
   text('HALL OF THE DEEPEST', W / 2, 124, { size: 64, weight: 'bold ', ls: 4, color: '#ffcf7a' });
-  text('THIS WEEK', W / 2, 190, { size: 34, ls: 8, color: '#b07a54' });
+  text('THIS WEEK  ·  DEEPEST FLOOR AND THAT RUN\'S TIME', W / 2, 190, { size: 28, ls: 3, color: '#b07a54' });
   rule(232);
   // The five deepest: rank, name, then floor and time.
   const RANK = ['#ffd36a', '#e8e0d0', '#e0904a'];
