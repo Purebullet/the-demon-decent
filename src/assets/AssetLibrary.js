@@ -252,6 +252,16 @@ export const Assets = {
         scene.updateMatrixWorld(true);
         box = boundsOf(holder);
       }
+      // An axe's edge turned to lead the swing (a swing carries the head
+      // toward -X about its grip), not the flat of its blade.
+      if (entry.edge) {
+        const to = edgeDirection(holder, box);
+        if (to) {
+          scene.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(to, new THREE.Vector3(-1, 0, 0)));
+          scene.updateMatrixWorld(true);
+          box = boundsOf(holder);
+        }
+      }
     }
     const s = box.getSize(_v);
     const c = box.getCenter(_c);
@@ -405,6 +415,51 @@ function straighten(holder, scene) {
   const axis = hi.divideScalar(nh).sub(lo.divideScalar(nl)).normalize();
   scene.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(axis, new THREE.Vector3(0, 1, 0)));
   scene.updateMatrixWorld(true);
+}
+
+// Which way an upright axe's edge points, flat across (a unit vector in
+// the horizontal plane): from the haft's line out to the farthest point of
+// the head. Null if it can't tell.
+function edgeDirection(holder, box) {
+  const h = box.max.y - box.min.y;
+  const v = new THREE.Vector3();
+  let hx = 0;
+  let hz = 0;
+  let n = 0;
+  const head = [];
+  holder.updateMatrixWorld(true);
+  holder.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    const step = Math.max(1, Math.floor(pos.count / 8000));
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      const k = (v.y - box.min.y) / h;
+      if (k < 0.45) {
+        hx += v.x;
+        hz += v.z;
+        n++;
+      } else if (k > 0.6) head.push(v.x, v.z);
+    }
+  });
+  if (!n || !head.length) return null;
+  hx /= n;
+  hz /= n;
+  let best = 0;
+  let bx = 0;
+  let bz = 0;
+  for (let i = 0; i < head.length; i += 2) {
+    const dx = head[i] - hx;
+    const dz = head[i + 1] - hz;
+    const d = dx * dx + dz * dz;
+    if (d > best) {
+      best = d;
+      bx = dx;
+      bz = dz;
+    }
+  }
+  const l = Math.hypot(bx, bz);
+  return l > 1e-6 ? new THREE.Vector3(bx / l, 0, bz / l) : null;
 }
 
 // Which end of an upright weapon is the head? An axe or a mace is widest at

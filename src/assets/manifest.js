@@ -137,15 +137,15 @@ const LOOK =
 
 export const PROPS = {
   sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, guard: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
-  axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
+  axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, edge: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
   mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
   // The weapons demons drop: three more of each kind, each its own shape.
   swordBone: { model: 'assets/models/sword-bone.glb', size: 1.2, weapon: true, guard: true, prompt: `Demonic straight longsword, serrated blackened steel blade with a glowing red crack down its fuller, crossguard of two curved horns, bone-wrapped grip, small skull pommel, ${LOOK}` },
   swordFlame: { model: 'assets/models/sword-flame.glb', size: 1.2, weapon: true, guard: true, prompt: `Flamberge sword with a long wavy flame-shaped dark steel blade, ornate curled crossguard, crimson leather grip, ring pommel, ${LOOK}` },
   swordGreat: { model: 'assets/models/sword-great.glb', size: 1.35, weapon: true, guard: true, prompt: `Huge broad two-handed greatsword, thick wide double-edged blade engraved with glowing runes, heavy square spiked crossguard, long grip, spiked pommel, ${LOOK}` },
-  axeTwin: { model: 'assets/models/axe-twin.glb', size: 1.3, weapon: true, prompt: `Double-headed battle axe, two symmetric crescent blades of dark iron on one long haft wrapped with chains and leather, ${LOOK}` },
-  axeHeadsman: { model: 'assets/models/axe-headsman.glb', size: 1.1, weapon: true, prompt: `Executioner's axe, one huge broad squared iron blade with a hooked spike on the back, thick short dark wooden haft bound in iron, ${LOOK}` },
-  axeHorn: { model: 'assets/models/axe-horn.glb', size: 1.2, weapon: true, prompt: `Bearded war axe with a narrow hooked blade and a long spike on top, haft of pale bone with leather bands, demon horn on the back of the head, ${LOOK}` },
+  axeTwin: { model: 'assets/models/axe-twin.glb', size: 1.3, weapon: true, edge: true, prompt: `Double-headed battle axe, two symmetric crescent blades of dark iron on one long haft wrapped with chains and leather, ${LOOK}` },
+  axeHeadsman: { model: 'assets/models/axe-headsman.glb', size: 1.1, weapon: true, edge: true, prompt: `Executioner's axe, one huge broad squared iron blade with a hooked spike on the back, thick short dark wooden haft bound in iron, ${LOOK}` },
+  axeHorn: { model: 'assets/models/axe-horn.glb', size: 1.2, weapon: true, edge: true, prompt: `Bearded war axe with a narrow hooked blade and a long spike on top, haft of pale bone with leather bands, demon horn on the back of the head, ${LOOK}` },
   maceStar: { model: 'assets/models/mace-star.glb', size: 1.05, weapon: true, prompt: `Morning star mace, round iron ball head covered in long sharp spikes on a straight dark wooden haft, leather grip, ${LOOK}` },
   maceHammer: { model: 'assets/models/mace-hammer.glb', size: 0.9, weapon: true, prompt: `Heavy warhammer, block-shaped iron hammer head with a demon skull carved into its face and a spike at the back, long dark haft, ${LOOK}` },
   maceClub: { model: 'assets/models/mace-club.glb', size: 0.92, weapon: true, prompt: `Brutal war club, thick knobbed bone club studded with iron nails and curved fang spikes, leather-wrapped handle, ${LOOK}` },
