@@ -354,7 +354,6 @@ export class Hud {
     this.topL = this._canvasLayer(1024, 256, 6);
     this.pieces = new Map();
     this.topSig = '';
-    this.relicFlash = null;
 
     this.playing = false;
     this.panel = 'title';
@@ -547,7 +546,9 @@ export class Hud {
   }
 
   flashRelic(id) {
-    this.relicFlash = { id, t: 0 };
+    // (Once: the new relic is drawn by the repaint this asks for. This
+    // used to stay set for good, and the whole interface then repainted
+    // twenty times a second from the first relic on.)
     this.dirty = true;
   }
 
@@ -1047,7 +1048,8 @@ export class Hud {
     this.blow = Math.max(0, (this.blow || 0) - dt * 1.6);
     V.uBlow.value = this.playing ? this.blow : 0;
 
-    const animating = this.panel === 'title' || this.panel === 'notice' || this.panel === 'death' || this.panel === 'victory' || this.relicFlash;
+    // (Panels that move repaint as they go; the playing HUD only on change.)
+    const animating = this.panel === 'title' || this.panel === 'notice' || this.panel === 'death' || this.panel === 'victory';
     const sig = this._signature();
     this.paintT -= dt;
     if ((this.dirty || sig !== this.lastSig || animating) && this.paintT <= 0) {
