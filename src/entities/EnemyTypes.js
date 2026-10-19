@@ -139,7 +139,7 @@ export const ENEMY_TYPES = {
     // springs away: too quick to outrun, it stays on you.
     name: 'Cinder Hound',
     asset: 'hound',
-    hp: 65,
+    hp: 117,
     dmg: 9,
     speed: 6.2,
     radius: 0.45,

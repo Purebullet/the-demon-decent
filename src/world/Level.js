@@ -220,6 +220,7 @@ export class Level {
     const free = Math.min(this.maxLights - this.spots.length, this.maxLights > 2 ? 3 : 1);
     for (const [i, g] of this.dressing.lightSpots(Math.max(0, free)).entries()) {
       this._spot({ color: this.look.glow, base: 9, distance: 11, decay: 1.6, x: g.x, y: Math.max(1.2, g.y), z: g.z, seed: 10 + i * 2.3, slow: true });
+      g.spot = this.spots[this.spots.length - 1];
     }
   }
 
@@ -248,7 +249,7 @@ export class Level {
     const want = this.poolT > 0 && this.poolWant ? this.poolWant : null;
     if (!want) {
       this.poolT = 0.25;
-      const ranked = [...this.spots, exit].map((s) => ({ s, d: (s.pos.x - p.x) ** 2 + (s.pos.z - p.z) ** 2 - (s === exit ? this.portalT * 60 : 0) - (s.prio || 0) })).sort((a, b) => a.d - b.d);
+      const ranked = [...this.spots.filter((s) => !s.out), exit].map((s) => ({ s, d: (s.pos.x - p.x) ** 2 + (s.pos.z - p.z) ** 2 - (s === exit ? this.portalT * 60 : 0) - (s.prio || 0) })).sort((a, b) => a.d - b.d);
       this.poolWant = ranked.slice(0, this.pool.length).map((r) => r.s);
     }
     this._assignPool(this.poolWant);

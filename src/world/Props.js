@@ -205,13 +205,38 @@ export class Props {
       const w = Math.max(0.25, f.r);
       const hb = new Hurtbox(root, new THREE.Vector3(0, f.h / 2, 0), new THREE.Vector3(w, f.h / 2, w), { name: 'prop' });
       hb.update();
-      const b = { isProp: true, id: f.id, root, material: dressing.mat(f.id), height: Math.min(f.h, 2.5), solids: f.solids, mm: f.mm, alive: true, position: root.position, hitRadius: w + 0.25, hurtboxes: [hb] };
+      const b = { isProp: true, id: f.id, root, material: dressing.mat(f.id), height: Math.min(f.h, 2.5), solids: f.solids, mm: f.mm, glow: f.glow, alive: true, position: root.position, hitRadius: w + 0.25, hurtboxes: [hb] };
       b.smash = (ctx, dir) => this._smash(b, ctx, dir);
       this.breakables.push(b);
     }
   }
 
   // Burst into pieces thrown away from the blow; sometimes a potion inside.
+  // What a breakable's flying chunks are made of: its own material, or for
+  // a glowing thing a dark copy (no glowing chunks lying about).
+  _pieceMat(b) {
+    if (!(b.glow && b.material?.emissive)) return b.material;
+    this._dark ||= new Map();
+    let m = this._dark.get(b.id);
+    if (!m) {
+      m = b.material.clone();
+      m.emissive.setRGB(0, 0, 0);
+      m.emissiveIntensity = 0;
+      m.color?.multiplyScalar(0.55);
+      this._dark.set(b.id, m);
+    }
+    return m;
+  }
+
+  // One chunk of each kind, for the loading warm-up: a loose chunk is a
+  // plain mesh where its prop is an instanced one, a different shader that
+  // would otherwise be built on the first smash.
+  stageMeshes() {
+    const mats = new Set();
+    for (const b of this.breakables) if (b.material) mats.add(this._pieceMat(b));
+    return [...mats].map((m) => new THREE.Mesh(PIECE, m));
+  }
+
   _smash(b, ctx, dir) {
     if (!b || !b.alive) return;
     b.alive = false;
@@ -229,9 +254,19 @@ export class Props {
       const w = this.level.world.circles;
       w.splice(w.indexOf(b.circle), 1);
     }
+    // A glowing thing (fungus, crystal, eggs) goes dark: its halo and any
+    // light it gave are gone with it.
+    if (b.glow) {
+      if (b.glow.sprite) b.glow.sprite.visible = false;
+      if (b.glow.spot) {
+        b.glow.spot.base = 0;
+        b.glow.spot.out = true;
+      }
+    }
     const p = b.position;
+    const pieceMat = this._pieceMat(b);
     for (let i = 0; i < 12; i++) {
-      const piece = new THREE.Mesh(PIECE, b.material);
+      const piece = new THREE.Mesh(PIECE, pieceMat);
       const s = 0.035 + Math.random() * 0.06;
       piece.scale.set(s * (1 + Math.random()), s, s * (0.6 + Math.random()));
       piece.position.set(p.x + (Math.random() - 0.5) * 0.4, 0.2 + Math.random() * b.height * 0.8, p.z + (Math.random() - 0.5) * 0.4);

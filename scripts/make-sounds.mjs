@@ -177,7 +177,7 @@ function heavySwing(o, k) {
   punch(o, 1.9);
 }
 
-const SOUNDS = {
+export const SOUNDS = {
   // Light swings: three takes, so a flurry never repeats itself.
   swing_light_1: (o) => lightSwing(o, 0),
   swing_light_2: (o) => lightSwing(o, 0.5),

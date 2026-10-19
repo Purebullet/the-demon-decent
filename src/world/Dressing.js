@@ -628,8 +628,14 @@ export class Dressing {
         q.setFromAxisAngle(UP, yaw);
         const mm = m.compose(p, q, s.setScalar(sc)).clone();
         add(k.id, mm);
-        if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc });
-        if (GLOW[k.id]) this.glows.push({ x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc });
+        const fr = FRAGILE.has(k.id) ? { id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc } : null;
+        if (fr) this.fragile.push(fr);
+        if (GLOW[k.id]) {
+          // (Its glow goes out with it if it is smashed: Props._smash.)
+          const gl = { x: p.x, y: size * sc * 0.5, z: p.z, size: size * sc };
+          this.glows.push(gl);
+          if (fr) fr.glow = gl;
+        }
         continue;
       }
       // Along the foot of the wall.
@@ -642,8 +648,13 @@ export class Dressing {
       this.solids.push(...solids);
       const mm = m.compose(p, q.setFromAxisAngle(UP, yaw), s.setScalar(sc)).clone();
       add(k.id, mm);
-      if (FRAGILE.has(k.id)) this.fragile.push({ id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc });
-      if (GLOW[k.id] && r() < 0.5) this.glows.push({ x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc });
+      const fr = FRAGILE.has(k.id) ? { id: k.id, mm, solids, x: p.x, z: p.z, r: rad, h: size * sc } : null;
+      if (fr) this.fragile.push(fr);
+      if (GLOW[k.id] && r() < 0.5) {
+        const gl = { x: p.x, y: size * sc * 0.45, z: p.z, size: size * sc };
+        this.glows.push(gl);
+        if (fr) fr.glow = gl;
+      }
     }
     for (const [id, list] of buckets) this._instances(Assets.propGeometry(id).geometry, this.mat(id), list);
   }
@@ -687,6 +698,7 @@ export class Dressing {
       sp.position.set(g.x, g.y, g.z);
       sp.scale.setScalar(g.size * 1.5);
       this._chunk(g.x, g.z).add(sp);
+      g.sprite = sp;
     }
   }
 

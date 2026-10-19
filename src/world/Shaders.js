@@ -170,9 +170,11 @@ export function abyssMaterial() {
 // teardrop shape is torn upward by scrolling noise, white-hot at the root,
 // orange, then red at the licking tips. Additive, no depth write. `uSeed`
 // keeps neighbouring flames out of step; `uIntensity` brightens or dims it.
-export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
+// `soft`: a round base that fades in (fire licking up off a body), not the
+// flat root a brazier's bowl hides.
+export function flameMaterial({ seed = 0, intensity = 1, soft = false } = {}) {
   return new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uIntensity: { value: intensity } },
+    uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uIntensity: { value: intensity }, uSoft: { value: soft ? 1 : 0 } },
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -192,6 +194,7 @@ export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
       uniform float uTime;
       uniform float uSeed;
       uniform float uIntensity;
+      uniform float uSoft;
       varying vec2 vUv;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
@@ -212,8 +215,11 @@ export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
         // Teardrop: wide and round at the root, pinched to a point at the top.
         float width = mix(0.62, 0.02, pow(uv.y, 0.9)) * (0.8 + 0.4 * n2);
         float body = 1.0 - smoothstep(width * 0.55, width, abs(p.x));
-        body *= smoothstep(0.0, 0.12, uv.y) * (1.0 - smoothstep(0.55 + 0.3 * n, 1.0, uv.y));
-        float heat = body * (1.15 - uv.y) * (0.75 + 0.5 * n2);
+        // The root: flat (hidden in a bowl) or soft (a U that curls up at
+        // the sides and fades in, torn by the noise).
+        float root = mix(smoothstep(0.0, 0.12, uv.y), smoothstep(0.0, 0.32, uv.y - 0.55 * p.x * p.x + 0.1 * (n - 0.5)), uSoft);
+        body *= root * (1.0 - smoothstep(0.55 + 0.3 * n, 1.0, uv.y));
+        float heat = body * (1.15 - uv.y) * (0.75 + 0.5 * n2) * mix(1.0, smoothstep(0.0, 0.4, uv.y) * 0.75 + 0.25, uSoft);
         vec3 col = mix(vec3(0.7, 0.06, 0.0), vec3(1.0, 0.42, 0.05), smoothstep(0.1, 0.5, heat));
         col = mix(col, vec3(1.0, 0.86, 0.55), smoothstep(0.55, 0.95, heat));
         float a = clamp(heat * 1.6, 0.0, 1.0) * uIntensity;
@@ -224,12 +230,12 @@ export function flameMaterial({ seed = 0, intensity = 1 } = {}) {
 
 // A flame object: two crossed noise flames (one smaller, hotter, inside the
 // other). Update `flame.userData.tick(time)` each frame.
-export function makeFlame({ height = 0.6, seed = Math.random() * 10, intensity = 1 } = {}) {
+export function makeFlame({ height = 0.6, seed = Math.random() * 10, intensity = 1, soft = false } = {}) {
   const g = new THREE.Group();
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed, intensity }));
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed, intensity, soft }));
   outer.scale.set(height * 0.62, height, 1);
   outer.position.y = height * 0.42;
-  const inner = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed: seed + 3.3, intensity: intensity * 0.9 }));
+  const inner = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), flameMaterial({ seed: seed + 3.3, intensity: intensity * 0.9, soft }));
   inner.scale.set(height * 0.4, height * 0.7, 1);
   inner.position.y = height * 0.3;
   for (const m of [outer, inner]) {

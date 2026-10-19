@@ -236,12 +236,13 @@ export function buildGltfCharacter(id, rootScale = 1) {
         const b = find(h.bone);
         if (!b) return null;
         const v = (a) => new THREE.Vector3(a[0] * k, a[1] * k, a[2] * k);
-        return new AnchoredHurtbox(b, root, v(h.offset), v(h.half), { name: h.name, multiplier: h.multiplier });
+        // (No blow counts for more on the head: older rigs baked in 1.5 there.)
+        return new AnchoredHurtbox(b, root, v(h.offset), v(h.half), { name: h.name, multiplier: h.name === 'head' ? 1 : h.multiplier });
       })
       .filter(Boolean);
   } else if (rigged) {
     hurtboxes = [
-      new AnchoredHurtbox(head, root, V(0, 0.03, 0.01), V(0.085, 0.09, 0.09), { name: 'head', multiplier: 1.5 }),
+      new AnchoredHurtbox(head, root, V(0, 0.03, 0.01), V(0.085, 0.09, 0.09), { name: 'head' }),
       new AnchoredHurtbox(chest, root, V(0, 0, 0), V(0.18, 0.15, 0.12), { name: 'torso' }),
       new AnchoredHurtbox(hips, root, V(0, -0.24, 0), V(0.15, 0.27, 0.11), { name: 'legs', multiplier: 0.85 }),
     ];
@@ -265,13 +266,13 @@ export function buildGltfCharacter(id, rootScale = 1) {
       const mid = (b.min.z + b.max.z) / 2 / H;
       const len = (b.max.z - b.min.z) / H;
       hurtboxes = [
-        new AnchoredHurtbox(bent(V(0, 0.74, front - 0.16)), root, V(0, 0, 0), V(0.13, 0.13, 0.17), { name: 'head', multiplier: 1.5 }),
+        new AnchoredHurtbox(bent(V(0, 0.74, front - 0.16)), root, V(0, 0, 0), V(0.13, 0.13, 0.17), { name: 'head' }),
         new AnchoredHurtbox(bent(V(0, 0.6, mid)), root, V(0, 0, 0), V(0.18, 0.18, len * 0.32), { name: 'torso' }),
         new Hurtbox(pose, V(0, 0.22, mid), V(0.17, 0.22, len * 0.38), { name: 'legs', multiplier: 0.85 }),
       ];
     } else {
       hurtboxes = [
-        new AnchoredHurtbox(bent(V(0, 0.9, 0.02)), root, V(0, 0, 0), V(0.1, 0.1, 0.11), { name: 'head', multiplier: 1.5 }),
+        new AnchoredHurtbox(bent(V(0, 0.9, 0.02)), root, V(0, 0, 0), V(0.1, 0.1, 0.11), { name: 'head' }),
         new AnchoredHurtbox(bent(V(0, 0.66, 0)), root, V(0, 0, 0), V(0.21, 0.17, 0.15), { name: 'torso' }),
         new Hurtbox(pose, V(0, 0.25, 0), V(0.17, 0.26, 0.13), { name: 'legs', multiplier: 0.85 }),
       ];

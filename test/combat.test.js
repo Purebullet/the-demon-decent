@@ -9,7 +9,8 @@ import { PROPS } from '../src/assets/manifest.js';
 import { ENEMY_TYPES } from '../src/entities/EnemyTypes.js';
 import { BOSS_TYPES } from '../src/entities/Bosses.js';
 
-const swing = (t, extra = {}) => ({ W: 0.2, A: 0.15, R: 0.4, t, ...extra });
+// (A swing that has landed on a demon, unless `hits: 0`.)
+const swing = (t, extra = {}) => ({ W: 0.2, A: 0.15, R: 0.4, t, hits: 1, ...extra });
 
 test('a press is judged by where it falls in the swing', () => {
   const done = 0.35;
@@ -20,6 +21,14 @@ test('a press is judged by where it falls in the swing', () => {
   assert.equal(classifyPress(swing(done)), 'perfect');
   assert.equal(classifyPress(swing(done + WINDOW_LATE - 0.005)), 'perfect');
   assert.equal(classifyPress(swing(done + WINDOW_LATE + 0.02)), 'late');
+});
+
+test('only a blow that landed has a beat: a swing at nothing never chains', () => {
+  const done = 0.35;
+  assert.equal(classifyPress(swing(done, { hits: 0 })), 'late');
+  assert.equal(beat(swing(done, { hits: 0 })).window, false);
+  // Mashing a miss is still a fumble.
+  assert.equal(classifyPress(swing(0.05, { hits: 0 })), 'mash');
 });
 
 test('mashing spoils the window: a fumbled swing never chains perfectly', () => {

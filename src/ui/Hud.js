@@ -30,6 +30,9 @@ import { beat, CHAIN_MAX } from '../combat/Rhythm.js';
 // keeps its size relative to the screen (about 1.5x at 1080p).
 
 const SERIF = "Georgia, 'Times New Roman', serif";
+// The range of callout sizes (Hud.callout rounds to steps of 0.05).
+const CALLOUT_MIN = 0.6;
+const CALLOUT_MAX = 1.7;
 // A rounded rectangle path (without relying on the canvas's own roundRect).
 function roundRect(g, x, y, w, h, r) {
   r = Math.min(r, w / 2, h / 2);
@@ -246,6 +249,8 @@ const P0_CHAT = 412;
 // Damage numbers' size as a share of the screen's height.
 const NUM_W = 0.1;
 const NUM_H = 0.04;
+// Damage numbers on screen at once (the oldest is reused past that).
+const NUM_MAX = 28;
 
 // How long an announcement stays up (seconds).
 export const ANNOUNCE_HOLD = 3.4;
@@ -475,6 +480,9 @@ export class Hud {
 
   // A short burst of text below the crosshair: PERFECT x3, COUNTER, a proc.
   callout(text, { color = C.light, size = 1, proc = false } = {}) {
+    // (In steps of 0.05: each font size is drawn once at load, prewarmText;
+    // the first use of a new one stalls a frame.)
+    size = Math.min(CALLOUT_MAX, Math.max(CALLOUT_MIN, Math.round(size * 20) / 20));
     // Reuse the oldest slot.
     const c = this.callouts.reduce((a, b) => (a.t > b.t ? a : b));
     for (const o of this.callouts) o.order = (o.order ?? 0) + 1;
@@ -876,26 +884,29 @@ export class Hud {
     this.world = scene;
   }
 
+  _newNumber() {
+    const canvas = makeCanvas(160, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // A fixed size on screen, however near or far the demon.
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false, sizeAttenuation: false });
+    const n = { canvas, tex, sprite: new THREE.Sprite(mat), live: false, t: 9 };
+    n.sprite.renderOrder = 20;
+    this.numbers.push(n);
+    return n;
+  }
+
   // kind: 'counter', 'perfect', 'proc', 'bleed', 'burn' or null.
-  damageNumber(pos, amount, crit, kind = null) {
+  damageNumber(pos, amount, strong, kind = null) {
     if (amount <= 0 || !this.world) return;
     let n = this.numbers.find((x) => !x.live);
     if (!n) {
-      if (this.numbers.length >= 28) n = this.numbers.reduce((a, b) => (a.t > b.t ? a : b));
-      else {
-        const canvas = makeCanvas(160, 64);
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        // A fixed size on screen, however near or far the demon.
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false, sizeAttenuation: false });
-        n = { canvas, tex, sprite: new THREE.Sprite(mat) };
-        n.sprite.renderOrder = 20;
-        this.numbers.push(n);
-      }
+      if (this.numbers.length >= NUM_MAX) n = this.numbers.reduce((a, b) => (a.t > b.t ? a : b));
+      else n = this._newNumber();
     }
     const small = kind === 'bleed' || kind === 'burn';
-    const big = kind === 'counter' ? 1.45 : crit ? 1.2 : kind === 'perfect' ? 1.1 : small ? 0.7 : 1;
-    const col = { counter: '#ffe0a0', perfect: '#ffd070', proc: '#b8d8ff', bleed: '#d0202a', burn: '#ff8a3a' }[kind] || (crit ? '#ff5a2a' : '#ffd8b0');
+    const big = kind === 'counter' ? 1.45 : strong ? 1.2 : kind === 'perfect' ? 1.1 : small ? 0.7 : 1;
+    const col = { counter: '#ffe0a0', perfect: '#ffd070', proc: '#b8d8ff', bleed: '#d0202a', burn: '#ff8a3a' }[kind] || (strong ? '#ff5a2a' : '#ffd8b0');
     const g = n.canvas.getContext('2d');
     g.clearRect(0, 0, 160, 64);
     g.font = `bold ${Math.round(40 * Math.min(1.2, big))}px ${SERIF}`;
@@ -915,6 +926,62 @@ export class Hud {
     n.sprite.scale.set(NUM_W * big, NUM_H * big, 1);
     n.sprite.material.opacity = 1;
     if (n.sprite.parent !== this.world) this.world.add(n.sprite);
+  }
+
+  // Every font size the callouts and damage numbers use, drawn once (at
+  // load, the webfont in): the first text drawn at a new size has its
+  // glyphs rendered then, a stall of tens of milliseconds mid-fight. And
+  // every canvas they draw into drawn on once: a canvas's memory is only
+  // set up at its first drawing, a few milliseconds each.
+  prewarmText() {
+    // (Drawn as a callout draws, its glow and shadow too: the first such
+    // drawing on each canvas is the slow one.)
+    for (const c of this.callouts) c.t = 9;
+    for (let i = 0; i < this.callouts.length; i++) this.callout('PERFECT ×3', { proc: i === 1 });
+    for (const c of this.callouts) {
+      c.g.clearRect(0, 0, c.cw, c.ch);
+      c.tex.needsUpdate = true;
+      c.t = 9;
+      c.life = 0;
+    }
+    while (this.numbers.length < NUM_MAX) {
+      const g = this._newNumber().canvas.getContext('2d');
+      g.fillRect(0, 0, 1, 1);
+      g.clearRect(0, 0, 160, 64);
+    }
+    if (this.textWarm) return;
+    this.textWarm = true;
+    const cv = makeCanvas(512, 96);
+    const g = cv.getContext('2d');
+    const glyphs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789×:!-+\' ';
+    g.textBaseline = 'middle';
+    for (let k = Math.round(CALLOUT_MIN * 20); k <= Math.round(CALLOUT_MAX * 20); k++) {
+      const fs = Math.round(54 * (k / 20));
+      g.font = `bold ${fs}px ${SERIF}`;
+      if ('letterSpacing' in g) g.letterSpacing = `${Math.round(fs * 0.12)}px`;
+      g.shadowColor = 'rgba(160,20,0,0.95)';
+      g.shadowBlur = 24;
+      g.fillText(glyphs, 4, 48);
+      g.shadowBlur = 6;
+      g.fillText(glyphs, 4, 48);
+    }
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+    g.shadowBlur = 0;
+    g.lineWidth = 6;
+    for (const big of [0.7, 1, 1.1, 1.2]) {
+      g.font = `bold ${Math.round(40 * big)}px ${SERIF}`;
+      g.strokeText('0123456789', 4, 48);
+      g.fillText('0123456789', 4, 48);
+    }
+  }
+
+  // A sprite made exactly as a damage number's, for the loading warm-up: a
+  // material first built mid-fight compiles its shader for the lights then
+  // in the scene, so each floor's warm-up builds one fresh (Game._stageExtras).
+  numberStage() {
+    const tex = new THREE.CanvasTexture(makeCanvas(4, 4));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false, sizeAttenuation: false }));
   }
 
   updateNumbers(dt) {
@@ -1506,6 +1573,67 @@ export class Hud {
   // Every panel: charred fill with grain and a shadow falling away from it,
   // a dark iron frame lined with old blood, and small horns at the corners
   // of the larger ones. `stroke` null draws the fill only.
+
+  // Shade Step's wide slot: either side of the icon, the shade stepping away
+  // (fading after-images of it) and wisps of violet smoke curling out from
+  // its path to the frame.
+  // (Drawn once into a picture of its own, kept until the slot's size
+  // changes: its glowing strokes are slow to draw on every repaint.)
+  _shadeTrail(g, sx, sy, sw, sz, icon) {
+    const ix = Math.floor(sx);
+    const iy = Math.floor(sy);
+    const key = `${sx - ix}|${sy - iy}|${sw}|${sz}|${icon}|${!!IconAtlas.image}`;
+    let c = this._trail;
+    if (!c || c.key !== key) {
+      const cv = makeCanvas(Math.ceil(sw) + 2, Math.ceil(sz) + 2);
+      this._drawShadeTrail(cv.getContext('2d'), sx - ix, sy - iy, sw, sz, icon);
+      c = this._trail = { key, cv };
+    }
+    g.drawImage(c.cv, ix, iy);
+  }
+
+  _drawShadeTrail(g, sx, sy, sw, sz, icon) {
+    const cx = sx + sw / 2;
+    const cy = sy + sz / 2;
+    const span = (sw - sz) / 2;
+    g.save();
+    g.beginPath();
+    g.rect(sx + 3, sy + 3, sw - 6, sz - 6);
+    g.clip();
+    for (const side of [-1, 1]) {
+      // Smoke: soft curving strands from the icon out to the frame.
+      for (let k = 0; k < 4; k++) {
+        const y0 = cy + (k - 1.5) * 9;
+        const x0 = cx + side * sz * 0.3;
+        const x1 = cx + side * (sz * 0.5 + span * (0.85 + 0.1 * k));
+        const grad = g.createLinearGradient(x0, 0, x1, 0);
+        grad.addColorStop(0, 'rgba(176,128,255,0.55)');
+        grad.addColorStop(0.55, 'rgba(110,60,200,0.25)');
+        grad.addColorStop(1, 'rgba(60,20,120,0)');
+        g.strokeStyle = grad;
+        g.lineWidth = 3.2 - k * 0.5;
+        g.lineCap = 'round';
+        g.shadowColor = 'rgba(150,90,255,0.6)';
+        g.shadowBlur = 6;
+        const bend = (k % 2 ? 1 : -1) * (6 + k * 2);
+        g.beginPath();
+        g.moveTo(x0, y0);
+        g.bezierCurveTo(x0 + side * span * 0.35, y0 + bend, x0 + side * span * 0.65, y0 - bend * 0.8, x1, y0 + bend * 0.4);
+        g.stroke();
+      }
+      g.shadowBlur = 0;
+      // After-images, smaller and fainter the further they fall behind.
+      const a0 = g.globalAlpha;
+      for (const [off, sc, al] of [[0.62, 0.86, 0.3], [1.12, 0.72, 0.15]]) {
+        const s2 = (sz - 8) * sc;
+        const x = cx + side * sz * off - s2 / 2;
+        g.globalAlpha = a0 * al;
+        IconAtlas.draw(g, icon, x, cy - s2 / 2, s2);
+      }
+      g.globalAlpha = a0;
+    }
+    g.restore();
+  }
   _box(g, x, y, w, h, fill = C.panel, stroke = C.edge) {
     g.save();
     g.shadowColor = 'rgba(0,0,0,0.85)';
@@ -1676,8 +1804,10 @@ export class Hud {
       g.save();
       this._box(g, sx, sy, sw, sz, C.panel, lvl ? C.edge : '#2a0c08');
       g.globalAlpha = lvl ? 1 : 0.22;
-      // (In a wide slot, the icon in the middle of it.)
+      // (In a wide slot, the icon in the middle of it, the shade's trail
+      // filling the sides.)
       const ix = sx + (sw - sz) / 2;
+      if (sw > sz) this._shadeTrail(g, sx, sy, sw, sz, slot.icon);
       if (!IconAtlas.draw(g, slot.icon, ix + 4, sy + 4, sz - 8)) {
         const words = SPELLS[slot.id].name.toUpperCase().split(' ');
         words.forEach((wd2, k) => this._text(g, wd2, sx + sw / 2, sy + sz / 2 + (k - (words.length - 1) / 2) * 11, { size: 8, ls: 1, align: 'center', base: 'middle' }));
@@ -1798,7 +1928,7 @@ export class Hud {
     if (wd.damage) {
       this._label(g, statLine, tx, wy + 44, { size: 10, ls: 1.5 });
       const en = wd.enchant && ENCHANTS[wd.enchant];
-      if (en) this._text(g, `${PROCS[en.proc].name} on ${en.on === 'hit' ? 'hits' : en.on === 'kill' ? 'kills' : en.on === 'crit' ? 'head hits' : en.on === 'counter' ? 'counters' : 'perfect chains'}`, tx, wy + 62, { size: 11, color: PROCS[en.proc].color });
+      if (en) this._text(g, `${PROCS[en.proc].name} on ${en.on === 'hit' ? 'hits' : en.on === 'kill' ? 'kills' : en.on === 'heavy' ? 'charged heavies' : en.on === 'counter' ? 'counters' : 'perfect chains'}`, tx, wy + 62, { size: 11, color: PROCS[en.proc].color });
       else if (wd.type === 'sword') {
         // Momentum: ten pips that heat up as the dance builds.
         const m = Math.floor(p.momentum || 0);

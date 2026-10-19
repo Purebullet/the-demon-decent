@@ -3,7 +3,7 @@ import { OBB } from './OBB.js';
 
 // A hurtbox is an OBB glued to one bone/group of a character mesh. It follows
 // the animated part every frame, so a blade only connects where the mesh
-// actually is: duck under a swing, or catch a ghoul's head for a critical.
+// actually is: a blow that misses the body misses.
 export class Hurtbox {
   constructor(object, center, half, { name = 'body', multiplier = 1 } = {}) {
     this.object = object;

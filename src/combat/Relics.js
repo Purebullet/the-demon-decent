@@ -7,7 +7,6 @@
 //   hit        any melee hit
 //   perfect    a hit from a Perfect Chain swing
 //   counter    a hit landed while the demon was winding up
-//   crit       a hit on the head
 //   heavy      a hit from a fully charged heavy blow
 //   kill       a killing blow
 //   heavyKill  a killing blow from a heavy attack
@@ -38,8 +37,8 @@ export const RELICS = {
     name: 'Storm-Eye Sigil',
     model: 'relicStorm',
     color: '#a8c8ff',
-    text: 'Critical hits may loose chain lightning.',
-    procs: [{ proc: 'lightning', on: 'crit', chance: 0.4 }],
+    text: 'Fully charged heavy blows may loose chain lightning.',
+    procs: [{ proc: 'lightning', on: 'heavy', chance: 0.5 }],
   },
   whetstone: {
     name: 'Hexed Whetstone',

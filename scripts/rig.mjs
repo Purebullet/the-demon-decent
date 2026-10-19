@@ -474,14 +474,14 @@ function bakeClips(def, skel, skin, welded) {
 function hurtboxes(def, skel, skin, welded) {
   const groups = def.plan === 'biped'
     ? [
-        { name: 'head', bone: 'Head', of: /^(Neck|Head|Hat)/, cut: 'above-neck', multiplier: 1.5 },
+        { name: 'head', bone: 'Head', of: /^(Neck|Head|Hat)/, cut: 'above-neck', multiplier: 1 },
         { name: 'torso', bone: 'Chest', of: /^(Waist|Chest|.*Shoulder)$/, multiplier: 1 },
         { name: 'legs', bone: 'Hips', of: /^(Hips|.*UpLeg|.*Leg|.*Foot)$/, multiplier: 0.85 },
         { name: 'arm', bone: 'LeftForeArm', of: /^Left(ForeArm|Hand)$/, multiplier: 0.8 },
         { name: 'arm', bone: 'RightForeArm', of: /^Right(ForeArm|Hand)$/, multiplier: 0.8 },
       ]
     : [
-        { name: 'head', bone: 'Head', of: /^Head$/, multiplier: 1.5 },
+        { name: 'head', bone: 'Head', of: /^Head$/, multiplier: 1 },
         { name: 'torso', bone: 'Chest', of: /^(Chest|Neck|.*Arm)$/, multiplier: 1 },
         { name: 'torso', bone: 'Hips', of: /^(Hips|Waist|.*UpLeg|Tail1)$/, multiplier: 1 },
         { name: 'legs', bone: 'Waist', of: /^(.*ForeArm|.*Hand|.*Leg|.*Foot)$/, multiplier: 0.85 },

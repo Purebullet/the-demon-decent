@@ -4,7 +4,7 @@ import { C, burst, ring } from '../world/Particles.js';
 
 // Procs: sudden magical escalations a blow can set off. They are never pure
 // luck: each is tied to a trigger the player earns (a Perfect Chain, a
-// counter-hit, a head hit, a heavy kill; see Relics.js), and the chance is
+// counter-hit, a charged heavy blow, a heavy kill; see Relics.js), and the chance is
 // multiplied by the swing's Perfect Chain (chainBonus().proc in Rhythm.js),
 // so fighting in rhythm is what turns the slot machine.
 //
@@ -29,7 +29,7 @@ export const ENCHANTS = {
   frost: { prefix: 'Frostbitten', proc: 'freeze', on: 'perfect', chance: 0.16 },
   serrated: { prefix: 'Serrated', proc: 'bleed', on: 'hit', chance: 0.14 },
   cinder: { prefix: 'Cinderforged', proc: 'hellfire', on: 'counter', chance: 0.45 },
-  storm: { prefix: 'Stormcalled', proc: 'lightning', on: 'crit', chance: 0.3 },
+  storm: { prefix: 'Stormcalled', proc: 'lightning', on: 'heavy', chance: 0.35 },
   thirst: { prefix: 'Bloodthirsty', proc: 'lifesteal', on: 'kill', chance: 0.3 },
 };
 

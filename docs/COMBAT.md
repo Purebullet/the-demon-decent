@@ -65,7 +65,7 @@ fills as the arc nears completion and burns gold inside the window; pips count t
 
 ## 4. Explosive escalation: procs (`src/combat/Procs.js`, `src/combat/Relics.js`)
 
-Triggers a hit can raise (several at once): `hit`, `perfect`, `counter`, `crit` (head),
+Triggers a hit can raise (several at once): `hit`, `perfect`, `counter`,
 `heavy` (full charge), `kill`, `heavyKill`. Sources are the relics carried (a second copy ×1.5)
 and the weapon's enchantment. For each source whose trigger fired:
 
@@ -99,7 +99,8 @@ struck counting as a counter.
   1–3 m: every swing seen to cross a demon within reach lands, and none lands that is not seen to.
 - The arc is swept in steps of at most 0.04 rad, interpolating the camera too, so neither a fast
   swing nor a mouse flick tunnels.
-- Hurtboxes ride the creatures' bones (head, chest, hips, forearms); head hits crit. The contact
+- Hurtboxes ride the creatures' bones (head, chest, hips, forearms); every part takes the same
+  damage (there are no head hits). The contact
   point is the point on the blade's centre line nearest the struck part, pulled into it: blood is
   thrown along the blade's travel from there, and the number appears there.
 - Every hit kicks an underdamped spring (k = 320, c = 15) per axis in the creature's own frame:

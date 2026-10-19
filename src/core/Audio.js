@@ -11,6 +11,7 @@
 // lower still while he speaks).
 
 import { SOUND_EXT } from './soundFormat.js';
+import { SOUND_NAMES } from './soundList.js';
 
 const DIR = 'assets/sounds/';
 const SONGS = {
@@ -103,6 +104,24 @@ export class Audio {
       this.host.music.stop();
       this.playing = null;
     }
+  }
+
+  // Every effect (and any `extra` files, a boss's voice) played once,
+  // inaudibly, while a floor loads: the host decodes a sound the first time
+  // it is played, a stall and a late sound mid-fight otherwise. A few at a
+  // time, so nothing playing is crowded out. Each file once a session.
+  prime(extra = []) {
+    if (this.muted || !this.started) return;
+    this.primed ||= new Set();
+    const list = [...SOUND_NAMES.map((n) => `${DIR}${n}.${SOUND_EXT}`), ...extra].filter((p) => !this.primed.has(p));
+    for (const p of list) this.primed.add(p);
+    let i = 0;
+    const next = () => {
+      if (this.muted) return;
+      for (const end = i + 6; i < end && i < list.length; i++) this.host.sound.play(this.host.asset(list[i]), { volume: 0.001, rate: 1 });
+      if (i < list.length) setTimeout(next, 60);
+    };
+    next();
   }
 
   _vol(pos) {

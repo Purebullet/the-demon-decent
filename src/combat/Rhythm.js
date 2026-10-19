@@ -46,7 +46,9 @@ export function classifyPress(swing, widen = 1) {
   // window opens by it and closes by the blade's own time, so a freeze
   // only ever makes it longer.
   if ((swing.rt ?? swing.t) < done - WINDOW_EARLY * widen) return 'mash';
-  if (swing.t <= done + WINDOW_LATE * widen) return swing.fumbled ? 'late' : 'perfect';
+  // The quick follow-up (and the chain) is earned by a blow that landed on
+  // a demon: a swing at nothing has no beat to catch.
+  if (swing.t <= done + WINDOW_LATE * widen) return swing.fumbled || !(swing.hits > 0) ? 'late' : 'perfect';
   return 'late';
 }
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { C, burst, ring, spawnFlame } from './Particles.js';
 import { Quakes } from './Quake.js';
-import { makeFlame } from './Shaders.js';
+import { makeFlame, flameMaterial } from './Shaders.js';
 
 // Ground telegraphs, delayed fire strikes, and projectiles. Everything that
 // can hurt the player here is announced first: a ring that fills up before
@@ -147,6 +147,10 @@ const orbGeo = new THREE.SphereGeometry(1, 24, 16);
 const _t = new THREE.Vector3();
 const _target = new THREE.Vector3();
 
+const FLAME_GEO = new THREE.PlaneGeometry(1, 1);
+// The body fire's few shared materials (a pair, outer and inner, per seed).
+const FIRE_SEEDS = 6;
+
 export class Effects {
   constructor(scene, fx) {
     this.scene = scene;
@@ -158,7 +162,36 @@ export class Effects {
     this.whips = [];
     this.orbs = [];
     this.fires = [];
+    this.flamePool = [];
+    this.fireT = 0;
     this.quakes = new Quakes(scene, fx);
+  }
+
+  // One flame of a burning body, `h` tall: from the pool when one is free,
+  // its materials shared with the rest, so setting a demon alight makes
+  // nothing new (two dozen meshes and shaders each time, otherwise).
+  _bodyFlame(h) {
+    this.fireMats ||= Array.from({ length: FIRE_SEEDS }, (_, i) => [
+      flameMaterial({ seed: i * 3.7, intensity: 1.15, soft: true }),
+      flameMaterial({ seed: i * 3.7 + 3.3, intensity: 1.15 * 0.9, soft: true }),
+    ]);
+    let g = this.flamePool.pop();
+    if (!g) {
+      const [om, im] = this.fireMats[(this.flameN = (this.flameN || 0) + 1) % FIRE_SEEDS];
+      g = new THREE.Group();
+      for (const m of [om, im]) {
+        const mesh = new THREE.Mesh(FLAME_GEO, m);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = 5;
+        g.add(mesh);
+      }
+    }
+    const [outer, inner] = g.children;
+    outer.scale.set(h * 0.62, h, 1);
+    outer.position.y = h * 0.42;
+    inner.scale.set(h * 0.4, h * 0.7, 1);
+    inner.position.y = h * 0.3;
+    return g;
   }
 
   // A cone on the ground ahead of `owner` for as long as it winds up the
@@ -319,7 +352,7 @@ export class Effects {
     if (!bones.length || this.fires.some((f) => f.owner === owner)) return;
     const flames = [];
     const add = (b, h, lat, push) => {
-      const f = makeFlame({ height: h, seed: Math.random() * 20, intensity: 1.35 });
+      const f = this._bodyFlame(h);
       this.scene.add(f);
       flames.push({ f, b, h, lat, push, ph: Math.random() * 6.3 });
     };
@@ -334,6 +367,10 @@ export class Effects {
 
   _updateFires(dt, ctx) {
     const eye = ctx?.player?.position;
+    if (this.fireMats && this.fires.length) {
+      this.fireT += dt;
+      for (const pair of this.fireMats) for (const m of pair) m.uniforms.uTime.value = this.fireT;
+    }
     for (let i = this.fires.length - 1; i >= 0; i--) {
       const fire = this.fires[i];
       const on = fire.owner.alive && !!fire.owner.status?.burn;
@@ -356,21 +393,43 @@ export class Effects {
         p.y -= fl.h * (fl.push > 0.5 ? 0.25 : 0.05);
         const flick = 0.82 + 0.18 * Math.sin(fire.t * 11 + fl.ph) + 0.08 * Math.sin(fire.t * 23 + fl.ph * 2);
         fl.f.scale.set(fire.k * (0.9 + 0.1 * Math.sin(fire.t * 7 + fl.ph)), fire.k * flick, fire.k);
-        fl.f.userData.tick(fire.t);
       }
       if (!on && fire.k <= 0) {
         for (const fl of fire.flames) {
           this.scene.remove(fl.f);
-          fl.f.traverse((o) => {
-            if (o.isMesh) {
-              o.geometry.dispose();
-              o.material.dispose();
-            }
-          });
+          this.flamePool.push(fl.f);
         }
         this.fires.splice(i, 1);
       }
     }
+  }
+
+  // One of each effect drawn with its own shader (cone, shadow orb and whip,
+  // body fire), for the loading warm-up to compile before they are first
+  // needed mid-fight (Game._stageExtras).
+  stageMeshes() {
+    const cone = new THREE.Mesh(coneGeometry(5, 0.3), new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(0xff2a10) }, uFill: { value: 0.5 }, uTime: { value: 0 }, uRange: { value: 5 }, uHalf: { value: 0.3 }, uFade: { value: 1 } },
+      vertexShader: CONE_VERT,
+      fragmentShader: CONE_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    const orb = new THREE.Mesh(orbGeo, new THREE.ShaderMaterial({ uniforms: { uTime: { value: 0 }, uK: { value: 1 } }, vertexShader: ORB_VERT, fragmentShader: ORB_FRAG, transparent: true, depthWrite: false }));
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+    wg.setAttribute('aUv', new THREE.Float32BufferAttribute([0, -1, 1, 1, 0, 1], 2));
+    const whip = new THREE.Mesh(wg, new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uReveal: { value: 1 }, uFade: { value: 0 }, uSeed: { value: 0 } },
+      vertexShader: WHIP_VERT,
+      fragmentShader: WHIP_FRAG,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }));
+    const fire = this._bodyFlame(0.5);
+    return [cone, orb, whip, fire];
   }
 
   // A heavy blow on the floor (world/Quake.js).
@@ -396,7 +455,12 @@ export class Effects {
       w.mat.dispose();
     }
     this.whips.length = 0;
-    for (const fire of this.fires) for (const fl of fire.flames) this.scene.remove(fl.f);
+    for (const fire of this.fires) {
+      for (const fl of fire.flames) {
+        this.scene.remove(fl.f);
+        this.flamePool.push(fl.f);
+      }
+    }
     this.fires.length = 0;
     for (const t of this.items) this.scene.remove(t.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);

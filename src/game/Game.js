@@ -12,6 +12,7 @@ import { Level } from '../world/Level.js';
 import { FLOORS, FLOOR_COUNT, floorDef, DEEP_FROM } from '../world/LevelData.js';
 import { Effects } from '../world/Effects.js';
 import { Player } from '../entities/Player.js';
+import { VOICE_LINES } from '../entities/voiceLines.js';
 import { Enemy } from '../entities/Enemy.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss, Sleeper } from '../entities/Bosses.js';
@@ -25,7 +26,7 @@ import { xpForKill, gainXp, spendPoint, legacyOf, STAT_IDS, LEVEL_STATS, STAT_CA
 import { TRANSITIONS, nextAfterFloor } from './transitions.js';
 import { Hud, fmtTime, ANNOUNCE_HOLD } from '../ui/Hud.js';
 import { pushOutOfCircle } from '../physics/CollisionWorld.js';
-import { RELICS, rollRelic, relicPassive } from '../combat/Relics.js';
+import { RELICS, rollRelic, relicPassive, addRelic } from '../combat/Relics.js';
 import { angleDelta } from '../core/rng.js';
 import { disposeTree } from '../core/dispose.js';
 import { Wounds, woundMaterials, prepareWounds } from '../combat/Wounds.js';
@@ -263,19 +264,31 @@ export class Game {
   async warmUp() {
     this.compiling = true;
     const t0 = performance.now();
+    this.hud.prewarmText();
+    // (The Sleeper's spoken lines with the effects, on his floor only.)
+    this.audio.prime(this.boss?.voice ? Object.values(VOICE_LINES).map((l) => l.file) : []);
     const rc = this.host.camera || this.camera;
     const staged = this._stageExtras();
     const jobs = [];
     const seen = new Set();
     const textures = new Set();
+    // A lit material's shader is rebuilt for each new set of lights, so it
+    // is drawn again here; an unlit one keeps the shader it has, so only
+    // those not drawn yet need it (and a fresh one, made as mid-fight ones
+    // will be, builds the variant for this place's lights).
+    const lit = (m) => m.isMeshLambertMaterial || m.isMeshPhongMaterial || m.isMeshStandardMaterial || m.isMeshToonMaterial || m.isShadowMaterial || (m.isShaderMaterial && m.lights);
+    const props = this.renderer.properties;
     const collect = (scene, cam) => {
       scene.updateMatrixWorld(true);
       scene.traverse((o) => {
         if (!o.material || !(o.isMesh || o.isPoints || o.isSprite || o.isLine)) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!lit(m) && props.get(m).currentProgram) continue;
           matte(m);
           for (const t of [m.map, m.normalMap, m.emissiveMap, m.bumpMap, m.roughnessMap, m.metalnessMap]) if (t) textures.add(t);
-          const key = [m.type, m.customProgramCacheKey?.(), m.vertexShader?.length, m.fragmentShader?.length, !!m.map, !!m.emissiveMap, !!m.bumpMap, !!m.normalMap, !!m.roughnessMap, !!m.metalnessMap, m.vertexColors, m.transparent, m.blending, m.side, m.fog, o.isInstancedMesh, o.isSkinnedMesh].join('|');
+          // (Everything that picks a different shader variant: two materials
+          // alike in all but, say, tone mapping still need one draw each.)
+          const key = [m.type, m.customProgramCacheKey?.(), m.vertexShader?.length, m.fragmentShader?.length, !!m.map, !!m.emissiveMap, !!m.bumpMap, !!m.normalMap, !!m.roughnessMap, !!m.metalnessMap, !!m.alphaMap, !!m.envMap, m.vertexColors, m.transparent, m.blending, m.side, m.fog, m.toneMapped, m.sizeAttenuation, m.alphaTest > 0, m.flatShading, m.dithering, m.premultipliedAlpha, m.defines ? JSON.stringify(m.defines) : '', o.isInstancedMesh, o.isSkinnedMesh, !!o.morphTargetInfluences].join('|');
           if (seen.has(key)) continue;
           seen.add(key);
           jobs.push([o, scene, cam]);
@@ -285,6 +298,9 @@ export class Game {
     collect(this.scene, rc);
     collect(this.viewScene, this.viewCamera);
     collect(this.hud.scene, this.hud.camera);
+    // (The damage numbers' canvases, made ready at load, given their GPU
+    // copies now too.)
+    for (const n of this.hud.numbers) textures.add(n.tex);
     const r = this.renderer;
     const nextFrame = () => new Promise((res) => setTimeout(res, 16));
     // Upload every texture too, not only the first per shader.
@@ -300,7 +316,13 @@ export class Game {
       // from drawing to the screen); the interface draws to the screen.
       const screen = scene === this.hud.scene;
       r.setRenderTarget(screen ? null : this.sceneTarget);
+      // (Frames run on while this works through its list: a damage number
+      // staged for it may have faded and left the scene by its turn. Put
+      // it back for its draw, or its shader is first built mid-fight.)
+      const orphan = !o.parent;
+      if (orphan) scene.add(o);
       this._drawAlone(r, o, scene, cam);
+      if (orphan) o.removeFromParent();
       r.setRenderTarget(null);
       if (screen) this._cover(r);
       await nextFrame();
@@ -374,6 +396,7 @@ export class Game {
       staged.push(o);
     };
     this.hud.damageNumber(new THREE.Vector3(0, -500, 0), 1, false);
+    far(this.hud.numberStage());
     if (this.pickups) {
       const before = this.pickups.items.length;
       this.pickups.addPotion(0, 0);
@@ -405,7 +428,10 @@ export class Game {
       const fb = this.effects.projectiles.pop();
       fb.mesh.removeFromParent();
       far(fb.mesh);
+      // Wind-up cones, the shadow lash, demons on fire.
+      for (const o of this.effects.stageMeshes()) far(o);
     }
+    if (this.level?.props) for (const o of this.level.props.stageMeshes()) far(o);
     if (this.level) {
       // Boss summons and burrowed ambushers arrive mid-fight.
       const bodies = Object.keys(ENEMY_TYPES).map((type) => new Enemy(type, { x: 0, z: 0 }, this.level.def));
@@ -499,7 +525,7 @@ export class Game {
       },
       shake: (a) => this.player.shake(a),
       flash: (color, intensity, dur) => this.player.flash(color, intensity * 6, dur),
-      onDamage: (e, amount, crit, point, kind) => this.hud.damageNumber(point || e.position, amount, crit, kind),
+      onDamage: (e, amount, strong, point, kind) => this.hud.damageNumber(point || e.position, amount, strong, kind),
       onPlayerHurt: (amount, angle = 0, opts = {}) => this.hud.playerHurt(amount, angle, { ...opts, max: this.run?.maxHealth || 100 }),
       onDodge: () => this.hud.callout('EVADED', { color: '#c9a0ff', size: 0.8 }),
       later: (delay, fn) => (this.effects ? this.effects.later(delay, fn) : setTimeout(fn, delay * 1000)),
@@ -525,6 +551,7 @@ export class Game {
   _surfaceScene() {
     if (!this.surface) this.surface = new Surface();
     this.surface.falling(false);
+    this.surface.hideSecret();
     const s = this._newScene({ fog: 0x0d0606, density: 0.022, background: 0x050203 });
     s.add(this.surface.group);
     this.surface.setScores({ best: this.best, last: this.lastFloor, top: players(this.table)[0] || null });
@@ -585,6 +612,8 @@ export class Game {
 
   _enterSurface() {
     this._surfaceScene();
+    // Its secret lies somewhere new each time (Surface.placeSecret).
+    this.surface.placeSecret();
     // Permadeath: a fresh run every time you stand on the surface, keeping
     // only half the level of the one that fell.
     this.run = newRun();
@@ -652,6 +681,16 @@ export class Game {
     const ground = this.surface.heightAt(p.position.x, p.position.z);
     p.position.y += (ground - p.position.y) * Math.min(1, dt * 12);
     this.surface.update(dt, this.fx);
+    this.surface.updateSecret(dt, ctx);
+    if (this.surface.secret?.near && this.input.wasPressed('KeyF')) {
+      // The buried reliquary, dug up: a relic to carry down.
+      this.surface.takeSecret(ctx);
+      const id = rollRelic(this.run);
+      ctx.onRelic(id, addRelic(this.run, id));
+      if (this.run.best) this.run.best.secrets = (this.run.best.secrets || 0) + 1;
+      this.audio.play?.('soulrend', { pos: new THREE.Vector3(this.surface.secret.x, 0.6, this.surface.secret.z), volume: 0.8, gap: 0.5 });
+      this.hud.toast('A secret: the Buried Reliquary');
+    }
     if (this.surface.inPit(p.position) && !this.busy) {
       this.falling = 0.001;
       this.torchOutT = 0;
@@ -665,7 +704,7 @@ export class Game {
       floorLabel: `${this.lotLabel}: The Surface`,
       enemyLabel: '',
       best: this.best,
-      prompt: this.surface.nearPit(p.position) ? 'Step into the pit to begin your descent' : '',
+      prompt: this.surface.secret?.near ? '<b>F</b> dig up the buried reliquary' : this.surface.nearPit(p.position) ? 'Step into the pit to begin your descent' : '',
     });
   }
 
@@ -953,7 +992,7 @@ export class Game {
 
   _onProc(id, P) {
     if (this.run) this.run.best.procs++;
-    this._hint('proc', 'Relics wake on <b>perfect chains, counters and head hits</b>: fight in rhythm to set them off');
+    this._hint('proc', 'Relics wake on <b>perfect chains, counters and charged heavy blows</b>: fight in rhythm to set them off');
     this.hud.callout(P.name.toUpperCase(), { color: P.color, size: 1.05, proc: true });
   }
 
@@ -1377,6 +1416,7 @@ export class Game {
     this.player.spawnAt(this.sanctum.spawn.x, this.sanctum.spawn.z, 0);
     this.player.position.y = 0;
     this.choice = null;
+    this.sanctumFall = 0;
     this.ctx = this._baseCtx({ world: this.sanctum.world, torchRange: 14, ground: 'gravel' });
     this.hud.announce('Sanctum', `Wake one altar before Floor ${next}`);
   }
@@ -1385,6 +1425,26 @@ export class Game {
     const p = this.player;
     const sc = this.sanctum;
     this.ctx.time = this.time;
+    if (this.sanctumFall > 0) {
+      // Onto the circle: the floor gives way and you drop into its swirl,
+      // drawn to its middle, the view tipping down and turning, then black.
+      this.sanctumFall += dt;
+      const t = this.sanctumFall;
+      p.position.x += (sc.portalPos.x - p.position.x) * Math.min(1, dt * 6);
+      p.position.z += (sc.portalPos.z - p.position.z) * Math.min(1, dt * 6);
+      p.position.y -= dt * (1.5 + t * 18);
+      p.pitch = Math.max(-1.25, p.pitch - dt * 2.4);
+      p.yaw += dt * (0.4 + t);
+      p.update(dt, { ...this.ctx, combat: false, input: FROZEN_INPUT });
+      sc.update(dt, this.ctx, null);
+      if (t > 0.3 && !this.sanctumBlack) {
+        this.sanctumBlack = true;
+        this.hud.fade(true, 280);
+      }
+      if (t > 0.7 && !this.busy) this.goto('floor', { floor: sc.nextFloor });
+      this.hud.update(dt, p, this.run, { floorLabel: `Sanctum, before Floor ${sc.nextFloor}`, enemyLabel: '', best: this.best, prompt: '' });
+      return;
+    }
     if (this.choice) {
       const n = this.choice.options.length;
       for (let i = 0; i < n; i++) if (this.input.wasPressed(`Digit${i + 1}`)) this._pickOption(i);
@@ -1409,7 +1469,9 @@ export class Game {
     }
     if (sc.atPortal(p.position) && !this.busy) {
       this.audio.portal();
-      this.goto('floor', { floor: sc.nextFloor });
+      this.sanctumFall = 0.001;
+      this.sanctumBlack = false;
+      this.player.shake?.(0.25);
     }
     let prompt = '';
     if (this.choice) prompt = '';
@@ -1641,10 +1703,17 @@ export class Game {
     const median = f[f.length >> 1];
     const quick = f[Math.floor(f.length * 0.1)];
     q.refresh = Math.min(1 / 30, Math.max(1 / 240, Math.min(q.refresh * 1.01, quick)));
+    // Frames that missed the display's beat (each one a visible stutter,
+    // however good the median): one in ten of them is reason enough to
+    // step down, as a slow median is.
+    const late = Math.max(q.refresh * 1.5, 1 / 50);
+    let missed = 0;
+    for (let i = f.length - 1; i >= 0 && f[i] > late; i--) missed++;
+    const missRate = missed / f.length;
     q.frames.length = 0;
     q.t = 0;
     const level = this.qualityLevel;
-    if (median > Math.max(1 / 45, q.refresh * 1.45)) {
+    if (median > Math.max(1 / 45, q.refresh * 1.45) || missRate > 0.1) {
       q.good = 0;
       if (++q.bad >= 2 && level < QUALITY.length - 1) {
         q.bad = 0;
@@ -1654,7 +1723,7 @@ export class Game {
         q.wait = q.hold;
         this._setQuality(level + 1);
       }
-    } else if (median < q.refresh * 1.15) {
+    } else if (median < q.refresh * 1.15 && missRate < 0.02) {
       q.bad = 0;
       if (++q.good >= 3 && level > 0 && q.wait <= 0) {
         q.good = 0;

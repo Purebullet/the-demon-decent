@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CollisionWorld } from '../physics/CollisionWorld.js';
 import { rockTextures, fogPuffTexture, emberVeinTexture, softDotTexture, makeCanvas } from './Textures.js';
 import { makeFlame, abyssMaterial } from './Shaders.js';
-import { C, spawnFlame } from './Particles.js';
+import { C, spawnFlame, burst } from './Particles.js';
 import { mulberry32, fbm2 } from '../core/rng.js';
 import { Assets } from '../assets/AssetLibrary.js';
 
@@ -23,6 +23,8 @@ export class Surface {
     this.spawn = { x: 0, z: 25, yaw: 0 };
     this.rand = mulberry32(1738);
     this.circles = [];
+    // Where the buried reliquary can lie (in the lee of things: placeSecret).
+    this.hides = [];
     const { map, bump } = rockTextures(1738, [64, 56, 54]);
     this.stoneTex = { map, bump };
     this.stone = new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 3, roughness: 0.92, color: 0x8a817c });
@@ -38,6 +40,7 @@ export class Surface {
     this._obelisk();
     this._fog();
     this._lights();
+    this._reliquary();
     this.world = new CollisionWorld({ circles: this.circles, boundRadius: LOT_RADIUS });
   }
 
@@ -372,6 +375,7 @@ export class Surface {
         o.rotation.set((this.rand() - 0.5) * 0.08, rotY + this.rand() * Math.PI * 2, (this.rand() - 0.5) * 0.08);
         this.group.add(o);
         this.circles.push({ x: px, z: pz, r: column ? 0.8 : 1.0 });
+        if (!column) this._hide(px, pz, 1.5);
       }
       return;
     }
@@ -403,6 +407,7 @@ export class Surface {
       if (Math.abs(Math.atan2(Math.sin(a - Math.PI / 2), Math.cos(a - Math.PI / 2))) < 0.35) continue;
       const rad = 15 + r() * 3;
       this._column(Math.cos(a) * rad, Math.sin(a) * rad, 2 + r() * 5, r() > 0.25);
+      this._hide(Math.cos(a) * rad, Math.sin(a) * rad, 1.4);
     }
     const walls = [
       [-17, -10, 8, 3.5, 0.9],
@@ -414,19 +419,24 @@ export class Surface {
     ];
     for (const w of walls) this._wall(...w);
 
-    // Fallen columns and loose blocks.
+    // Fallen columns and loose blocks. The walk from where you wake through
+    // the gate to the pit stays clear: nothing within it, end to end.
+    const onPath = (px, pz, pad = 0) => Math.abs(px) < 3.5 + pad && pz > 6;
     for (let i = 0; i < 6; i++) {
       const a = r() * Math.PI * 2;
       const rad = 11 + r() * 14;
       const x = Math.cos(a) * rad;
       const z = Math.sin(a) * rad;
-      if (Math.abs(x) < 3 && z > 8) continue;
+      if (onPath(x, z)) continue;
       const len = 3 + r() * 3;
+      const yaw = r() * 6;
+      // (A toppled column runs `len` along its yaw: test both ends too.)
+      const ex = Math.cos(yaw) * len * 0.5;
+      const ez = -Math.sin(yaw) * len * 0.5;
+      if (onPath(x + ex, z + ez, 0.8) || onPath(x - ex, z - ez, 0.8)) continue;
       const gen = Assets.instanceProp('column');
       if (gen) {
         // A broken column toppled over, half sunk in the ash.
-        gen.scale.multiplyScalar(len / 5.5);
-        const yaw = r() * 6;
         const lie = new THREE.Group();
         gen.rotation.z = Math.PI / 2;
         gen.position.set(len * 0.5, 0, 0);
@@ -441,6 +451,9 @@ export class Surface {
         this.group.add(c);
       }
       this.circles.push({ x, z, r: 0.9 });
+      // Alongside it (square to its length), on the side away from you.
+      const side = Math.sin(yaw) * (x - this.spawn.x) + Math.cos(yaw) * (z - this.spawn.z) > 0 ? 1 : -1;
+      this._hideAt(x + Math.sin(yaw) * 1.2 * side, z + Math.cos(yaw) * 1.2 * side);
     }
     const blockGeo = new THREE.BoxGeometry(1, 1, 1);
     for (let i = 0; i < 40; i++) {
@@ -448,7 +461,7 @@ export class Surface {
       const rad = 10 + r() * 22;
       const x = Math.cos(a) * rad;
       const z = Math.sin(a) * rad;
-      if (Math.abs(x) < 3 && z > 8) continue;
+      if (onPath(x, z)) continue;
       const s = 0.3 + r() * 0.8;
       // Boulders and the odd jagged shard (plain blocks only without them).
       const shard = r() < 0.25;
@@ -479,6 +492,7 @@ export class Surface {
       g.rotation.set((r() - 0.5) * 0.3, r() * 0.6 - 0.3, (r() - 0.5) * 0.3);
       this.group.add(g);
       this.circles.push({ x, z, r: 0.4 });
+      this._hide(x, z, 0.9);
     }
   }
 
@@ -495,6 +509,7 @@ export class Surface {
         gen.rotation.y = r() * 6;
         this.group.add(gen);
         this.circles.push({ x, z, r: 0.5 });
+        this._hide(x, z, 1.0);
         continue;
       }
       const tree = new THREE.Group();
@@ -603,6 +618,127 @@ export class Surface {
     g.rotation.y = Math.atan2(this.spawn.x - x, this.spawn.z - z);
     this.group.add(g);
     this.circles.push({ x, z, r: 1.1 });
+    // Round its back, away from the tablet.
+    this.hides.push({ x: x - Math.sin(g.rotation.y) * 1.5, z: z - Math.cos(g.rotation.y) * 1.5 });
+  }
+
+  // A hiding place in the lee of something at (x, z): on its far side from
+  // where you wake, `off` metres out (kept off the path and out of the pit).
+  _hide(x, z, off) {
+    const dx = x - this.spawn.x;
+    const dz = z - this.spawn.z;
+    const l = Math.hypot(dx, dz) || 1;
+    this._hideAt(x + (dx / l) * off, z + (dz / l) * off);
+  }
+
+  _hideAt(hx, hz) {
+    const r = Math.hypot(hx, hz);
+    if (r < PIT_RADIUS + 3.5 || r > LOT_RADIUS - 3) return;
+    if (Math.abs(hx) < 4 && hz > 6) return;
+    if (Math.hypot(hx - this.spawn.x, hz - this.spawn.z) < 7) return;
+    if (this.hides.some((h) => Math.hypot(h.x - hx, h.z - hz) < 2.5)) return;
+    this.hides.push({ x: hx, z: hz });
+  }
+
+  // The surface's secret: a reliquary half buried in the ash, somewhere new
+  // each time you stand here (placeSecret). From afar only a spark now and
+  // then gives it away; come close and embers glow through its seams and
+  // something whispers. Dig it up (F) for a relic to carry down.
+  _reliquary() {
+    const g = new THREE.Group();
+    const box = Assets.instanceProp('chest');
+    if (box) {
+      box.scale.multiplyScalar(0.62);
+      // Sunk to its lid, tipped as the ash took it.
+      box.position.y = -0.32;
+      box.rotation.set(0.16, 0, -0.12);
+      g.add(box);
+    } else {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.55), this.darkStone);
+      b.position.y = -0.05;
+      b.rotation.set(0.16, 0, -0.12);
+      g.add(b);
+    }
+    for (let i = 0; i < 3; i++) {
+      const sk = Assets.instanceProp('skulls');
+      if (!sk) break;
+      sk.scale.multiplyScalar(0.28);
+      const a = i * 2.1 + 0.4;
+      sk.position.set(Math.cos(a) * 0.75, -0.06, Math.sin(a) * 0.6);
+      sk.rotation.y = a * 1.7;
+      g.add(sk);
+    }
+    const dot = softDotTexture();
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: dot, color: 0xffa040, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.scale.setScalar(1.7);
+    glow.position.y = 0.3;
+    g.add(glow);
+    g.visible = false;
+    this.group.add(g);
+    this.secret = { group: g, glow, x: 0, z: 0, k: 0, t: 0, found: false, near: false, woke: false, last: -1 };
+  }
+
+  // A new hiding place for this visit (never the last one).
+  placeSecret() {
+    const S = this.secret;
+    // (Not inside anything solid: some of it was placed after the spot.)
+    if (!this.hidesChecked) {
+      this.hidesChecked = true;
+      this.hides = this.hides.filter((h) => !this.circles.some((c) => Math.hypot(c.x - h.x, c.z - h.z) < c.r + 0.2));
+    }
+    if (!S || !this.hides.length) return;
+    let i = Math.floor(Math.random() * this.hides.length);
+    if (i === S.last && this.hides.length > 1) i = (i + 1 + Math.floor(Math.random() * (this.hides.length - 1))) % this.hides.length;
+    S.last = i;
+    const h = this.hides[i];
+    S.x = h.x;
+    S.z = h.z;
+    S.k = 0;
+    S.found = false;
+    S.near = false;
+    S.woke = false;
+    S.group.position.set(h.x, this.heightAt(h.x, h.z), h.z);
+    S.group.rotation.y = Math.random() * Math.PI * 2;
+    S.group.visible = true;
+  }
+
+  hideSecret() {
+    if (this.secret) this.secret.group.visible = false;
+  }
+
+  updateSecret(dt, ctx) {
+    const S = this.secret;
+    if (!S?.group.visible) return;
+    S.t += dt;
+    const p = ctx.player.position;
+    const d = Math.hypot(p.x - S.x, p.z - S.z);
+    const y = S.group.position.y;
+    if (!S.found) {
+      if (d < 8 && !S.woke) {
+        S.woke = true;
+        ctx.audio?.play?.('echo', { pos: new THREE.Vector3(S.x, y + 0.5, S.z), volume: 0.6, rate: 0.7, gap: 1 });
+      }
+      S.k = Math.max(0, Math.min(1, S.k + (d < 8 ? dt / 1.5 : -dt / 2)));
+      // Far off, only a spark now and then.
+      if (Math.random() < dt * (0.7 + 6 * S.k)) {
+        const a = Math.random() * Math.PI * 2;
+        ctx.fx.add.emit({ x: S.x + Math.cos(a) * 0.3, y: y + 0.15, z: S.z + Math.sin(a) * 0.3, vy: 0.7 + Math.random() * 0.6, life: 1.4, size: 0.05 + 0.03 * S.k, color: C.spark, colorEnd: C.emberRed, turbulence: 1.4 });
+      }
+    } else S.k = Math.max(0, S.k - dt / 0.8);
+    const flick = 0.75 + 0.25 * Math.sin(S.t * 5.3) * Math.sin(S.t * 3.1 + 1);
+    S.glow.material.opacity = 0.55 * S.k * flick;
+    S.near = !S.found && d < 2.1 && !ctx.player.dead;
+  }
+
+  // Dug up: the relic it held (the caller gives it to the run).
+  takeSecret(ctx) {
+    const S = this.secret;
+    S.found = true;
+    S.near = false;
+    const at = new THREE.Vector3(S.x, S.group.position.y + 0.3, S.z);
+    burst(ctx.fx.add, at, { count: 60, speed: 3.5, color: C.spark, colorEnd: C.fireEdge, size: 0.1, life: 1.2, gravity: -2 });
+    burst(ctx.fx.alpha, at, { count: 26, speed: 1.6, color: C.smoke, colorEnd: C.smoke, size: 0.7, life: 1.4, gravity: -0.5 });
+    ctx.shake?.(0.15);
   }
 
   // The obelisk carries the week's deepest descent and your own.

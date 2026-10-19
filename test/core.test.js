@@ -95,3 +95,9 @@ test('high score keeps the deepest floor', () => {
   assert.equal(recordDepth(s, 7), true);
   assert.equal(s.best, 7);
 });
+
+test('the sound list names every effect the sound script renders (so all are loaded ahead of play)', async () => {
+  const { SOUND_NAMES } = await import('../src/core/soundList.js');
+  const { SOUNDS } = await import('../scripts/make-sounds.mjs');
+  assert.deepEqual([...SOUND_NAMES].sort(), Object.keys(SOUNDS).sort());
+});

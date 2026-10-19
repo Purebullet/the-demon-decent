@@ -668,9 +668,11 @@ export class Player {
   // ----------------------------------------------------------- combat ---
 
   // Left button. A press is judged where it falls in the swing (Rhythm.js):
-  // a perfect press starts the next swing at once; an early one is a fumble;
-  // otherwise it begins a press that becomes a light swing when released, or
-  // draws back a heavy one if held. Right button blocks.
+  // a perfect press (on the beat of a blow that landed) starts the next
+  // swing at once; an early one is a fumble; otherwise it begins a press
+  // that becomes a light swing when released, or draws back a heavy one if
+  // held (after a swing that missed, once it has run its course). Right
+  // button blocks.
   _attackInput(dt, ctx) {
     const input = ctx.input;
     if (!this.armed) {
@@ -683,10 +685,16 @@ export class Player {
     if (input.mouseClicked[0] && free && !this.charge) this._onPress(ctx);
     if (this.press) {
       this.press.t += dt;
-      if (!held) {
-        this.press = null;
-        this._startLight(ctx, { perfect: false });
-      } else if (this.press.t >= HOLD) {
+      if (!held) this.press.up = true;
+      // A swing that found nothing plays out its recovery: what you press
+      // meanwhile waits for it (only a blow that lands cuts it short).
+      const wait = !!this.swing && !(this.swing.hits > 0);
+      if (this.press.up) {
+        if (!wait) {
+          this.press = null;
+          this._startLight(ctx, { perfect: false });
+        }
+      } else if (this.press.t >= HOLD && !wait) {
         this.press = null;
         this._beginCharge(ctx);
       }
@@ -1238,7 +1246,6 @@ export class Player {
     const bonus = chainBonus(s.chain);
     let total = 0;
     let anyCounter = false;
-    let anyCrit = false;
     for (const h of hits) {
       const e = h.target;
       const dir = new THREE.Vector3().subVectors(e.position, this.position).setY(0).normalize();
@@ -1274,7 +1281,6 @@ export class Player {
       // Caught winding up: a counter-hit (the Wrathful Brand makes any blow one).
       const counter = !guard && (e.isWindingUp?.() || this.wrathT > 0);
       if (this.wrathT > 0 && counter) this.wrathT = 0;
-      const crit = h.part.multiplier > 1.2;
       let amount = w.damage * damageMul(run) * h.part.multiplier * (0.93 + Math.random() * 0.14);
       if (heavy) amount *= 1.6 + 0.8 * s.power;
       if (s.perfect) amount *= bonus.damage * (1 + (relicPassive(run, 'perfectDamage') ?? 0));
@@ -1294,7 +1300,7 @@ export class Player {
       if (dealt > 0) ctx.wounds?.hit(e, w.type, h.point, dir, s.travel, heavy);
       total += dealt;
       s.hits++;
-      ctx.onDamage?.(e, dealt, crit || counter, h.point, counter ? 'counter' : s.perfect ? 'perfect' : null);
+      ctx.onDamage?.(e, dealt, counter, h.point, counter ? 'counter' : s.perfect ? 'perfect' : null);
 
       // Weapon personality.
       // An armoured blow (gold tell) shrugs off all but a heavy one.
@@ -1329,7 +1335,6 @@ export class Player {
       const triggers = new Set(['hit']);
       if (s.perfect) triggers.add('perfect');
       if (counter) triggers.add('counter');
-      if (crit) triggers.add('crit');
       if (heavy && s.power >= 0.99) triggers.add('heavy');
       if (!e.alive) {
         triggers.add('kill');
@@ -1342,7 +1347,6 @@ export class Player {
         s.counter = true;
         ctx.onCombat?.('counter', h.point);
       }
-      if (crit) anyCrit = true;
     }
     if (total > 0) {
       // Momentum: every landed swing adds to it (counted once per swing).
@@ -1353,7 +1357,7 @@ export class Player {
       let stop = def.hitstop * (hits.length > 1 ? 1.4 : 1) * (heavy ? 1.7 : 1) + (s.perfect ? 0.006 * s.chain : 0);
       if (anyCounter) stop = Math.max(stop, 0.14);
       ctx.hitStop?.(stop);
-      ctx.audio?.hit(heavy ? 'heavy' : w.type, { counter: anyCounter, perfect: s.perfect, chain: s.chain, crit: anyCrit });
+      ctx.audio?.hit(heavy ? 'heavy' : w.type, { counter: anyCounter, perfect: s.perfect, chain: s.chain });
       this.shake(anyCounter ? 0.5 : heavy ? 0.3 : 0.12);
       if (this.siphonT > 0) this.heal(total * this.siphonLeech);
     }
