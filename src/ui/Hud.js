@@ -255,6 +255,18 @@ const NUM_MAX = 28;
 // How long an announcement stays up (seconds).
 export const ANNOUNCE_HOLD = 3.4;
 
+// The buffs shown above the skills: [text, colour] each.
+function buffTags(p) {
+  const tags = [];
+  if (!p) return tags;
+  if (p.siphonT > 0) tags.push(['Blood Siphon', '#ff6a5a']);
+  if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
+  if (p.burnT > 0) tags.push(['Burning: shade step (Space) to put it out', '#ff8a2a']);
+  if (p.flameT > 0) tags.push(['Flaming blade', '#ff9a3a']);
+  else if (p.coatT > 0) tags.push(['Slime-coated: block to ignite', '#8ef05a']);
+  return tags;
+}
+
 export class Hud {
   constructor(host) {
     this.host = host;
@@ -340,6 +352,7 @@ export class Hud {
     this.hintT = 0;
     // Numbers that sit on top of the GPU fills: health, cooldown seconds.
     this.topL = this._canvasLayer(1024, 256, 6);
+    this.pieces = new Map();
     this.topSig = '';
     this.relicFlash = null;
 
@@ -399,6 +412,9 @@ export class Hud {
   }
 
   resize(w, h) {
+    // (The same size again, as when only the 3D view's quality changes:
+    // nothing to do. Re-making the canvas would re-send all of it.)
+    if (Math.max(1, w) === this.w && Math.max(1, h) === this.h && this.canvas.width > 16) return;
     this.w = Math.max(1, w);
     this.h = Math.max(1, h);
     // Painted at about the screen's resolution (at most 1.25x, and never
@@ -1148,7 +1164,8 @@ export class Hud {
     const p = i.player;
     if (!this.playing || !r) return `${this.panel}`;
     // (Spell cooldowns have their own layer, and the boss's health its own
-    // bar on the GPU: neither repaints the whole interface.)
+    // bar on the GPU: neither repaints the whole interface. Nor do the
+    // pieces that change all the time: _paintPieces.)
     return [
       this.panel,
       r.potions,
@@ -1157,7 +1174,6 @@ export class Hud {
       r.weapon.rarity,
       r.level,
       r.points,
-      Math.floor((r.xp / xpToNext(r.level)) * 100),
       r.weapon.damage,
       p?.armed,
       r.dmgMul.toFixed(2),
@@ -1167,18 +1183,12 @@ export class Hud {
       JSON.stringify(r.spellUses || {}),
       JSON.stringify(r.relics),
       i.floorLabel,
-      i.enemyLabel,
-      r.floor >= 1 ? Math.floor(r.time || 0) : -1,
+      r.floor >= 1,
       i.best,
-      i.prompt,
       i.boss?.name || '',
       i.compass?.kind || '',
-      p?.siphonT > 0,
-      p?.wrathT > 0,
-      p?.burnT > 0,
-      p?.flameT > 0,
-      p?.coatT > 0,
-      Math.floor(p?.momentum || 0),
+      // (The buffs move the weapon card only where it sits above them.)
+      this.layout?.cardUp ? buffTags(p).length > 0 : 0,
       this.touch,
       this.w,
       this.h,
@@ -1186,6 +1196,122 @@ export class Hud {
   }
 
   // ---- GPU layers ------------------------------------------------------------
+
+  // A small piece of the playing interface on a canvas of its own, at
+  // (x, y), vw x vh in layout units: repainted (by `paint`, in layout
+  // coordinates) only when `sig` changes, and then only it is sent to the
+  // GPU, not the whole screen's interface (megabytes, a stutter each time
+  // on a big screen). Pieces not drawn this frame are hidden.
+  _piece(key, x, y, vw, vh, sig, paint) {
+    const k = this.scale * this.u;
+    const pw = Math.max(1, Math.ceil(vw * k));
+    const ph = Math.max(1, Math.ceil(vh * k));
+    let pc = this.pieces.get(key);
+    if (!pc || pc.pw !== pw || pc.ph !== ph) {
+      if (pc) {
+        pc.layer.mesh.removeFromParent();
+        pc.layer.tex.dispose();
+        pc.layer.mesh.material.dispose();
+      }
+      // (Just above the main canvas, as what it replaces was on it.)
+      pc = { layer: this._canvasLayer(pw, ph, 2.5), pw, ph, sig: null };
+      this.pieces.set(key, pc);
+    }
+    const full = `${sig}|${x}|${y}|${k}`;
+    if (pc.sig !== full) {
+      pc.sig = full;
+      const g = pc.layer.g;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, pw, ph);
+      g.setTransform(k, 0, 0, k, -x * k, -y * k);
+      paint(g);
+      pc.layer.tex.needsUpdate = true;
+    }
+    this._place(pc.layer.mesh, x, y, pw / k, ph / k);
+    pc.layer.mesh.visible = true;
+    pc.used = true;
+  }
+
+  _paintPieces(shown) {
+    for (const pc of this.pieces.values()) pc.used = false;
+    const L = this.layout;
+    const i = this.info;
+    const r = i.run;
+    const p = i.player;
+    if (shown && L && r && !this.panel) {
+      const w = this.vw;
+      const h = this.vh;
+      if (L.clock) {
+        const t = fmtTime(r.time);
+        this._piece('clock', L.clock.x - 160, L.clock.y - 24, 172, 34, `${t}|${!!r.finished}`, (g) => {
+          this._text(g, t, L.clock.x, L.clock.y, { size: 15, ls: 1, color: r.finished ? '#ffd28a' : C.bone, align: 'right' });
+        });
+      }
+      if (L.enemy && i.enemyLabel) {
+        const el = i.enemyLabel.toUpperCase();
+        const e = L.enemy;
+        this._piece('enemy', Math.max(0, e.x - 460), e.y - 34, Math.min(w, 480), 50, `${el}|${e.k}`, (g) => {
+          this._text(g, el, e.x, e.y, { size: 15 * e.k, ls: 1.5 * e.k, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
+        });
+      }
+      if (L.xp) {
+        const x = L.xp;
+        const xf = r.level >= MAX_LEVEL ? 1 : clamp01(r.xp / xpToNext(r.level));
+        this._piece('xp', x.x - 8, x.y - 8, x.w + 16, 21, `${Math.round(xf * 400)}|${x.w}`, (g) => {
+          g.fillStyle = 'rgba(20,8,4,0.85)';
+          g.fillRect(x.x, x.y, x.w, 5);
+          if (xf > 0) {
+            g.save();
+            const xg = g.createLinearGradient(x.x - 5, 0, x.x + x.w + 5, 0);
+            xg.addColorStop(0, '#8a5a10');
+            xg.addColorStop(1, '#ffd36a');
+            g.fillStyle = xg;
+            g.shadowColor = 'rgba(255,190,80,0.8)';
+            g.shadowBlur = 6;
+            g.fillRect(x.x, x.y, x.w * xf, 5);
+            g.restore();
+          }
+        });
+      }
+      if (L.momentum && p) {
+        const m = Math.floor(p.momentum || 0);
+        const mo = L.momentum;
+        this._piece('momentum', mo.x - 8, mo.y - 8, MOMENTUM_MAX * 12 + 12, 24, `${m}`, (g) => {
+          for (let k = 0; k < MOMENTUM_MAX; k++) {
+            g.fillStyle = k < m ? (k >= 7 ? '#ffd070' : '#ff7a2a') : 'rgba(80,20,12,0.6)';
+            g.shadowColor = k < m ? 'rgba(255,120,30,0.9)' : 'transparent';
+            g.shadowBlur = k < m ? 6 : 0;
+            g.fillRect(mo.x + k * 12, mo.y, 8, 8);
+          }
+          g.shadowBlur = 0;
+        });
+      }
+      const tags = buffTags(p);
+      if (tags.length && L.tags) {
+        const t = L.tags;
+        this._piece('tags', 0, t.y - 24, w, 48, tags.map((x) => x[0]).join('|') + `|${t.x}`, (g) => {
+          g.font = `12px ${SERIF}`;
+          const widths = tags.map(([tx]) => g.measureText(tx).width + 18);
+          let tx = t.x - (widths.reduce((a, b) => a + b, 0) + (tags.length - 1) * 8) / 2;
+          tags.forEach(([tt, c], k) => {
+            this._tag(g, tt, tx, t.y, c);
+            tx += widths[k] + 8;
+          });
+        });
+      }
+      if (i.prompt) {
+        const y = h * 0.64;
+        this._piece('prompt', 0, y - 36, w, 72, i.prompt, (g) => {
+          g.font = `18px ${SERIF}`;
+          const plain = i.prompt.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '-');
+          const pw = Math.min(w - 20, g.measureText(plain).width + 36);
+          this._box(g, (w - pw) / 2, y - 21, pw, 42, C.panel, C.edge);
+          this._rich(g, i.prompt, w / 2, y, 18);
+        });
+      }
+    }
+    for (const pc of this.pieces.values()) if (!pc.used) pc.layer.mesh.visible = false;
+  }
 
   _updateLayers(dt) {
     const i = this.info;
@@ -1195,6 +1321,7 @@ export class Hud {
     // `shown`: the HUD is up; `play`: actually fighting (no panel over it).
     const shown = this.playing && !!r && !!p && !p.dead;
     const play = shown && this.panel !== 'choice' && this.panel !== 'pause';
+    this._paintPieces(shown);
 
     // Rhythm ring around the crosshair.
     const fx = this.rhythmFx;
@@ -1698,10 +1825,11 @@ export class Hud {
     const elW = this._measure(g, el, { size: 15, ls: 1.5 });
     const topK = Math.max(0.55, Math.min(1, (w - pad * 2 - 18) / Math.max(1, flW + elW)));
     this._text(g, fl, pad, TOP + 32, { size: 15 * topK, ls: 1.5 * topK, color: C.bone });
-    this._text(g, el, w - pad, TOP + 32, { size: 15 * topK, ls: 1.5 * topK, color: C.ember, align: 'right', glow: 'rgba(120,20,0,0.9)' });
     if (i.best) this._label(g, `Deepest: Floor ${i.best}`, w - pad, TOP + 52, { size: 11, align: 'right' });
-    // The descent's clock.
-    if (r.floor >= 1) this._text(g, fmtTime(r.time), w - pad, TOP + (i.best ? 74 : 54), { size: 15, ls: 1, color: r.finished ? '#ffd28a' : C.bone, align: 'right' });
+    // The descent's clock and the demons left are pieces of their own
+    // (_paintPieces): they change all the time.
+    L.clock = r.floor >= 1 ? { x: w - pad, y: TOP + (i.best ? 74 : 54) } : null;
+    L.enemy = { x: w - pad, y: TOP + 32, k: topK };
 
     // Relics, top left: painted icons with their stack counts.
     const relics = Object.entries(r.relics || {});
@@ -1791,6 +1919,7 @@ export class Hud {
     const clear = w - pad - ww - 60;
     if (hx + hw > clear) hw = Math.max(180, clear - hx);
     const cardUp = hx + hw > clear;
+    L.cardUp = cardUp;
     if (cardUp) {
       hw = Math.min(520, w - pad * 2 - lead - 60);
       hx = Math.max(pad + lead, (w - hw) / 2);
@@ -1854,20 +1983,7 @@ export class Hud {
     // Experience: a thin gold seam under the vial, the level on a plate to
     // its right (lit while a point waits to be spent).
     const maxed = r.level >= MAX_LEVEL;
-    const xf = maxed ? 1 : clamp01(r.xp / xpToNext(r.level));
-    g.fillStyle = 'rgba(20,8,4,0.85)';
-    g.fillRect(hx + 5, hy + 30, hw - 10, 5);
-    if (xf > 0) {
-      g.save();
-      const xg = g.createLinearGradient(hx, 0, hx + hw, 0);
-      xg.addColorStop(0, '#8a5a10');
-      xg.addColorStop(1, '#ffd36a');
-      g.fillStyle = xg;
-      g.shadowColor = 'rgba(255,190,80,0.8)';
-      g.shadowBlur = 6;
-      g.fillRect(hx + 5, hy + 30, (hw - 10) * xf, 5);
-      g.restore();
-    }
+    L.xp = { x: hx + 5, y: hy + 30, w: hw - 10 };
     const lx = hx + hw + 30;
     const ly = hy + 15;
     g.save();
@@ -1886,22 +2002,9 @@ export class Hud {
     // Potions to the left of it, with the key.
     for (let k = 0; k < r.potionCap; k++) this._potionIcon(g, hx - 30 - k * 26, hy - 4, k < r.potions);
     this._key(g, 'E', hx - 40 - r.potionCap * 26, hy + 13);
-    // Buffs above the skills.
-    const tags = [];
-    if (p.siphonT > 0) tags.push(['Blood Siphon', '#ff6a5a']);
-    if (p.wrathT > 0) tags.push(['Next blow counters', '#ff7040']);
-    if (p.burnT > 0) tags.push(['Burning: shade step (Space) to put it out', '#ff8a2a']);
-    if (p.flameT > 0) tags.push(['Flaming blade', '#ff9a3a']);
-    else if (p.coatT > 0) tags.push(['Slime-coated: block to ignite', '#8ef05a']);
-    if (tags.length) {
-      g.font = `12px ${SERIF}`;
-      const widths = tags.map(([t]) => g.measureText(t).width + 18);
-      let tx = cx - (widths.reduce((a, b) => a + b, 0) + (tags.length - 1) * 8) / 2;
-      tags.forEach(([t, c], k) => {
-        this._tag(g, t, tx, sy - 18, c);
-        tx += widths[k] + 8;
-      });
-    }
+    // Buffs above the skills: a piece of their own (_paintPieces).
+    L.tags = { x: cx, y: sy - 18 };
+    const tags = buffTags(p);
 
     // Weapon, bottom right: its painted icon, name, kind and personality.
     const wh = 78;
@@ -1930,26 +2033,13 @@ export class Hud {
       const en = wd.enchant && ENCHANTS[wd.enchant];
       if (en) this._text(g, `${PROCS[en.proc].name} on ${en.on === 'hit' ? 'hits' : en.on === 'kill' ? 'kills' : en.on === 'heavy' ? 'charged heavies' : en.on === 'counter' ? 'counters' : 'perfect chains'}`, tx, wy + 62, { size: 11, color: PROCS[en.proc].color });
       else if (wd.type === 'sword') {
-        // Momentum: ten pips that heat up as the dance builds.
-        const m = Math.floor(p.momentum || 0);
-        for (let k = 0; k < MOMENTUM_MAX; k++) {
-          g.fillStyle = k < m ? (k >= 7 ? '#ffd070' : '#ff7a2a') : 'rgba(80,20,12,0.6)';
-          g.shadowColor = k < m ? 'rgba(255,120,30,0.9)' : 'transparent';
-          g.shadowBlur = k < m ? 6 : 0;
-          g.fillRect(tx + k * 12, wy + 56, 8, 8);
-        }
-        g.shadowBlur = 0;
+        // Momentum: ten pips that heat up as the dance builds (a piece of
+        // their own, _paintPieces: they change with every blow).
+        L.momentum = { x: tx, y: wy + 56 };
       } else this._text(g, wd.type === 'axe' ? 'Shatters guards · sunders' : 'Crashes through · stuns', tx, wy + 62, { size: 11, color: C.ash });
     }
 
-    // Prompt.
-    if (i.prompt) {
-      g.font = `18px ${SERIF}`;
-      const plain = i.prompt.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '-');
-      const pw = Math.min(w - 20, g.measureText(plain).width + 36);
-      this._box(g, (w - pw) / 2, h * 0.64 - 21, pw, 42, C.panel, C.edge);
-      this._rich(g, i.prompt, w / 2, h * 0.64, 18);
-    }
+    // The prompt: a piece of its own (_paintPieces).
 
     // Touch controls.
     if (this.touch) this._paintTouch(g);

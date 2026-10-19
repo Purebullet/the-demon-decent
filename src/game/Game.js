@@ -69,6 +69,14 @@ const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', azrakel: 'Lord of the
 // A finished descent's time goes on a table of its own, the quickest first
 // (the weekly table keeps the deepest floor).
 const DESCENT_BOARD = 'Fastest Descent';
+// Each player's deepest descent with the time it took, as one score: the
+// floor first, then the quicker (floor x 10^8 less the milliseconds).
+const RECORD_BOARD = 'Depth Record';
+const recordScore = (floor, sec) => floor * 1e8 - Math.min(99999999, Math.max(0, Math.round(sec * 1000)));
+const fromRecord = (score) => {
+  const floor = Math.ceil(score / 1e8);
+  return { floor, time: (floor * 1e8 - score) / 1000 };
+};
 // How long after the blow that levels you up before the choice opens.
 const LEVEL_UP_DELAY = 0.7;
 const LEVEL_UP_ARM = 0.6;
@@ -83,7 +91,10 @@ const LEVEL_UP_ARM = 0.6;
 // the view never gets so small that its stretch to the screen shows as
 // stair-steps, and the lower rungs give up the ground mist and some
 // scenery instead.
+// (The top rung is the screen's own resolution on most screens: no
+// stretching, so nothing is soft.)
 const QUALITY = [
+  { width: 2560, samples: 4 },
   { width: 1920, samples: 4 },
   { width: 1600, samples: 2 },
   { width: 1440, samples: 2 },
@@ -92,10 +103,10 @@ const QUALITY = [
   { width: 1152, samples: 0 },
   { width: 1024, samples: 0 },
 ];
-const START = 3;
+const START = 2;
 // From this rung down there is no ground mist; further down, sparser scenery.
-const NO_MIST = 5;
-const SLOW = 6;
+const NO_MIST = 6;
+const SLOW = 7;
 const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
 
@@ -181,14 +192,21 @@ export class Game {
     host.on('table', (top) => {
       this.table = top || [];
       this._refreshTitle();
+      this._refreshPlaque();
     });
     for (const row of this.table) if (row.you) this.best = Math.max(this.best, row.score);
     // The fastest descents this week (and this player's own best time).
     this.descent = [];
     this.bestTime = 0;
     this.pendingTime = 0;
+    this.records = host.boards?.[RECORD_BOARD] || [];
+    this.myRecord = null;
     host.on('board', (b) => {
       if (b?.name === DESCENT_BOARD) this._setDescent(b.top);
+      if (b?.name === RECORD_BOARD) {
+        this.records = Array.isArray(b.top) ? b.top : [];
+        this._refreshPlaque();
+      }
     });
     this._setDescent(host.boards?.[DESCENT_BOARD]);
 
@@ -554,7 +572,26 @@ export class Game {
     this.surface.hideSecret();
     const s = this._newScene({ fog: 0x0d0606, density: 0.022, background: 0x050203 });
     s.add(this.surface.group);
-    this.surface.setScores({ best: this.best, last: this.lastFloor, top: players(this.table)[0] || null });
+    this._refreshPlaque();
+  }
+
+  // The surface's plaque: the week's five deepest, each with the time the
+  // descent took (from the record table, or for a finished descent the
+  // fastest-descent table), and your own deepest.
+  _refreshPlaque() {
+    if (!this.surface) return;
+    const rec = new Map(players(this.records).map((r) => [r.uid, fromRecord(r.score)]));
+    const fast = new Map(players(this.descent).map((r) => [r.uid, r.score / 1000]));
+    const rows = players(this.table).slice(0, 5).map((r) => {
+      const d = rec.get(r.uid);
+      const time = d && d.floor === r.score ? d.time : r.score >= FLOOR_COUNT ? fast.get(r.uid) || null : null;
+      return { name: r.name, floor: r.score, time };
+    });
+    const youRec = (this.records || []).find((r) => r.you);
+    let mine = youRec ? fromRecord(youRec.score) : null;
+    if (this.myRecord && (!mine || recordScore(this.myRecord.floor, this.myRecord.time) > recordScore(mine.floor, mine.time))) mine = this.myRecord;
+    if (this.best && (!mine || mine.floor < this.best)) mine = { floor: this.best, time: null };
+    this.surface.setScores({ rows, mine, last: this.lastFloor });
   }
 
   _refreshTitle() {
@@ -1520,6 +1557,12 @@ export class Game {
     // (Not the owner's: they stay off the tables.)
     const posts = !run.dev && !this._isOwner();
     if (posts) this.host.score(run.floor);
+    // How deep, and how long it took: the plaque on the surface shows it.
+    if (!run.dev && run.floor >= 1) {
+      const t = run.time || 0;
+      if (posts) this.host.score(recordScore(run.floor, t), { board: RECORD_BOARD });
+      if (!this.myRecord || recordScore(run.floor, t) > recordScore(this.myRecord.floor, this.myRecord.time)) this.myRecord = { floor: run.floor, time: t };
+    }
     let time = null;
     if (won && run.finished) {
       const ms = Math.max(1, Math.round(run.time * 1000));
@@ -1703,17 +1746,13 @@ export class Game {
     const median = f[f.length >> 1];
     const quick = f[Math.floor(f.length * 0.1)];
     q.refresh = Math.min(1 / 30, Math.max(1 / 240, Math.min(q.refresh * 1.01, quick)));
-    // Frames that missed the display's beat (each one a visible stutter,
-    // however good the median): one in ten of them is reason enough to
-    // step down, as a slow median is.
-    const late = Math.max(q.refresh * 1.5, 1 / 50);
-    let missed = 0;
-    for (let i = f.length - 1; i >= 0 && f[i] > late; i--) missed++;
-    const missRate = missed / f.length;
+    // (Only a slow median steps down: a hitch now and then is no measure
+    // of the screen's size, and lowering the resolution for it only blurs
+    // the picture without curing the hitch.)
     q.frames.length = 0;
     q.t = 0;
     const level = this.qualityLevel;
-    if (median > Math.max(1 / 45, q.refresh * 1.45) || missRate > 0.1) {
+    if (median > Math.max(1 / 45, q.refresh * 1.45)) {
       q.good = 0;
       if (++q.bad >= 2 && level < QUALITY.length - 1) {
         q.bad = 0;
@@ -1723,11 +1762,11 @@ export class Game {
         q.wait = q.hold;
         this._setQuality(level + 1);
       }
-    } else if (median < q.refresh * 1.15 && missRate < 0.02) {
+    } else if (median < q.refresh * 1.15) {
       q.bad = 0;
       if (++q.good >= 3 && level > 0 && q.wait <= 0) {
         q.good = 0;
-        q.wait = 10;
+        q.wait = 5;
         this._setQuality(level - 1);
       }
     } else {

@@ -609,7 +609,7 @@ export class Surface {
       tip.scale.set(1, 1, 0.45);
       g.add(body, tip);
     }
-    this.plaque = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.9), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
+    this.plaque = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.0), plaqueMaterial());
     this.plaque.position.set(0, at, face);
     g.add(this.plaque);
     g.position.set(x, this.heightAt(x, z) - 0.1, z);
@@ -741,10 +741,15 @@ export class Surface {
     ctx.shake?.(0.15);
   }
 
-  // The obelisk carries the week's deepest descent and your own.
-  setScores({ best = 0, last = 0, top = null } = {}) {
+  // The obelisk carries the week's deepest descents (each with the time it
+  // took) and your own. `rows`: [{ name, floor, time }] best first; `mine`:
+  // { floor, time } or null; `last`: the floor your last descent ended on.
+  setScores({ rows = [], mine = null, last = 0 } = {}) {
+    const sig = JSON.stringify([rows, mine, last]);
+    if (sig === this.scoreSig) return;
+    this.scoreSig = sig;
     const old = this.plaque.material.map;
-    this.plaque.material.map = scoreTablet({ best, last, top });
+    this.plaque.material.map = scoreTablet({ rows, mine, last });
     this.plaque.material.needsUpdate = true;
     old?.dispose();
   }
@@ -869,121 +874,146 @@ export class Surface {
 // The score tablet: a slab of dark iron in a riveted frame with spiked
 // corners, a skull at its crown, the week's deepest descent engraved in
 // molten gold and your own below a rule.
-function scoreTablet({ best, last, top }) {
-  const W = 480;
-  const H = 608;
+// The plaque's material: unlit, its picture sampled a little sharper than
+// usual (a mip level finer), so the engraving still reads from a few
+// paces back rather than going soft.
+function plaqueMaterial() {
+  const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, vMapUv, -0.8 )'));
+  };
+  m.customProgramCacheKey = () => 'plaque-sharp';
+  return m;
+}
+
+// m:ss (h:mm:ss past the hour).
+function clock(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+// The Hall of the Deepest: a dark basalt slab in a plain iron frame, the
+// week's five deepest descents carved into it (who, how deep, how long it
+// took), and your own beneath. Big, solid lettering with a dark edge (no
+// wide glows): it has to read from across the clearing.
+function scoreTablet({ rows, mine, last }) {
+  const W = 1024;
+  const H = 1280;
   const c = makeCanvas(W, H);
   const g = c.getContext('2d');
   const serif = "Georgia, 'Times New Roman', serif";
-  // The frame: a dark iron border, bevelled, with a spike at each corner.
-  const frame = g.createLinearGradient(0, 0, W, H);
-  frame.addColorStop(0, '#5a4a44');
-  frame.addColorStop(0.5, '#2a201e');
-  frame.addColorStop(1, '#141010');
-  g.fillStyle = frame;
-  g.beginPath();
-  const cut = 34;
-  g.moveTo(cut, 0);
-  g.lineTo(W - cut, 0);
-  g.lineTo(W, cut);
-  g.lineTo(W, H - cut);
-  g.lineTo(W - cut, H);
-  g.lineTo(cut, H);
-  g.lineTo(0, H - cut);
-  g.lineTo(0, cut);
-  g.closePath();
-  g.fill();
-  // The slab inside, scorched toward its edges.
-  const inset = 30;
-  const slab = g.createRadialGradient(W / 2, H * 0.42, 20, W / 2, H / 2, H * 0.7);
-  slab.addColorStop(0, '#2c0e08');
-  slab.addColorStop(0.6, '#160605');
-  slab.addColorStop(1, '#080202');
-  g.fillStyle = slab;
-  g.fillRect(inset, inset, W - inset * 2, H - inset * 2);
-  g.strokeStyle = '#8a3a14';
-  g.lineWidth = 3;
-  g.strokeRect(inset + 8, inset + 8, W - (inset + 8) * 2, H - (inset + 8) * 2);
-  g.strokeStyle = 'rgba(255,120,40,0.35)';
-  g.lineWidth = 1;
-  g.strokeRect(inset + 14, inset + 14, W - (inset + 14) * 2, H - (inset + 14) * 2);
-  // Rivets round the frame.
-  for (let i = 0; i < 6; i++) {
-    for (const [x, y] of [[14 + ((W - 28) * i) / 5, 15], [14 + ((W - 28) * i) / 5, H - 15], [15, 14 + ((H - 28) * i) / 5], [W - 15, 14 + ((H - 28) * i) / 5]]) {
-      const rv = g.createRadialGradient(x - 2, y - 2, 0, x, y, 6);
-      rv.addColorStop(0, '#d8c8b8');
-      rv.addColorStop(1, '#3a2a24');
-      g.fillStyle = rv;
-      g.beginPath();
-      g.arc(x, y, 5, 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  // A skull at its crown.
-  g.save();
-  g.translate(W / 2, inset + 52);
-  g.fillStyle = '#d8c4a4';
-  g.shadowColor = 'rgba(255,90,20,0.8)';
-  g.shadowBlur = 14;
-  g.beginPath();
-  g.arc(0, -4, 20, Math.PI, 0);
-  g.lineTo(14, 16);
-  g.lineTo(-14, 16);
-  g.closePath();
-  g.fill();
-  g.shadowBlur = 0;
-  g.fillStyle = '#ff6a1a';
-  for (const sx of [-1, 1]) {
+  // Iron frame with cut corners.
+  const cut = 56;
+  const shape = (inset) => {
+    const k = cut - inset * 0.6;
     g.beginPath();
-    g.arc(sx * 8, 0, 5.5, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.restore();
-  // The engraving: gold that glows like metal fresh from the forge.
-  const gold = (text, y, size, opts = {}) => {
-    g.font = `${opts.bold ? 'bold ' : ''}${size}px ${serif}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    const fit = Math.min(1, (W - inset * 2 - 40) / Math.max(1, g.measureText(text).width));
-    g.save();
-    g.translate(W / 2, y);
-    g.scale(fit, 1);
-    g.shadowColor = opts.glow || 'rgba(255,100,10,0.95)';
-    g.shadowBlur = opts.blur ?? 18;
-    const grad = g.createLinearGradient(0, -size / 2, 0, size / 2);
-    grad.addColorStop(0, opts.top || '#fff2c4');
-    grad.addColorStop(0.55, opts.mid || '#ffb347');
-    grad.addColorStop(1, opts.bottom || '#c4560c');
-    g.fillStyle = grad;
-    g.fillText(text, 0, 0);
-    g.restore();
+    g.moveTo(inset + k, inset);
+    g.lineTo(W - inset - k, inset);
+    g.lineTo(W - inset, inset + k);
+    g.lineTo(W - inset, H - inset - k);
+    g.lineTo(W - inset - k, H - inset);
+    g.lineTo(inset + k, H - inset);
+    g.lineTo(inset, H - inset - k);
+    g.lineTo(inset, inset + k);
+    g.closePath();
   };
-  const rule = (y) => {
-    const rg = g.createLinearGradient(inset + 30, 0, W - inset - 30, 0);
+  const iron = g.createLinearGradient(0, 0, W, H);
+  iron.addColorStop(0, '#4a3c36');
+  iron.addColorStop(0.5, '#221a18');
+  iron.addColorStop(1, '#100c0c');
+  g.fillStyle = iron;
+  shape(0);
+  g.fill();
+  // The basalt slab, warmed from below as if by the pit.
+  const slab = g.createLinearGradient(0, 0, 0, H);
+  slab.addColorStop(0, '#120807');
+  slab.addColorStop(0.7, '#1a0907');
+  slab.addColorStop(1, '#2a0d08');
+  g.fillStyle = slab;
+  shape(26);
+  g.fill();
+  // Grain in the stone.
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 1400; i++) {
+    g.fillStyle = rnd() < 0.5 ? `rgba(0,0,0,${0.1 + rnd() * 0.25})` : `rgba(150,60,30,${rnd() * 0.06})`;
+    g.fillRect(40 + rnd() * (W - 80), 40 + rnd() * (H - 80), 1 + rnd() * 3, 1 + rnd() * 3);
+  }
+  // A single engraved border line.
+  g.strokeStyle = '#7a3412';
+  g.lineWidth = 5;
+  shape(46);
+  g.stroke();
+  // Lettering: solid, warm, with a dark cut edge.
+  const text = (t, x, y, { size = 48, color = '#f3d9a8', align = 'center', weight = '', ls = 0, max = W - 140 } = {}) => {
+    g.font = `${weight}${size}px ${serif}`;
+    if ('letterSpacing' in g) g.letterSpacing = `${ls}px`;
+    g.textAlign = align;
+    g.textBaseline = 'middle';
+    const wdt = g.measureText(t).width;
+    const fit = Math.min(1, max / Math.max(1, wdt));
+    g.save();
+    g.translate(x, y);
+    g.scale(fit, 1);
+    g.lineJoin = 'round';
+    g.lineWidth = Math.max(4, size * 0.12);
+    g.strokeStyle = 'rgba(8,2,1,0.95)';
+    g.strokeText(t, 0, 0);
+    g.shadowColor = 'rgba(255,90,20,0.45)';
+    g.shadowBlur = size * 0.18;
+    g.fillStyle = color;
+    g.fillText(t, 0, 0);
+    g.restore();
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+  };
+  const rule = (y, k = 1) => {
+    const rg = g.createLinearGradient(110, 0, W - 110, 0);
     rg.addColorStop(0, 'rgba(255,120,30,0)');
-    rg.addColorStop(0.5, 'rgba(255,140,40,0.9)');
+    rg.addColorStop(0.5, `rgba(255,140,50,${0.85 * k})`);
     rg.addColorStop(1, 'rgba(255,120,30,0)');
     g.fillStyle = rg;
-    g.fillRect(inset + 30, y - 1, W - (inset + 30) * 2, 2);
-    g.fillStyle = '#ffb347';
-    g.beginPath();
-    g.moveTo(W / 2, y - 6);
-    g.lineTo(W / 2 + 6, y);
-    g.lineTo(W / 2, y + 6);
-    g.lineTo(W / 2 - 6, y);
-    g.closePath();
-    g.fill();
+    g.fillRect(110, y - 2, W - 220, 4);
   };
-  gold("THIS WEEK'S DEEPEST", inset + 112, 30, { blur: 10 });
-  rule(inset + 136);
-  gold(top ? `FLOOR ${top.score}` : 'NONE YET', inset + 205, top ? 78 : 56, { bold: true, blur: 26 });
-  gold(top ? String(top.name).slice(0, 18) : 'no soul has returned', inset + 270, 34, { top: '#ffe6c8', mid: '#e8c8a0', bottom: '#a8805a', glow: 'rgba(200,80,10,0.7)', blur: 10 });
-  rule(inset + 318);
-  gold('YOUR DEEPEST', inset + 362, 24, { blur: 8 });
-  gold(best ? `Floor ${best}` : 'none yet', inset + 404, 42, { bold: true, blur: 14 });
-  if (last) gold(`Last descent: floor ${last}`, inset + 458, 26, { top: '#f0d8b8', mid: '#d0a878', bottom: '#8a6040', glow: 'rgba(160,60,10,0.6)', blur: 6 });
+  // Header.
+  text('HALL OF THE DEEPEST', W / 2, 124, { size: 64, weight: 'bold ', ls: 4, color: '#ffcf7a' });
+  text('THIS WEEK', W / 2, 190, { size: 34, ls: 8, color: '#b07a54' });
+  rule(232);
+  // The five deepest: rank, name, then floor and time.
+  const RANK = ['#ffd36a', '#e8e0d0', '#e0904a'];
+  const top = rows.slice(0, 5);
+  if (!top.length) {
+    text('No soul has returned', W / 2, 420, { size: 54, color: '#e8c8a0' });
+    text('yet', W / 2, 490, { size: 54, color: '#e8c8a0' });
+  }
+  top.forEach((r, k) => {
+    const y = 300 + k * 128;
+    const col = RANK[k] || '#c8a888';
+    // Rank in a small diamond.
+    g.save();
+    g.translate(126, y + 6);
+    g.rotate(Math.PI / 4);
+    g.fillStyle = 'rgba(30,8,4,0.95)';
+    g.strokeStyle = col;
+    g.lineWidth = 5;
+    g.fillRect(-30, -30, 60, 60);
+    g.strokeRect(-30, -30, 60, 60);
+    g.restore();
+    text(String(k + 1), 126, y + 8, { size: 44, weight: 'bold ', color: col, max: 60 });
+    text(String(r.name || 'Unknown').slice(0, 24), 196, y - 18, { size: k === 0 ? 58 : 52, align: 'left', color: k === 0 ? '#fff0cc' : '#f0dcc0', max: 620 });
+    text(`FLOOR ${r.floor}`, 196, y + 34, { size: 36, align: 'left', ls: 3, color: col, max: 330 });
+    text(r.time ? clock(r.time) : '-', W - 110, y + 34, { size: 40, align: 'right', color: r.time ? '#f3d9a8' : '#7a5a44', max: 260 });
+  });
+  // Your own.
+  rule(H - 300, 0.7);
+  text('YOUR DEEPEST', W / 2, H - 244, { size: 38, ls: 6, color: '#b07a54' });
+  const mineLine = mine?.floor ? `Floor ${mine.floor}${mine.time ? `  ·  ${clock(mine.time)}` : ''}` : 'none yet';
+  text(mineLine, W / 2, H - 172, { size: 66, weight: 'bold ', color: '#ffcf7a' });
+  if (last) text(`Last descent ended on floor ${last}`, W / 2, H - 98, { size: 36, color: '#c89a70' });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = 16;
   return t;
 }
