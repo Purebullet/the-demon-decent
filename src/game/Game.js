@@ -69,14 +69,6 @@ const BOSS_TITLES = { sleeper: 'Warden of the fifth seal', azrakel: 'Lord of the
 // A finished descent's time goes on a table of its own, the quickest first
 // (the weekly table keeps the deepest floor).
 const DESCENT_BOARD = 'Fastest Descent';
-// Each player's deepest descent with the time it took, as one score: the
-// floor first, then the quicker (floor x 10^8 less the milliseconds).
-const RECORD_BOARD = 'Depth Record';
-const recordScore = (floor, sec) => floor * 1e8 - Math.min(99999999, Math.max(0, Math.round(sec * 1000)));
-const fromRecord = (score) => {
-  const floor = Math.ceil(score / 1e8);
-  return { floor, time: (floor * 1e8 - score) / 1000 };
-};
 // How long after the blow that levels you up before the choice opens.
 const LEVEL_UP_DELAY = 0.7;
 const LEVEL_UP_ARM = 0.6;
@@ -199,14 +191,8 @@ export class Game {
     this.descent = [];
     this.bestTime = 0;
     this.pendingTime = 0;
-    this.records = host.boards?.[RECORD_BOARD] || [];
-    this.myRecord = null;
     host.on('board', (b) => {
       if (b?.name === DESCENT_BOARD) this._setDescent(b.top);
-      if (b?.name === RECORD_BOARD) {
-        this.records = Array.isArray(b.top) ? b.top : [];
-        this._refreshPlaque();
-      }
     });
     this._setDescent(host.boards?.[DESCENT_BOARD]);
 
@@ -575,23 +561,13 @@ export class Game {
     this._refreshPlaque();
   }
 
-  // The surface's plaque: the week's five deepest, each with the time the
-  // descent took (from the record table, or for a finished descent the
-  // fastest-descent table), and your own deepest.
+  // The surface's plaque: the week's five deepest, and your own deepest.
+  // (No times: a descent takes a while, and a clock there would only put
+  // people off.)
   _refreshPlaque() {
     if (!this.surface) return;
-    const rec = new Map(players(this.records).map((r) => [r.uid, fromRecord(r.score)]));
-    const fast = new Map(players(this.descent).map((r) => [r.uid, r.score / 1000]));
-    const rows = players(this.table).slice(0, 5).map((r) => {
-      const d = rec.get(r.uid);
-      const time = d && d.floor === r.score ? d.time : r.score >= FLOOR_COUNT ? fast.get(r.uid) || null : null;
-      return { name: r.name, floor: r.score, time };
-    });
-    const youRec = (this.records || []).find((r) => r.you);
-    let mine = youRec ? fromRecord(youRec.score) : null;
-    if (this.myRecord && (!mine || recordScore(this.myRecord.floor, this.myRecord.time) > recordScore(mine.floor, mine.time))) mine = this.myRecord;
-    if (this.best && (!mine || mine.floor < this.best)) mine = { floor: this.best, time: null };
-    this.surface.setScores({ rows, mine, last: this.lastFloor });
+    const rows = players(this.table).slice(0, 5).map((r) => ({ name: r.name, floor: r.score }));
+    this.surface.setScores({ rows, best: this.best, last: this.lastFloor });
   }
 
   _refreshTitle() {
@@ -1557,12 +1533,6 @@ export class Game {
     // (Not the owner's: they stay off the tables.)
     const posts = !run.dev && !this._isOwner();
     if (posts) this.host.score(run.floor);
-    // How deep, and how long it took: the plaque on the surface shows it.
-    if (!run.dev && run.floor >= 1) {
-      const t = run.time || 0;
-      if (posts) this.host.score(recordScore(run.floor, t), { board: RECORD_BOARD });
-      if (!this.myRecord || recordScore(run.floor, t) > recordScore(this.myRecord.floor, this.myRecord.time)) this.myRecord = { floor: run.floor, time: t };
-    }
     let time = null;
     if (won && run.finished) {
       const ms = Math.max(1, Math.round(run.time * 1000));

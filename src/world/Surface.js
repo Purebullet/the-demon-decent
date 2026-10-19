@@ -741,15 +741,15 @@ export class Surface {
     ctx.shake?.(0.15);
   }
 
-  // The obelisk carries the week's deepest descents (each with the time it
-  // took) and your own. `rows`: [{ name, floor, time }] best first; `mine`:
-  // { floor, time } or null; `last`: the floor your last descent ended on.
-  setScores({ rows = [], mine = null, last = 0 } = {}) {
-    const sig = JSON.stringify([rows, mine, last]);
+  // The obelisk carries the week's deepest descents and your own. `rows`:
+  // [{ name, floor }] best first; `best`: your deepest floor; `last`: the
+  // floor your last descent ended on.
+  setScores({ rows = [], best = 0, last = 0 } = {}) {
+    const sig = JSON.stringify([rows, best, last]);
     if (sig === this.scoreSig) return;
     this.scoreSig = sig;
     const old = this.plaque.material.map;
-    this.plaque.material.map = scoreTablet({ rows, mine, last });
+    this.plaque.material.map = scoreTablet({ rows, best, last });
     this.plaque.material.needsUpdate = true;
     old?.dispose();
   }
@@ -886,20 +886,11 @@ function plaqueMaterial() {
   return m;
 }
 
-// m:ss (h:mm:ss past the hour).
-function clock(sec) {
-  const s = Math.max(0, Math.floor(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, '0');
-  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
-}
-
 // The Hall of the Deepest: a dark basalt slab in a plain iron frame, the
-// week's five deepest descents carved into it (who, how deep, how long it
-// took), and your own beneath. Big, solid lettering with a dark edge (no
-// wide glows): it has to read from across the clearing.
-function scoreTablet({ rows, mine, last }) {
+// week's five deepest descents carved into it (who, and how deep), and your
+// own beneath. Big, solid lettering with a dark edge (no wide glows): it
+// has to read from across the clearing.
+function scoreTablet({ rows, best, last }) {
   const W = 1024;
   const H = 1280;
   const c = makeCanvas(W, H);
@@ -979,7 +970,7 @@ function scoreTablet({ rows, mine, last }) {
   };
   // Header.
   text('HALL OF THE DEEPEST', W / 2, 124, { size: 64, weight: 'bold ', ls: 4, color: '#ffcf7a' });
-  text('THIS WEEK  ·  DEEPEST FLOOR AND THAT RUN\'S TIME', W / 2, 190, { size: 28, ls: 3, color: '#b07a54' });
+  text('THIS WEEK', W / 2, 190, { size: 34, ls: 8, color: '#b07a54' });
   rule(232);
   // The five deepest: rank, name, then floor and time.
   const RANK = ['#ffd36a', '#e8e0d0', '#e0904a'];
@@ -1002,15 +993,14 @@ function scoreTablet({ rows, mine, last }) {
     g.strokeRect(-30, -30, 60, 60);
     g.restore();
     text(String(k + 1), 126, y + 8, { size: 44, weight: 'bold ', color: col, max: 60 });
-    text(String(r.name || 'Unknown').slice(0, 24), 196, y - 18, { size: k === 0 ? 58 : 52, align: 'left', color: k === 0 ? '#fff0cc' : '#f0dcc0', max: 620 });
-    text(`FLOOR ${r.floor}`, 196, y + 34, { size: 36, align: 'left', ls: 3, color: col, max: 330 });
-    text(r.time ? clock(r.time) : '-', W - 110, y + 34, { size: 40, align: 'right', color: r.time ? '#f3d9a8' : '#7a5a44', max: 260 });
+    // The name, and how deep, on one line.
+    text(String(r.name || 'Unknown').slice(0, 24), 196, y + 8, { size: k === 0 ? 60 : 54, align: 'left', color: k === 0 ? '#fff0cc' : '#f0dcc0', max: 470 });
+    text(`FLOOR ${r.floor}`, W - 110, y + 10, { size: 44, align: 'right', ls: 3, color: col, max: 240 });
   });
   // Your own.
   rule(H - 300, 0.7);
   text('YOUR DEEPEST', W / 2, H - 244, { size: 38, ls: 6, color: '#b07a54' });
-  const mineLine = mine?.floor ? `Floor ${mine.floor}${mine.time ? `  ·  ${clock(mine.time)}` : ''}` : 'none yet';
-  text(mineLine, W / 2, H - 172, { size: 66, weight: 'bold ', color: '#ffcf7a' });
+  text(best ? `Floor ${best}` : 'none yet', W / 2, H - 172, { size: 66, weight: 'bold ', color: '#ffcf7a' });
   if (last) text(`Last descent ended on floor ${last}`, W / 2, H - 98, { size: 36, color: '#c89a70' });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
