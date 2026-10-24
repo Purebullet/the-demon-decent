@@ -41,6 +41,8 @@ const POTION_HEAL = 0.2;
 const IDLE_DIR = new THREE.Vector3(0.24, 0.94, -0.24).normalize();
 const IDLE_AXIS = new THREE.Vector3(0.15, 0.1, 1).normalize();
 const IDLE_POS = new THREE.Vector3(0.3, -0.48, -0.52);
+// Where a mace rests against the others (see setWeapon).
+const MACE_REST = new THREE.Vector3(0.07, -0.06, 0);
 // Block: the blade laid across the body, flat toward the enemy.
 const BLOCK_DIR = new THREE.Vector3(-0.93, 0.3, -0.2).normalize();
 const BLOCK_AXIS = new THREE.Vector3(0, 0.1, 1).normalize();
@@ -295,6 +297,18 @@ export class Player {
     this.weaponPivot.clear();
     this.weaponMesh = buildWeaponMesh(weapon, { own: true });
     this.weaponPivot.add(this.weaponMesh);
+    // An axe rests with its edge forward, turning to lead with it as it
+    // swings (_updateWeapon): the angle about the haft from where its edge
+    // leads a swing (-X about the grip) to straight ahead at rest.
+    this.restTwist = 0;
+    if (weapon.type === 'axe') {
+      _v.set(0, 0, -1).applyQuaternion(_quat.copy(this.idleQuat).invert());
+      if (Math.hypot(_v.x, _v.z) > 0.2) this.restTwist = Math.atan2(_v.z, -_v.x);
+    }
+    this.weaponMesh.rotation.y = this.restTwist;
+    // A mace's big head rests a little further out to the right and down,
+    // more of it off the screen.
+    this.restOffset = weapon.type === 'mace' ? MACE_REST : null;
     this.weaponMats = [];
     const [b0, b1] = blade;
     this.weaponPivot.updateMatrixWorld(true);
@@ -862,6 +876,22 @@ export class Player {
     const pivot = this.weaponPivot;
     pivot.visible = this.armed;
     this._weaponGlow(dt);
+    // The axe turns its edge from straight ahead (at rest) to leading the
+    // blow: turned through the wind-up (or the draw of a heavy), edge first
+    // all through the strike, and turned back as it comes home.
+    if (this.weaponMesh && this.restTwist) {
+      let k = 1;
+      if (s && !s.bounced) {
+        if (s.t < s.W) k = 1 - easeOut(Math.min(1, s.t / Math.max(1e-3, s.W)));
+        else if (s.t < s.W + s.A) k = 0;
+        else k = easeInOut(Math.min(1, (s.t - s.W - s.A) / Math.max(1e-3, s.R)));
+      } else if (this.charge) k = 1 - easeOut(Math.min(1, this.charge.t / 0.25));
+      const m = this.weaponMesh;
+      const want = this.restTwist * k;
+      // (Tracked quickly rather than set: a swing chained out of another's
+      // follow-through starts from wherever that one had turned to.)
+      m.rotation.y = k === 0 ? 0 : m.rotation.y + (want - m.rotation.y) * Math.min(1, dt * 40);
+    }
     if (!s) {
       const t = performance.now() * 0.001;
       const sw = this._sway(0);
@@ -882,6 +912,7 @@ export class Player {
       // dipped and shaken while staggered.
       const st = this.staggerT > 0 ? Math.sin(Math.min(1, this.staggerT / Math.max(0.01, this.staggerMax)) * Math.PI) : 0;
       _v.set(IDLE_POS.x + st * 0.05, IDLE_POS.y + sw * 0.012 + Math.sin(t * 1.3) * 0.004 - st * 0.12, IDLE_POS.z - sw * 0.055);
+      if (this.restOffset) _v.add(this.restOffset);
       _tilt.setFromAxisAngle(_side, -sw * 0.12 + st * 0.5);
       _quat.copy(this.idleQuat).premultiply(_tilt);
       if (this.blockK > 0.001) {
