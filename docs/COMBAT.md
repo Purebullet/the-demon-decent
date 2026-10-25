@@ -143,6 +143,7 @@ a blow you can counter in its windup; **gold** is an **armoured** blow that a li
 | Pyre Witch | Fireballs (three on deep floors) that **parry back** at her; **pyre**: the ground erupts under you and where you are heading; a fire burst up close; **blinks away** when cornered. | Parry the fireballs; keep moving through the pyre; corner her after the blink. |
 | Gorvath | Armoured slam and charge (the charge stuns him in a wall); the sweep may run into the slam. | As the brute, bigger. |
 | Azrakel | The sweep may run into the gust; an armoured leap. | Watch the ring, then the follow-up. |
+| Grave Wraith (the surface) | A raking **swipe**; a **dive**: it draws back and up, climbs high, then swoops down through where you stand; a **grab** (arms flung wide, then a lunge) that holds you still for 2 s while it chills you. | Block the swipe; step aside as it swoops; strike or block the grab's lunge before it reaches you. |
 
 Common to all: demons waiting for an opening **circle** you instead of queueing; strings keep
 their attack token; a string's next blow has a shorter windup (`combo.windup`); blinks and hops

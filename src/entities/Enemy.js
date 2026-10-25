@@ -70,8 +70,9 @@ export class Enemy {
     this.typeKey = typeKey;
     this.type = type;
     this.tuning = tuning;
-    // The AI-generated model (a plain block until its GLB exists).
-    this.model = buildGltfCharacter(type.asset, type.scale || 1);
+    // The AI-generated model (a plain block until its GLB exists), or a body
+    // the kind builds itself (the Grave Wraith: particles, no model).
+    this.model = type.buildModel ? type.buildModel() : buildGltfCharacter(type.asset, type.scale || 1);
     this.root = this.model.root;
     if (type.scale) this.root.scale.setScalar(type.scale);
     this.position = this.root.position;
@@ -1322,7 +1323,10 @@ export class Enemy {
       }
       const h = (this.model.height || 1.6) * 0.6 * (this.type.scale || 1);
       if (kind === 'burn') this._burnFx(dt, ctx);
-      if (kind === 'bleed' && Math.random() < dt * 8) ctx.fx.alpha.emit({ x: this.position.x + rand(-0.2, 0.2), y: h, z: this.position.z + rand(-0.2, 0.2), vx: rand(-0.5, 0.5), vy: 0.5, vz: rand(-0.5, 0.5), life: 0.8, size: 0.09, color: C.blood, colorEnd: C.bloodDark, gravity: -9 });
+      if (kind === 'bleed' && Math.random() < dt * 8) {
+        const ich = this.type.ichor;
+        (ich ? ctx.fx.add : ctx.fx.alpha).emit({ x: this.position.x + rand(-0.2, 0.2), y: h, z: this.position.z + rand(-0.2, 0.2), vx: rand(-0.5, 0.5), vy: 0.5, vz: rand(-0.5, 0.5), life: 0.8, size: 0.09, color: ich ? ich.color : C.blood, colorEnd: ich ? ich.end : C.bloodDark, gravity: ich ? 0 : -9 });
+      }
       if (tick && this.alive) {
         const dealt = this.takeHit(st.dps * 0.5, tmpV.set(0, 0, 0), 0, 0, ctx, { proc: true });
         ctx.onDamage?.(this, dealt, false, tmpV.set(this.position.x, h + 0.3, this.position.z), kind);

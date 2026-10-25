@@ -396,7 +396,7 @@ export class Player {
     this.healFlash = Math.max(0, this.healFlash - dt * 2);
     this.shakeT = Math.max(0, this.shakeT - dt * 2.2);
     if (this.pinned && (!this.pinned.by.alive || this.pinned.by.state !== 'latched')) this.pinned = null;
-    this.thrash = this.pinned ? Math.min(1, this.thrash + dt * 8) : Math.max(0, this.thrash - dt * 3.5);
+    this.thrash = this.pinned && !this.pinned.still ? Math.min(1, this.thrash + dt * 8) : Math.max(0, this.thrash - dt * 3.5);
     this.siphonT = Math.max(0, this.siphonT - dt);
     this.staggerT = Math.max(0, this.staggerT - dt);
     this.wrathT = Math.max(0, this.wrathT - dt);
@@ -478,8 +478,9 @@ export class Player {
   }
 
   // Latched on to (Enemy._latch): held where you stand, the view thrashing.
-  pin(by) {
-    this.pinned = { by };
+  // `still`: held without the thrashing (the wraith's grip).
+  pin(by, { still = false } = {}) {
+    this.pinned = { by, still };
     this.dash = null;
     this.blocking = false;
     this.knock.set(0, 0, 0);
@@ -491,18 +492,20 @@ export class Player {
 
   // Bitten while held: straight through any guard, but it does not break
   // your swing (strike it off).
-  maul(amount, from, ctx) {
+  // `chill`: a cold that seeps in (the wraith's grip), not teeth or claws:
+  // no blood, no red flash. `quiet`: no cry of pain this time.
+  maul(amount, from, ctx, { chill = false, quiet = false } = {}) {
     if (this.dead) return;
     const armor = relicPassive(this.run, 'armor') ?? 0;
     amount = Math.max(1, Math.round(amount * (1 - armor) * takenMul(this.run)));
     this.run.health -= amount;
-    this.hurtFlash = Math.min(1, 0.4 + amount / 40);
-    this.jolt = Math.min(1, this.jolt + 0.35);
+    if (!chill) this.hurtFlash = Math.min(1, 0.4 + amount / 40);
+    this.jolt = Math.min(1, this.jolt + (chill ? 0.15 : 0.35));
     const fx = this.position.x - from.x;
     const fz = this.position.z - from.z;
     const angle = Math.atan2(-fx * Math.cos(this.yaw) + fz * Math.sin(this.yaw), fx * Math.sin(this.yaw) + fz * Math.cos(this.yaw));
-    ctx.audio?.hurt();
-    ctx.onPlayerHurt?.(amount, angle);
+    if (!quiet) ctx.audio?.hurt();
+    ctx.onPlayerHurt?.(amount, angle, chill ? { chill: true } : undefined);
     if (this.run.health <= 0) this._die(ctx);
   }
 
@@ -1349,11 +1352,14 @@ export class Player {
         else if (staggers && e.state === 'strike' && !e.hitPlayer && reels) e.interrupt?.(ctx, 0.45);
       }
 
-      // Blood thrown along the blade's travel, sparks at the contact.
+      // Blood thrown along the blade's travel, sparks at the contact. (What
+      // has no blood, a wraith of light, bleeds its own glow: `ichor`.)
       const tv = s.travel || dir;
+      const ich = e.type.ichor;
+      const spray = ich ? ctx.fx.add : ctx.fx.alpha;
       for (let i = 0; i < (heavy ? 26 : 16); i++) {
         const sp = 2.5 + Math.random() * 3.5;
-        ctx.fx.alpha.emit({ x: h.point.x, y: h.point.y, z: h.point.z, vx: tv.x * sp + (Math.random() - 0.5) * 2, vy: tv.y * sp + Math.random() * 2, vz: tv.z * sp + (Math.random() - 0.5) * 2, life: 0.5 + Math.random() * 0.5, size: 0.1, sizeEnd: 0.03, color: C.blood, colorEnd: C.bloodDark, gravity: -9, drag: 1.2 });
+        spray.emit({ x: h.point.x, y: h.point.y, z: h.point.z, vx: tv.x * sp + (Math.random() - 0.5) * 2, vy: tv.y * sp + Math.random() * 2, vz: tv.z * sp + (Math.random() - 0.5) * 2, life: 0.5 + Math.random() * 0.5, size: 0.1, sizeEnd: 0.03, color: ich ? ich.color : C.blood, colorEnd: ich ? ich.end : C.bloodDark, gravity: ich ? 0 : -9, drag: ich ? 2.2 : 1.2 });
       }
       burst(ctx.fx.add, h.point, { count: counter ? 22 : 8, speed: counter ? 7 : 5, size: 0.06, life: 0.25 });
       // A burning blade sets them alight.
@@ -1552,6 +1558,11 @@ export class Player {
   }
 
   _die(ctx) {
+    // (On the surface, sparring before the descent, a blow can't kill.)
+    if (this.run.spar) {
+      this.run.health = 1;
+      return;
+    }
     this.run.health = 0;
     this.dead = true;
     this.deathT = 0;

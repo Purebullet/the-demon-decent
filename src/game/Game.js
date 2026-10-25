@@ -6,7 +6,7 @@ import { Input } from '../core/Input.js';
 import { Audio } from '../core/Audio.js';
 import { StateMachine } from '../core/StateMachine.js';
 import { ParticleSystem } from '../world/Particles.js';
-import { Surface, SHAFT_BOTTOM } from '../world/Surface.js';
+import { Surface, SHAFT_BOTTOM, PIT_RADIUS } from '../world/Surface.js';
 import { Sanctum } from '../world/Sanctum.js';
 import { Level } from '../world/Level.js';
 import { FLOORS, FLOOR_COUNT, floorDef, DEEP_FROM } from '../world/LevelData.js';
@@ -14,6 +14,7 @@ import { Effects } from '../world/Effects.js';
 import { Player } from '../entities/Player.js';
 import { VOICE_LINES } from '../entities/voiceLines.js';
 import { Enemy } from '../entities/Enemy.js';
+import { Wraith } from '../entities/Wraith.js';
 import { ENEMY_TYPES } from '../entities/EnemyTypes.js';
 import { Boss, Sleeper } from '../entities/Bosses.js';
 import { Archfiend } from '../entities/Archfiend.js';
@@ -101,6 +102,13 @@ const NO_MIST = 6;
 const SLOW = 7;
 const FROZEN_INPUT = { consumeMouse: () => ({ dx: 0, dy: 0 }), moveAxes: () => ({ forward: 0, strafe: 0 }), wasPressed: () => false, isDown: () => false, mouseClicked: [], mouseDown: [] };
 const SURFACE_TUNING = { hp: 1, dmg: 1, speed: 1, windup: 1, cooldown: 1, attackers: 2, swarm: false, aggro: 10, loot: 1 };
+// The surface has no paths or pack tactics: what fights there (the Grave
+// Wraith, which flies) needs only these.
+const SPAR_DIRECTOR = { requestToken: () => true, releaseToken() {} };
+const OPEN_GROUND = { hasLineOfSight: () => true };
+const NO_PATHS = { request() {}, cancel() {} };
+// How long after it is struck down the wraith forms again.
+const WRAITH_BACK = 6;
 
 export class Game {
   constructor(host, { lotLabel = 'The Demon Descent', devFloor = 0 } = {}) {
@@ -646,13 +654,51 @@ export class Game {
     this.hud.show('title', false);
     this.falling = 0;
     this.audio.music('intro');
-    this.ctx = this._baseCtx({ world: this.surface.world, combat: true, ground: 'gravel' });
+    this.ctx = this._baseCtx({ world: this.surface.world, combat: true, ground: 'gravel', director: SPAR_DIRECTOR, nav: OPEN_GROUND, pathService: NO_PATHS });
+    // Sparring before the descent: nothing up here can kill you (and the
+    // fall restores you).
+    this.run.spar = true;
+    this._spawnWraith();
     this.hud.announce(this.lotLabel, 'The pit waits. Step over the edge to descend.');
     if (this.devFloor) {
       this.run.dev = true;
       this.pendingGoto = { name: 'floor', params: { floor: this.devFloor } };
       this.devFloor = 0;
     }
+  }
+
+  // The Grave Wraith (entities/Wraith.js), hanging in the air across the
+  // pit from where you wake: a ghoul of light to cross blades with before
+  // the descent.
+  _spawnWraith() {
+    const sp = this.surface.spawn;
+    const l = Math.hypot(sp.x, sp.z) || 1;
+    const r = PIT_RADIUS + 5;
+    const w = new Wraith({ x: (-sp.x / l) * r, z: (-sp.z / l) * r }, SURFACE_TUNING);
+    w.yaw = Math.atan2(sp.x - w.position.x, sp.z - w.position.z);
+    this.scene.add(w.root);
+    this.surfaceFoes = [w];
+    this.ctx.enemies = this.surfaceFoes;
+    this.wraithBack = 0;
+  }
+
+  _updateWraiths(dt, ctx) {
+    const foes = this.surfaceFoes || [];
+    let grip = 0;
+    for (const e of foes) {
+      e.update(dt, ctx);
+      e.postUpdate(dt, ctx, this.time);
+      grip = Math.max(grip, e.gripK || 0);
+    }
+    for (let i = foes.length - 1; i >= 0; i--) {
+      if (!foes[i].removed) continue;
+      foes[i].root.removeFromParent();
+      foes.splice(i, 1);
+      this.wraithBack = WRAITH_BACK;
+    }
+    // Struck down, it forms again a little later.
+    if (!foes.length && this.wraithBack > 0 && (this.wraithBack -= dt) <= 0) this._spawnWraith();
+    this.hud.setGrip(grip);
   }
 
   _updateSurface(dt) {
@@ -693,6 +739,7 @@ export class Game {
     p.update(dt, ctx);
     const ground = this.surface.heightAt(p.position.x, p.position.z);
     p.position.y += (ground - p.position.y) * Math.min(1, dt * 12);
+    this._updateWraiths(dt, ctx);
     this.surface.update(dt, this.fx);
     this.surface.updateSecret(dt, ctx);
     if (this.surface.secret?.near && this.input.wasPressed('KeyF')) {
@@ -705,6 +752,14 @@ export class Game {
       this.hud.toast('A secret: the Buried Reliquary');
     }
     if (this.surface.inPit(p.position) && !this.busy) {
+      // Over the edge: the wraith is left behind, and the fall restores you.
+      p.unpin();
+      for (const e of this.surfaceFoes || []) e.root.removeFromParent();
+      this.surfaceFoes = [];
+      ctx.enemies = this.surfaceFoes;
+      this.hud.setGrip(0);
+      this.run.spar = false;
+      this.run.health = this.run.maxHealth;
       this.falling = 0.001;
       this.torchOutT = 0;
       this.surface.falling(true);
@@ -728,6 +783,9 @@ export class Game {
     const inDeep = floor >= DEEP_FROM;
     this.audio.music(SONG_FOR[floor] || (def.boss ? 'boss' : inDeep ? 'deep' : 'drone'));
     const run = this.run;
+    // (The surface's sparring is over, however it was left.)
+    run.spar = false;
+    this.hud.setGrip(0);
     // Each floor gives the spells their uses again.
     run.spellUses = {};
     run.floor = floor;

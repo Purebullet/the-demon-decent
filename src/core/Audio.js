@@ -149,7 +149,7 @@ export class Audio {
   }
 
   // Each creature borrows the voice nearest its size.
-  kind = (k) => (k === 'ghoul' || k === 'hound' ? 'ghoul' : k === 'fiend' || k === 'witch' ? 'fiend' : 'brute');
+  kind = (k) => (k === 'ghoul' || k === 'hound' ? 'ghoul' : k === 'fiend' || k === 'witch' || k === 'wraith' ? 'fiend' : 'brute');
 
   // A swing's sound says how it was made: a Perfect Chain cuts deeper with
   // every link, a sluggish one drags, a heavy blow (or an axe or mace) heaves

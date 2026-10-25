@@ -78,6 +78,42 @@ const SLOTS = SPELL_IDS.map((id) => ({ id, icon: id }));
 const FULL_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy * 2.0, 0.0, 1.0); }';
 const QUAD_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
 
+// The Grave Wraith's grip (Wraith.js): its wisps come in from every edge
+// of your sight, swirling round the frame over a dark smoke, with gold and
+// white sparks in them; `uK` how far it has taken hold.
+const GRIP_FRAG = `
+  varying vec2 vUv;
+  uniform float uK; uniform float uTime; uniform float uAspect;
+  float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p){
+    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm(vec2 p){ float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + 1.7; a *= 0.5; } return v; }
+  void main(){
+    vec2 c = vUv - 0.5;
+    c.x *= uAspect;
+    float r = length(c);
+    float ang = atan(c.y, c.x);
+    // How near the edge (0 at it), in screen heights.
+    float edge = min(min(vUv.x, 1.0 - vUv.x) * uAspect, min(vUv.y, 1.0 - vUv.y));
+    // Wisps flowing round the frame, and drawn in toward the middle.
+    vec2 q = vec2(ang * 2.2 + uTime * 0.55, r * 7.0 - uTime * 1.4);
+    float n = fbm(q);
+    float n2 = fbm(q * 2.3 + vec2(7.3, -uTime * 0.8));
+    float reach = (0.1 + 0.26 * uK) * (0.7 + 0.6 * n);
+    float band = smoothstep(reach, 0.0, edge);
+    float wisp = band * smoothstep(0.35, 0.8, n);
+    float streak = band * smoothstep(0.58, 0.82, n2);
+    // Sparks.
+    vec2 cell = floor(vUv * vec2(140.0 * uAspect, 140.0));
+    float spark = step(0.988, hash(cell + floor(uTime * 9.0))) * band;
+    vec3 teal = vec3(0.3, 1.0, 0.9);
+    vec3 col = teal * (wisp * 1.1 + streak * 0.9) + vec3(1.0, 0.82, 0.45) * spark;
+    float a = clamp(band * 0.62 + wisp * 0.5 + streak * 0.45 + spark, 0.0, 1.0) * uK;
+    gl_FragColor = vec4(col, a);
+  }`;
+
 const VIGNETTE_FRAG = `
   varying vec2 vUv;
   uniform float uHurt; uniform float uLow; uniform float uFade; uniform float uPulse; uniform float uHeal;
@@ -292,10 +328,19 @@ export class Hud {
     vq.frustumCulled = false;
     vq.renderOrder = 1;
     this.overlay = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
+    // The Grave Wraith's grip at the edges of sight (setGrip).
+    this.gripFx = new THREE.Mesh(
+      quad,
+      new THREE.ShaderMaterial({ vertexShader: FULL_VERT, fragmentShader: GRIP_FRAG, uniforms: { uK: { value: 0 }, uTime: { value: 0 }, uAspect: { value: 1 } }, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
+    );
+    this.gripFx.frustumCulled = false;
+    this.gripFx.renderOrder = 1.5;
+    this.gripFx.visible = false;
+    this.gripK = 0;
     this.main = new THREE.Mesh(quad, this.overlay);
     this.main.frustumCulled = false;
     this.main.renderOrder = 2;
-    this.scene.add(vq, this.main);
+    this.scene.add(vq, this.gripFx, this.main);
 
     // ---- GPU layers ----
     const shader = (frag, uniforms, order) => {
@@ -545,6 +590,12 @@ export class Hud {
     } else if (kind === 'fumble') this.rhythmFx.fumble = 1;
   }
 
+  // How far the Grave Wraith's grip has taken hold (0..1): its wisps at the
+  // edges of sight.
+  setGrip(k) {
+    this.gripK = k;
+  }
+
   flashRelic(id) {
     // (Once: the new relic is drawn by the repaint this asks for. This
     // used to stay set for good, and the whole interface then repainted
@@ -729,10 +780,11 @@ export class Hud {
   // you face (0 ahead, positive to the right). The view reddens on that side,
   // blood is thrown across the lens, and the health vial jolts, flares and
   // sheds the amount lost.
-  playerHurt(amount, angle, { blocked = false, burn = false, max = 100 } = {}) {
+  playerHurt(amount, angle, { blocked = false, burn = false, chill = false, max = 100 } = {}) {
     const k = clamp01(amount / Math.max(1, max * 0.25));
     const F = this.hpFx;
-    if (burn) {
+    // (Burning, or the wraith's cold: the bar shudders, no blood.)
+    if (burn || chill) {
       F.shake = Math.min(1.2, F.shake + 0.18);
       F.hit = Math.max(F.hit, 0.45);
       return;
@@ -1047,6 +1099,11 @@ export class Hud {
     V.uFade.value = this.fadeValue;
     this.blow = Math.max(0, (this.blow || 0) - dt * 1.6);
     V.uBlow.value = this.playing ? this.blow : 0;
+    const G = this.gripFx.material.uniforms;
+    G.uK.value = this.playing ? this.gripK : 0;
+    G.uTime.value = this.time;
+    G.uAspect.value = this.w / Math.max(1, this.h);
+    this.gripFx.visible = G.uK.value > 0.003;
 
     // (Panels that move repaint as they go; the playing HUD only on change.)
     const animating = this.panel === 'title' || this.panel === 'notice' || this.panel === 'death' || this.panel === 'victory';
