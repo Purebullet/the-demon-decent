@@ -693,6 +693,7 @@ export class Game {
     for (let i = foes.length - 1; i >= 0; i--) {
       if (!foes[i].removed) continue;
       foes[i].root.removeFromParent();
+      foes[i].dispose?.();
       foes.splice(i, 1);
       this.wraithBack = WRAITH_BACK;
     }
@@ -754,7 +755,10 @@ export class Game {
     if (this.surface.inPit(p.position) && !this.busy) {
       // Over the edge: the wraith is left behind, and the fall restores you.
       p.unpin();
-      for (const e of this.surfaceFoes || []) e.root.removeFromParent();
+      for (const e of this.surfaceFoes || []) {
+        e.root.removeFromParent();
+        e.dispose?.();
+      }
       this.surfaceFoes = [];
       ctx.enemies = this.surfaceFoes;
       this.hud.setGrip(0);
