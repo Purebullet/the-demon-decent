@@ -63,6 +63,7 @@ const HAIR = 1;
 const RIB = 2;
 const TENDRIL = 3;
 const FRAY = 4;
+const LIMB = 5;
 // What a fraying wisp grows from (its spine and tail, its shoulders, an
 // arm, its skull).
 const ON_SPINE = 0;
@@ -194,6 +195,10 @@ function strandSpecs() {
     const l = Math.hypot(x, y, z);
     return { dx: x / l, dy: y / l, dz: z / l };
   }, 40);
+  // Strands bundled along its arms and over its shoulders, weaving in and
+  // out, so they read as sinew of light, not tubes.
+  for (const hand of [0, 1]) for (let j = 0; j < 16; j++) S.push({ kind: LIMB, hand, n: 22, w0: rand(0.012, 0.022), w1: 0.006, a: rand(0.45, 0.85), tone: r() < 0.15 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.55, 1.3), twist: rand(-1.2, 1.2), ...weave() });
+  for (let j = 0; j < 14; j++) S.push({ kind: LIMB, hand: -1, n: 14, w0: rand(0.012, 0.022), w1: 0.006, a: rand(0.45, 0.85), tone: TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.5, 1.3), twist: rand(-1, 1), ...weave() });
   // Tendrils trailing from the arms.
   for (const hand of [0, 1]) {
     const side = hand === 0 ? 1 : -1;
@@ -204,8 +209,9 @@ function strandSpecs() {
 
 // Its tubes (see SPINE and the rest).
 function tubeSpecs() {
-  const T = [{ rings: SPINE_RINGS, sides: 14, len: 4, wob: 0.2 }, { rings: 11, sides: 10, len: 0.9, wob: 0.14 }];
-  for (let h = 0; h < 2; h++) T.push({ rings: 22, sides: 9, len: 1.2, wob: 0.26 });
+  // (Its shoulders and arms are mostly strands: their flesh is faint.)
+  const T = [{ rings: SPINE_RINGS, sides: 14, len: 4, wob: 0.2, fur: 1 }, { rings: 11, sides: 10, len: 0.9, wob: 0.14, fur: 1, solid: 0.45 }];
+  for (let h = 0; h < 2; h++) T.push({ rings: 22, sides: 9, len: 1.2, wob: 0.26, fur: 0.8, solid: 0.5 });
   for (let h = 0; h < 2; h++) T.push({ rings: 4, sides: 8, len: 0.12 });
   for (let h = 0; h < 2; h++) for (let f = 0; f < 5; f++) T.push({ rings: 7, sides: 6, len: 0.25, tip: 0.9 });
   return T;
@@ -219,7 +225,7 @@ function buildBody() {
   const tubes = new Tubes(tubeSpecs(), mats);
   const strands = new Strands(strandSpecs());
   const head = buildHead(mats);
-  root.add(tubes.core, tubes.shell, strands.mesh, head.group);
+  root.add(tubes.core, tubes.shell, ...tubes.fur, strands.mesh, head.group);
   const eyes = [];
   const glows = [];
   for (const s of [1, -1]) {
@@ -516,6 +522,7 @@ export class Wraith extends Enemy {
     const M = this.model;
     const shown = !this.hidden && this.fade > 0.01;
     M.tubes.shell.visible = M.tubes.core.visible = M.strands.mesh.visible = M.head.group.visible = shown;
+    for (const f of M.tubes.fur) f.visible = shown;
     // (It is laid out only while it can be seen: in front of you, or near
     // enough that some of it might be.)
     const pl = ctx.player;
@@ -543,7 +550,7 @@ export class Wraith extends Enemy {
     const fu = ctx.fx.add.material.uniforms;
     U.uPixel.value = 1 / Math.max(1, fu.uScale.value);
     F.uFogDensity.value = U.uFogDensity.value = fu.uFogDensity.value;
-    for (const m of [M.head.face, M.head.jawCard, M.head.mouth]) {
+    for (const m of [M.head.face, M.head.jawCard, M.head.mouth, M.head.profile, M.head.jawProfileCard]) {
       m.material.uniforms.uFade.value = this.fade;
       m.material.uniforms.uHeat.value = heat;
     }
@@ -780,6 +787,7 @@ export class Wraith extends Enemy {
     const open = this.jawOpen + (1 - this.fade) * 0.4;
     H.jaw.position.y = -0.082 - open * 0.085;
     H.jaw.rotation.x = open * 0.3;
+    H.jawSide.rotation.x = open * 0.55;
     H.mouth.scale.y = 0.6 + open * 1.1;
     H.mouth.material.uniforms.uOpacity.value = smooth(0.06, 0.35, open);
   }
@@ -1049,6 +1057,7 @@ export class Wraith extends Enemy {
       else if (sp.kind === HAIR) this._hair(sp, t, loose);
       else if (sp.kind === RIB) this._rib(sp);
       else if (sp.kind === FRAY) this._fray(sp, t, loose);
+      else if (sp.kind === LIMB) this._limb(sp, t, loose);
       else this._tendril(sp, t, loose);
     }
   }
@@ -1120,6 +1129,19 @@ export class Wraith extends Enemy {
       const w = i / (sp.n - 1);
       const rip = L * w * 0.35;
       this.strands.set(sp.start + i, _f0.x + dx * L * w + rip * Math.sin(w * sp.f1 - t * 4 + sp.p1), _f0.y + dy * L * w + 0.25 * L * w * w + rip * 0.6 * Math.sin(w * sp.f2 - t * 3.3 + sp.p2), _f0.z + dz * L * w + rip * Math.cos(w * sp.f1 - t * 3.6 + sp.p2));
+    }
+  }
+
+  // A strand along an arm (shoulder to wrist) or across its shoulders,
+  // twisting round it and weaving in and out of its flesh.
+  _limb(sp, t, loose) {
+    const tube = sp.hand < 0 ? YOKE : ARM + sp.hand;
+    for (let i = 0; i < sp.n; i++) {
+      const s = 0.02 + 0.96 * (i / (sp.n - 1));
+      const a = sp.phi + sp.twist * Math.PI * s + 0.35 * Math.sin(s * sp.f1 + sp.p1 + t * 0.9);
+      const k = sp.k + 0.25 * Math.sin(s * sp.f2 + sp.p2 - t * 1.3) + loose;
+      this._tubePoint(tube, s, a, Math.max(0.2, k), _h);
+      this.strands.set(sp.start + i, _h.x, _h.y + loose * 0.4 * s, _h.z);
     }
   }
 

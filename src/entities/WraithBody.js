@@ -210,6 +210,8 @@ export class Strands {
 
 const SHELL_VERT = /* glsl */ `
 attribute float glow;
+attribute float solid;
+varying float vSolid;
 uniform float uFogDensity;
 varying vec3 vN;
 varying vec3 vV;
@@ -222,6 +224,7 @@ void main() {
   vV = normalize(-mv.xyz);
   vUv = uv;
   vGlow = glow;
+  vSolid = solid;
   float depth = -mv.z;
   vFog = exp(-uFogDensity * uFogDensity * depth * depth) * smoothstep(0.15, 0.5, depth);
   gl_Position = projectionMatrix * mv;
@@ -248,6 +251,7 @@ varying vec3 vV;
 varying vec2 vUv;
 varying float vGlow;
 varying float vFog;
+varying float vSolid;
 ${NOISE}
 void main() {
   float ndv = abs(dot(normalize(vN), normalize(vV)));
@@ -255,7 +259,7 @@ void main() {
   float v = vUv.y;
   // No clean outline: the very edge fades out, and what glows near it is
   // streaks running along it (as wisps in the paint), not a line.
-  float edge = smoothstep(0.02, 0.32, ndv);
+  float edge = smoothstep(0.04, 0.42, ndv);
   float st = vnoise2(vec2(v * 34.0 + sin(u * 1.7 + uTime * 0.6) * 2.0, u * 0.7 - uTime * 0.75));
   st = st * 0.6 + vnoise2(vec2(v * 61.0 - uTime * 0.3, u * 1.6 - uTime * 1.1)) * 0.4;
   float streak = smoothstep(0.38, 0.82, st);
@@ -280,7 +284,7 @@ void main() {
   float dot2 = smoothstep(0.2, 0.0, length(fract(gp) - off));
   float g = step(0.965, hash2(gc + floor(uTime * 3.0 + h * 7.0))) * dot2;
   vec3 spark = mix(vec3(1.0), uGold, step(0.55, hash2(gc * 1.7))) * g * 1.6;
-  gl_FragColor = vec4((col * a * (1.0 + vGlow) + spark) * uFade * vFog, 1.0);
+  gl_FragColor = vec4((col * a * (1.0 + vGlow) * vSolid + spark) * uFade * vFog, 1.0);
 }`;
 
 const CORE_FRAG = /* glsl */ `
@@ -291,13 +295,63 @@ varying vec3 vN;
 varying vec3 vV;
 varying vec2 vUv;
 varying float vFog;
+varying float vSolid;
 ${NOISE}
 void main() {
   float ndv = abs(dot(normalize(vN), normalize(vV)));
   // Dark swirls through it, thickest through the middle.
   float n = vnoise2(vec2(vUv.y * 9.0 + sin(vUv.x * 1.7 + uTime * 0.4) * 2.0, vUv.x * 2.2 - uTime * 0.35));
-  float a = pow(ndv, 1.2) * (0.42 + 0.4 * n) * uFade * vFog;
+  float a = pow(ndv, 1.2) * (0.42 + 0.4 * n) * vSolid * uFade * vFog;
   gl_FragColor = vec4(uDark, a);
+}`;
+
+// Its wisps: shells round its flesh a little further out each (the same
+// tubes and skull drawn again, pushed out along their normals by `fur`),
+// each nothing but thin streaks running along it and trailing further back
+// the further out they are, seen only where you see it side-on. So its
+// edges are wisps coming off it, never a line.
+const FUR_VERT = /* glsl */ `
+attribute float fur;
+uniform float uOff;
+uniform float uFogDensity;
+varying vec3 vN;
+varying vec3 vV;
+varying vec2 vUv;
+varying float vFur;
+varying float vFog;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position + normal * uOff * fur, 1.0);
+  vN = normalize(normalMatrix * normal);
+  vV = normalize(-mv.xyz);
+  vUv = uv;
+  vFur = min(1.0, fur);
+  float depth = -mv.z;
+  vFog = exp(-uFogDensity * uFogDensity * depth * depth) * smoothstep(0.15, 0.5, depth);
+  gl_Position = projectionMatrix * mv;
+}`;
+
+const FUR_FRAG = /* glsl */ `
+uniform float uTime;
+uniform float uFade;
+uniform float uLayer;
+uniform vec3 uColor;
+varying vec3 vN;
+varying vec3 vV;
+varying vec2 vUv;
+varying float vFur;
+varying float vFog;
+${NOISE}
+void main() {
+  float ndv = abs(dot(normalize(vN), normalize(vV)));
+  float u = vUv.x;
+  float v = vUv.y;
+  float x = v * 40.0 + sin(u * 2.1 + uTime * 0.6 + uLayer) * 1.6;
+  float y = u * 1.5 - uTime * 0.85 - uLayer * 0.4;
+  float n = vnoise2(vec2(x, y)) * 0.62 + vnoise2(vec2(x * 2.3 + 5.0, y * 1.8 + 3.0)) * 0.38;
+  float wisp = smoothstep(0.56 + uLayer * 0.06, 0.93, n);
+  float side = pow(1.0 - ndv, 1.1);
+  float a = wisp * side * vFur * (0.85 - uLayer * 0.2);
+  gl_FragColor = vec4(uColor * a * uFade * vFog, 1.0);
 }`;
 
 // The shell and core materials, shared by its tubes and its skull.
@@ -326,7 +380,34 @@ export function fleshMaterials() {
     transparent: true,
     depthWrite: false,
   });
-  return { shell, core };
+  // Three layers of wisps, further out and sparser each.
+  const fur = [1, 2, 3].map(
+    (layer) =>
+      new THREE.ShaderMaterial({
+        uniforms: { uTime: shell.uniforms.uTime, uFade: shell.uniforms.uFade, uFogDensity: shell.uniforms.uFogDensity, uColor: { value: new THREE.Color(0.3, 0.95, 0.85) }, uLayer: { value: layer }, uOff: { value: [0.028, 0.058, 0.095][layer - 1] } },
+        vertexShader: FUR_VERT,
+        fragmentShader: FUR_FRAG,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+  );
+  return { shell, core, fur };
+}
+
+// Meshes drawing `geo` with each wisp layer.
+function furMeshes(geo, mats, like) {
+  return mats.fur.map((m) => {
+    const o = new THREE.Mesh(geo, m);
+    o.frustumCulled = false;
+    o.renderOrder = 10;
+    if (like) {
+      o.position.copy(like.position);
+      o.scale.copy(like.scale);
+    }
+    return o;
+  });
 }
 
 // `specs`: one per tube, { rings, sides, len: metres along it (for its
@@ -360,6 +441,8 @@ export class Tubes {
     const nrm = new Float32Array(verts * 3);
     const uv = new Float32Array(verts * 2);
     const glow = new Float32Array(verts);
+    const fur = new Float32Array(verts);
+    const solid = new Float32Array(verts);
     const index = [];
     for (const s of specs) {
       const n = s.sides + 1;
@@ -370,6 +453,10 @@ export class Tubes {
           uv[v * 2] = f * s.len;
           uv[v * 2 + 1] = k / s.sides;
           glow[v] = (s.tip || 0) * Math.max(0, (f - 0.55) / 0.45) ** 2;
+          // (Its wisps thin out toward a tube's end.)
+          fur[v] = (s.fur || 0) * (1 - 0.6 * f * f);
+          // (How much of it is a body at all: thin parts are mostly strands.)
+          solid[v] = s.solid ?? 1;
           if (i < s.rings - 1 && k < s.sides) {
             const a = v;
             const b = v + n;
@@ -385,10 +472,13 @@ export class Tubes {
     geo.setAttribute('normal', this.nrmAttr);
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setAttribute('glow', new THREE.BufferAttribute(glow, 1));
+    geo.setAttribute('fur', new THREE.BufferAttribute(fur, 1));
+    geo.setAttribute('solid', new THREE.BufferAttribute(solid, 1));
     geo.setIndex(index);
     this.geometry = geo;
     this.shell = new THREE.Mesh(geo, mats.shell);
     this.core = new THREE.Mesh(geo, mats.core);
+    this.fur = furMeshes(geo, mats);
     for (const m of [this.shell, this.core]) m.frustumCulled = false;
     this.shell.renderOrder = 10;
     this.core.renderOrder = 9;
@@ -517,6 +607,7 @@ export class Tubes {
 
 const FACE_VERT = /* glsl */ `
 uniform float uFogDensity;
+uniform float uAbs;
 varying vec2 vUv;
 varying float vFace;
 varying float vFog;
@@ -525,7 +616,9 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   // (How squarely the face looks at you, the card as a whole: seen from the
   // side, all of it fades, not just its edges.)
-  vFace = dot(normalize(normalMatrix * vec3(0.0, 0.0, 1.0)), normalize(-mv.xyz));
+  // (A profile card shows from either side: uAbs.)
+  float f = dot(normalize(normalMatrix * vec3(0.0, 0.0, 1.0)), normalize(-mv.xyz));
+  vFace = mix(f, abs(f), uAbs);
   float depth = -mv.z;
   vFog = exp(-uFogDensity * uFogDensity * depth * depth);
   gl_Position = projectionMatrix * mv;
@@ -536,12 +629,13 @@ uniform sampler2D map;
 uniform float uFade;
 uniform float uHeat;
 uniform float uOpacity;
+uniform vec2 uShow;
 varying vec2 vUv;
 varying float vFace;
 varying float vFog;
 void main() {
   vec4 c = texture2D(map, vUv);
-  float a = c.a * smoothstep(0.2, 0.6, vFace) * uFade * uOpacity;
+  float a = c.a * smoothstep(uShow.x, uShow.y, vFace) * uFade * uOpacity;
   vec3 col = mix(c.rgb, vec3(0.85, 1.0, 1.0), uHeat * 0.35 * step(0.3, c.g));
   gl_FragColor = vec4(mix(vec3(0.0), col, vFog), a * mix(0.4, 1.0, vFog));
 }`;
@@ -745,6 +839,158 @@ function skullJaw() {
   return tex;
 }
 
+// Its skull seen from the side, facing right (its face): the cranium
+// sweeping back with wisps streaming off it, a heavy brow over a dark
+// socket with the eye burning in it, the snout jutting forward with its
+// fangs, cheekbone back to the ear, and the dark of its mouth below (its
+// lower jaw is a card of its own, to drop). 256 x 204 over head space z
+// -0.34..0.24, y 0.24..-0.22.
+function skullProfile() {
+  const [cv, g] = canvas(256, 204);
+  const skull = new Path2D();
+  skull.moveTo(226, 74);
+  skull.bezierCurveTo(214, 22, 150, 10, 104, 16);
+  skull.bezierCurveTo(48, 22, 12, 60, 14, 100);
+  skull.bezierCurveTo(16, 132, 40, 150, 70, 150);
+  skull.lineTo(150, 150);
+  skull.lineTo(184, 150);
+  skull.bezierCurveTo(214, 150, 246, 150, 250, 132);
+  skull.bezierCurveTo(252, 118, 244, 96, 226, 74);
+  const fill = g.createRadialGradient(150, 86, 10, 150, 86, 126);
+  fill.addColorStop(0, 'rgba(80,200,186,0.36)');
+  fill.addColorStop(0.65, 'rgba(80,200,186,0.16)');
+  fill.addColorStop(1, 'rgba(80,200,186,0)');
+  g.fillStyle = fill;
+  g.fill(skull);
+  fibres(g, skull, 20, 245, 16, 150, 110);
+  // The dark of its mouth, under the fangs.
+  const m = g.createRadialGradient(208, 168, 4, 208, 168, 48);
+  m.addColorStop(0, 'rgba(0,4,8,0.95)');
+  m.addColorStop(0.7, 'rgba(0,6,10,0.7)');
+  m.addColorStop(1, 'rgba(0,8,12,0)');
+  g.fillStyle = m;
+  g.fillRect(150, 140, 106, 64);
+  // Hollow of the temple and the cheek.
+  for (const [x, y, r] of [
+    [150, 92, 30],
+    [180, 132, 18],
+  ]) {
+    const h = g.createRadialGradient(x, y, 2, x, y, r);
+    h.addColorStop(0, 'rgba(0,10,16,0.55)');
+    h.addColorStop(1, 'rgba(0,10,16,0)');
+    g.fillStyle = h;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // The socket, and the eye burning in it (slanted down to the snout).
+  g.save();
+  g.translate(214, 104);
+  g.rotate(0.3);
+  const so = g.createRadialGradient(0, 0, 3, 0, 0, 24);
+  so.addColorStop(0, 'rgba(0,5,10,0.97)');
+  so.addColorStop(0.7, 'rgba(0,8,14,0.85)');
+  so.addColorStop(1, 'rgba(0,10,16,0)');
+  g.fillStyle = so;
+  g.beginPath();
+  g.ellipse(0, 0, 24, 17, 0, 0, Math.PI * 2);
+  g.fill();
+  const e = g.createRadialGradient(3, 1, 1, 3, 1, 14);
+  e.addColorStop(0, 'rgba(255,255,255,1)');
+  e.addColorStop(0.45, 'rgba(215,252,255,0.95)');
+  e.addColorStop(1, 'rgba(90,225,255,0)');
+  g.fillStyle = e;
+  g.beginPath();
+  g.ellipse(3, 1, 14, 7, 0, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+  // The hole of the nose, near the end of the snout.
+  g.fillStyle = 'rgba(0,8,14,0.9)';
+  g.beginPath();
+  g.ellipse(241, 122, 5, 9, -0.4, 0, Math.PI * 2);
+  g.fill();
+  // Its lines, in strokes: crown and back of the skull, brow, the bridge of
+  // the snout, cheekbone, the line of the upper jaw.
+  sketch(g, bez([226, 74], [214, 22], [150, 10], [104, 16]), { n: 34, w: 5, a: 0.75, len: 22, jit: 5 });
+  sketch(g, bez([104, 16], [48, 22], [12, 60], [14, 100]), { n: 26, w: 4, a: 0.55, len: 22, jit: 6 });
+  sketch(g, bez([14, 100], [16, 132], [40, 150], [70, 150]), { n: 12, w: 3, a: 0.4, len: 16, jit: 5 });
+  sketch(g, bez([172, 82], [196, 76], [226, 76], [240, 92]), { n: 26, w: 6, a: 0.95, len: 16, jit: 2.5 });
+  sketch(g, bez([238, 90], [246, 104], [252, 120], [250, 136]), { n: 14, w: 4, a: 0.8, len: 12, jit: 2 });
+  sketch(g, bez([200, 124], [180, 122], [150, 120], [122, 124]), { n: 16, w: 4, a: 0.7, len: 16, jit: 3 });
+  sketch(g, bez([250, 140], [230, 150], [196, 152], [170, 150]), { n: 14, w: 3, a: 0.6, len: 14, jit: 2 });
+  // Wisps streaming off the back of its skull, up and back.
+  g.save();
+  g.lineCap = 'round';
+  g.shadowColor = 'rgba(70,255,220,0.8)';
+  g.shadowBlur = 5;
+  for (let k = 0; k < 40; k++) {
+    const t = Math.random();
+    const x = 20 + t * 150;
+    const y = 18 + (1 - t) * (1 - t) * 50 + Math.random() * 10;
+    const L = 30 + Math.random() * 60;
+    g.strokeStyle = `rgba(170,255,238,${0.15 + Math.random() * 0.45})`;
+    g.lineWidth = 1 + Math.random() * 2.5;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x - L * 0.45, y - L * 0.2 + (Math.random() - 0.5) * 12, x - L * 0.8, y - L * 0.55);
+    g.stroke();
+  }
+  g.restore();
+  // Upper teeth along the jaw line, a long fang near the front.
+  for (const [x, w, len] of [
+    [182, 9, 9],
+    [192, 9, 10],
+    [202, 10, 12],
+    [214, 10, 13],
+    [244, 9, 12],
+    [233, 13, 34],
+  ]) {
+    tooth(g, x, 150, w, len, 1);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// Its lower jaw from the side, facing right: from the hinge below its ear
+// down to the angle, forward to the chin, teeth along the top and a fang
+// near the front. 256 x 142 over jaw space z -0.06..0.30, y 0.04..-0.16.
+function jawProfile() {
+  const [cv, g] = canvas(256, 142);
+  const jaw = new Path2D();
+  jaw.moveTo(40, 22);
+  jaw.bezierCurveTo(40, 60, 46, 92, 60, 102);
+  jaw.bezierCurveTo(120, 104, 190, 100, 224, 92);
+  jaw.bezierCurveTo(234, 80, 232, 60, 224, 50);
+  jaw.lineTo(80, 50);
+  jaw.lineTo(66, 22);
+  jaw.closePath();
+  const fill = g.createRadialGradient(130, 76, 6, 130, 76, 110);
+  fill.addColorStop(0, 'rgba(80,200,186,0.34)');
+  fill.addColorStop(0.65, 'rgba(80,200,186,0.15)');
+  fill.addColorStop(1, 'rgba(80,200,186,0)');
+  g.fillStyle = fill;
+  g.fill(jaw);
+  fibres(g, jaw, 40, 232, 22, 104, 50);
+  sketch(g, bez([40, 22], [40, 60], [46, 92], [60, 102]), { n: 14, w: 4, a: 0.6, len: 14, jit: 3 });
+  sketch(g, bez([60, 102], [120, 104], [190, 100], [224, 92]), { n: 22, w: 4, a: 0.7, len: 18, jit: 3 });
+  sketch(g, bez([224, 92], [234, 80], [232, 60], [224, 50]), { n: 10, w: 4, a: 0.7, len: 12, jit: 2 });
+  sketch(g, bez([80, 50], [130, 52], [180, 52], [224, 50]), { n: 14, w: 3, a: 0.5, len: 14, jit: 2 });
+  for (const [x, w, len] of [
+    [96, 8, 8],
+    [110, 8, 9],
+    [124, 9, 10],
+    [138, 9, 10],
+    [152, 9, 11],
+    [166, 9, 11],
+    [214, 8, 10],
+    [198, 12, 26],
+  ]) {
+    tooth(g, x, 50, w, len, -1);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  return tex;
+}
+
 function darkMouth() {
   const [cv, g] = canvas(128, 128);
   const m = g.createRadialGradient(64, 64, 6, 64, 64, 62);
@@ -756,13 +1002,15 @@ function darkMouth() {
   return new THREE.CanvasTexture(cv);
 }
 
-function faceMaterial(map, fog) {
+// `profile`: a card seen side-on (from either side), not from the front.
+function faceMaterial(map, fog, profile = false) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: map }, uFade: { value: 1 }, uHeat: { value: 0 }, uOpacity: { value: 1 }, uFogDensity: fog },
+    uniforms: { map: { value: map }, uFade: { value: 1 }, uHeat: { value: 0 }, uOpacity: { value: 1 }, uFogDensity: fog, uAbs: { value: profile ? 1 : 0 }, uShow: { value: profile ? new THREE.Vector2(0.5, 0.88) : new THREE.Vector2(0.42, 0.78) } },
     vertexShader: FACE_VERT,
     fragmentShader: FACE_FRAG,
     transparent: true,
     depthWrite: false,
+    side: profile ? THREE.DoubleSide : THREE.FrontSide,
   });
 }
 
@@ -797,6 +1045,10 @@ export function buildHead(mats) {
   }
   sphere.computeVertexNormals();
   sphere.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(sphere.attributes.position.count), 1));
+  // (Its wisps reach as far off its skull as off its body: the skull is
+  // drawn some six times smaller than a metre.)
+  sphere.setAttribute('fur', new THREE.BufferAttribute(new Float32Array(sphere.attributes.position.count).fill(5), 1));
+  sphere.setAttribute('solid', new THREE.BufferAttribute(new Float32Array(sphere.attributes.position.count).fill(0.85), 1));
   // (Its skull is the shell alone: with the dark core too, seen from the
   // side it read as a helmet.)
   const skull = new THREE.Mesh(sphere, mats.shell);
@@ -816,6 +1068,18 @@ export function buildHead(mats) {
   jawCard.position.z = 0.02;
   jawCard.renderOrder = 12;
   jaw.add(jawCard);
-  group.add(skull, mouth, face, jaw);
-  return { group, face, jaw, jawCard, mouth, sphere };
+  // Seen from the side: its profile, and its lower jaw hinged below the ear.
+  const profile = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.46), faceMaterial(skullProfile(), fog, true));
+  profile.rotation.y = -Math.PI / 2;
+  profile.position.set(0, 0.01, -0.05);
+  profile.renderOrder = 12;
+  const jawSide = new THREE.Group();
+  jawSide.position.set(0, -0.07, -0.06);
+  const jawProfileCard = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.2), faceMaterial(jawProfile(), fog, true));
+  jawProfileCard.rotation.y = -Math.PI / 2;
+  jawProfileCard.position.set(0, -0.06, 0.12);
+  jawProfileCard.renderOrder = 12;
+  jawSide.add(jawProfileCard);
+  group.add(skull, ...furMeshes(sphere, mats, skull), mouth, face, jaw, profile, jawSide);
+  return { group, face, jaw, jawCard, mouth, sphere, profile, jawSide, jawProfileCard };
 }
