@@ -47,10 +47,13 @@ const GOLD_DIM = new THREE.Color(0.5, 0.22, 0.04);
 const VIOLET = new THREE.Color(0.8, 0.55, 1.3);
 const WHITE = new THREE.Color(1, 1, 1);
 const MIST = new THREE.Color(0.2, 0.4, 0.4);
+const ASH = new THREE.Color(0.01, 0.02, 0.03);
 const _p = new THREE.Vector3();
 const _q = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _h = new THREE.Vector3();
+const _f0 = new THREE.Vector3();
+const _f1 = new THREE.Vector3();
 // Its right claw raised up and back for a swipe.
 const SWIPE_UP = new THREE.Vector3(-0.95, 2.6, -0.25);
 
@@ -59,6 +62,13 @@ const FIBRE = 0;
 const HAIR = 1;
 const RIB = 2;
 const TENDRIL = 3;
+const FRAY = 4;
+// What a fraying wisp grows from (its spine and tail, its shoulders, an
+// arm, its skull).
+const ON_SPINE = 0;
+const ON_YOKE = 1;
+const ON_ARM = 2;
+const ON_HEAD = 3;
 // Its tubes: spine and tail, its shoulders, two arms, two palms, then five
 // fingers a hand (the fifth the thumb).
 const SPINE = 0;
@@ -162,6 +172,28 @@ function strandSpecs() {
   for (let j = 0; j < 4; j++) S.push({ kind: HAIR, n: 14, w0: 0.26, w1: 0.06, a: 0.12, tone: TONE_GLOW, seed: r(), lat: rand(-0.6, 0.6), up: 0.5, back: 0.7, len: 0.9, ...weave() });
   // Ribs.
   for (const side of [1, -1]) for (let row = 0; row < 4; row++) S.push({ kind: RIB, side, row, n: 10, w0: 0.024, w1: 0.012, a: 0.6, tone: TONE_TEAL, seed: r() });
+  // Wisps fraying off it everywhere, so no edge of it is a clean line: off
+  // its body and tail, its shoulders, its arms and its skull.
+  const fray = (on, extra, n) => {
+    for (let j = 0; j < n; j++) S.push({ kind: FRAY, on, n: 6, w0: rand(0.014, 0.024), w1: 0.002, a: rand(0.35, 0.75), tone: r() < 0.1 ? TONE_GOLD : TONE_TEAL, seed: r(), s: 0.03 + 0.94 * r(), ang: r() * Math.PI * 2, len: rand(0.1, 0.28), ...weave(), ...extra() });
+  };
+  fray(ON_SPINE, () => ({}), 170);
+  fray(ON_YOKE, () => ({}), 18);
+  fray(ON_ARM, () => ({ hand: 0, len: rand(0.08, 0.2) }), 40);
+  fray(ON_ARM, () => ({ hand: 1, len: rand(0.08, 0.2) }), 40);
+  fray(ON_HEAD, () => {
+    // (Over its crown, sides and back, not its face.)
+    let x;
+    let y;
+    let z;
+    do {
+      x = rand(-1, 1);
+      y = rand(-0.5, 1);
+      z = rand(-1, 0.6);
+    } while (Math.hypot(x, y, z) > 1 || Math.hypot(x, y, z) < 0.3 || (z > 0.2 && y < 0.5));
+    const l = Math.hypot(x, y, z);
+    return { dx: x / l, dy: y / l, dz: z / l };
+  }, 40);
   // Tendrils trailing from the arms.
   for (const hand of [0, 1]) {
     const side = hand === 0 ? 1 : -1;
@@ -173,7 +205,7 @@ function strandSpecs() {
 // Its tubes (see SPINE and the rest).
 function tubeSpecs() {
   const T = [{ rings: SPINE_RINGS, sides: 14, len: 4, wob: 0.2 }, { rings: 11, sides: 10, len: 0.9, wob: 0.14 }];
-  for (let h = 0; h < 2; h++) T.push({ rings: 18, sides: 9, len: 1.2, wob: 0.12 });
+  for (let h = 0; h < 2; h++) T.push({ rings: 22, sides: 9, len: 1.2, wob: 0.26 });
   for (let h = 0; h < 2; h++) T.push({ rings: 4, sides: 8, len: 0.12 });
   for (let h = 0; h < 2; h++) for (let f = 0; f < 5; f++) T.push({ rings: 7, sides: 6, len: 0.25, tip: 0.9 });
   return T;
@@ -232,6 +264,8 @@ export class Wraith extends Enemy {
     this.t = 0;
     this._cy = 1;
     this._sy = 0;
+    this._dlx = 0;
+    this._dlz = 0;
     this.tubes = this.model.tubes;
     this.strands = this.model.strands;
     this.head = this.model.head;
@@ -925,7 +959,8 @@ export class Wraith extends Enemy {
         _p.y += 2 * (1 - b) * b * A[4];
         _p.z += 2 * (1 - b) * b * A[5];
       } else this._armPoint(A, u, _p);
-      const r = (u < 0.5 ? 0.1 + (0.06 - 0.1) * u * 2 : 0.06 + (0.04 - 0.06) * (u * 2 - 1)) + 0.012 * Math.exp(-(((u - 0.5) / 0.06) ** 2));
+      // (Bony: knobbed at the elbow and wrist, wasted between.)
+      const r = (u < 0.5 ? 0.095 + (0.052 - 0.095) * u * 2 : 0.052 + (0.034 - 0.052) * (u * 2 - 1)) + 0.016 * Math.exp(-(((u - 0.5) / 0.06) ** 2)) + 0.01 * Math.exp(-(((u - 0.97) / 0.04) ** 2));
       this._lag(_p.x, _p.y, _p.z, 0.02 + 0.05 * u, _t);
       T.ring(arm, i, _t.x, _t.y, _t.z, r * swell, r * swell);
     }
@@ -1004,10 +1039,16 @@ export class Wraith extends Enemy {
 
   _layStrands(t) {
     const loose = 1 - this.fade;
+    // Its flight, in its own space (what trails bends away from it).
+    const dvx = Math.max(-12, Math.min(12, this.drift.x));
+    const dvz = Math.max(-12, Math.min(12, this.drift.z));
+    this._dlx = dvx * this._cy - dvz * this._sy;
+    this._dlz = dvx * this._sy + dvz * this._cy;
     for (const sp of this.strands.specs) {
       if (sp.kind === FIBRE) this._fibre(sp, t, loose);
       else if (sp.kind === HAIR) this._hair(sp, t, loose);
       else if (sp.kind === RIB) this._rib(sp);
+      else if (sp.kind === FRAY) this._fray(sp, t, loose);
       else this._tendril(sp, t, loose);
     }
   }
@@ -1034,6 +1075,51 @@ export class Wraith extends Enemy {
       const k = sp.k + 0.12 * Math.sin(s * sp.f2 + sp.p2 - t * 1.1) + loose;
       this._spinePoint(s, a, k, sp.peel * smooth(0.7, 1, s), _h);
       this.strands.set(sp.start + i, _h.x, _h.y + loose * 0.6 * s, _h.z);
+    }
+  }
+
+  // A point on tube `tube`'s surface at `s` along it, `a` round it, `k`
+  // times out, into `out`.
+  _tubePoint(tube, s, a, k, out) {
+    const T = this.tubes;
+    const sp = T.specs[tube];
+    const r = s * (sp.rings - 1);
+    const i0 = Math.min(sp.rings - 2, r | 0);
+    const ring = sp.ring0 + i0;
+    T.surface(ring, a, k, _p);
+    T.surface(ring + 1, a, k, _q);
+    return out.copy(_p).lerp(_q, r - i0);
+  }
+
+  // A wisp fraying off it: out of its surface, bending up and back (and
+  // away from where it is going), rippling, longer where it is thicker.
+  _fray(sp, t, loose) {
+    let r;
+    if (sp.on === ON_HEAD) {
+      const m = this.head.group.matrix;
+      _f0.set(sp.dx * 0.13, 0.04 + sp.dy * 0.16, -0.07 + sp.dz * 0.23).applyMatrix4(m);
+      _f1.set(sp.dx * 0.2, 0.04 + sp.dy * 0.245, -0.07 + sp.dz * 0.35).applyMatrix4(m);
+      r = 0.25;
+    } else {
+      const tube = sp.on === ON_SPINE ? SPINE : sp.on === ON_YOKE ? YOKE : ARM + sp.hand;
+      const a = sp.ang + 0.25 * Math.sin(t * 0.8 + sp.p1);
+      this._tubePoint(tube, sp.s, a, 0.9, _f0);
+      this._tubePoint(tube, sp.s, a, 1.5, _f1);
+      r = _f0.distanceTo(_f1) / 0.6;
+    }
+    let dx = _f1.x - _f0.x;
+    let dy = _f1.y - _f0.y;
+    let dz = _f1.z - _f0.z;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    // Out of it, bent up and back, and away from its flight.
+    dx = (dx / dl) * 0.75 - this._dlx * 0.05;
+    dy = (dy / dl) * 0.75 + 0.3;
+    dz = (dz / dl) * 0.75 - 0.35 - this._dlz * 0.05;
+    const L = sp.len * (0.45 + 2.2 * Math.min(0.32, r)) * (1 + loose);
+    for (let i = 0; i < sp.n; i++) {
+      const w = i / (sp.n - 1);
+      const rip = L * w * 0.35;
+      this.strands.set(sp.start + i, _f0.x + dx * L * w + rip * Math.sin(w * sp.f1 - t * 4 + sp.p1), _f0.y + dy * L * w + 0.25 * L * w * w + rip * 0.6 * Math.sin(w * sp.f2 - t * 3.3 + sp.p2), _f0.z + dz * L * w + rip * Math.cos(w * sp.f1 - t * 3.6 + sp.p2));
     }
   }
 
@@ -1128,7 +1214,7 @@ export class Wraith extends Enemy {
       let color;
       let end;
       if (Math.random() < 0.7) {
-        const s = this._onBody(0.12, rand(0.5, 1.05), _p);
+        const s = this._onBody(0.12, rand(0.7, 1.4), _p);
         const r = Math.random();
         color = s > 0.3 && r < 0.35 ? GOLD : s > 0.3 && r < 0.5 ? VIOLET : r < 0.75 ? WHITE : TEAL_HOT;
         end = color === GOLD ? GOLD_DIM : TEAL;
@@ -1140,6 +1226,16 @@ export class Wraith extends Enemy {
         end = gold ? GOLD_DIM : TEAL;
       }
       put(add, _p, dvx * 0.6 + rand(-0.25, 0.25), rand(-0.05, 0.3), dvz * 0.6 + rand(-0.25, 0.25), rand(0.35, 0.8), rand(0.02, 0.036), 0.008, color, end, 1, 0.8, 1.2);
+    }
+    // Fine wisps streaming off its edges.
+    for (let i = this._n('edge', 70 * fade, dt); i > 0; i--) {
+      this._onBody(0.05, rand(1.0, 1.3), _p);
+      put(add, _p, dvx * 0.4 + rand(-0.3, 0.3), rand(0.1, 0.45), dvz * 0.4 + rand(-0.3, 0.3), rand(0.4, 0.8), rand(0.03, 0.05), 0.07, TEAL, TEAL_DEEP, 0.55, 1, 2);
+    }
+    // Dark flakes of ash torn off its tail.
+    for (let i = this._n('ash', 22 * fade, dt); i > 0; i--) {
+      this._onBody(0.35, rand(1.0, 1.3), _p);
+      put(ctx.fx.alpha, _p, dvx * 0.4 + rand(-0.8, 0.8), rand(0.2, 1.0), dvz * 0.4 + rand(-0.8, 0.8), rand(0.9, 1.6), rand(0.035, 0.06), 0.02, ASH, ASH, 0.85, 0.6, 2.5);
     }
     // A low mist rolling off its tail.
     for (let i = this._n('mist', 5 * fade, dt); i > 0; i--) {

@@ -251,9 +251,15 @@ varying float vFog;
 ${NOISE}
 void main() {
   float ndv = abs(dot(normalize(vN), normalize(vV)));
-  float rim = pow(1.0 - ndv, 2.2);
   float u = vUv.x;
   float v = vUv.y;
+  // No clean outline: the very edge fades out, and what glows near it is
+  // streaks running along it (as wisps in the paint), not a line.
+  float edge = smoothstep(0.02, 0.32, ndv);
+  float st = vnoise2(vec2(v * 34.0 + sin(u * 1.7 + uTime * 0.6) * 2.0, u * 0.7 - uTime * 0.75));
+  st = st * 0.6 + vnoise2(vec2(v * 61.0 - uTime * 0.3, u * 1.6 - uTime * 1.1)) * 0.4;
+  float streak = smoothstep(0.38, 0.82, st);
+  float rim = pow(1.0 - ndv, 1.7) * edge * 1.7;
   // Smoke drifting through it: where it is thin, even its edge breaks up,
   // so its outline is ragged, not a clean line.
   float sm = vnoise2(vec2(v * 7.0 + sin(u * 1.3 + uTime * 0.5) * 1.2, u * 1.1 - uTime * 0.45));
@@ -264,8 +270,8 @@ void main() {
   float fib = smoothstep(0.55, 0.92, vnoise2(vec2(vw, u * 1.3 - uTime * 0.55)));
   float fib2 = smoothstep(0.66, 0.96, vnoise2(vec2(v * 47.0 - u * 0.8, u * 2.4 - uTime * 0.9)));
   float flow = 0.5 + 0.5 * sin(u * 5.0 - uTime * 2.2 + v * 12.566);
-  float a = rim * (0.1 + 0.8 * smoke) + (fib * 0.65 + fib2 * 0.45) * (0.25 + 0.75 * rim) * (0.3 + 0.7 * flow) * (0.25 + 0.75 * smoke) + 0.004;
-  vec3 col = mix(uColor, uHot, clamp(rim * smoke * 0.55 + fib * 0.3 + vGlow + uHeat, 0.0, 1.0));
+  float a = rim * (0.08 + 1.1 * streak * (0.4 + 0.6 * smoke)) + (fib * 0.65 + fib2 * 0.45) * (0.25 + 0.75 * rim) * (0.3 + 0.7 * flow) * (0.25 + 0.75 * smoke) * edge + 0.004;
+  vec3 col = mix(uColor, uHot, clamp(rim * streak * 0.6 + fib * 0.3 + vGlow + uHeat, 0.0, 1.0));
   // Glitter caught in it, white and gold, winking: round specks.
   vec2 gp = vec2(u * 30.0, v * 40.0);
   vec2 gc = floor(gp);
@@ -463,7 +469,7 @@ export class Tubes {
         const v = (s.vert0 + i * n + k) * 3;
         // (The seam's last vertex is its first: the same ripple.)
         const kk = k % s.sides;
-        const w = wob ? 1 + wob * (Math.sin(kk * 2.3 + i * 0.71 + t * 2.1) * 0.6 + Math.sin(kk * 5.1 - i * 1.37 + t * 3.3) * 0.4) : 1;
+        const w = wob ? 1 + wob * (Math.sin(kk * 2.3 + i * 0.71 + t * 2.1) * 0.5 + Math.sin(kk * 5.1 - i * 1.37 + t * 3.3) * 0.35 + Math.sin(kk * 9.7 + i * 2.9 - t * 4.7) * 0.3) : 1;
         pos[v] = cx + (px * co * ra + bx * si * rb) * w;
         pos[v + 1] = cy + (py * co * ra + by * si * rb) * w;
         pos[v + 2] = cz + (pz * co * ra + bz * si * rb) * w;
@@ -517,7 +523,9 @@ varying float vFog;
 void main() {
   vUv = uv;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vFace = dot(normalize(normalMatrix * normal), normalize(-mv.xyz));
+  // (How squarely the face looks at you, the card as a whole: seen from the
+  // side, all of it fades, not just its edges.)
+  vFace = dot(normalize(normalMatrix * vec3(0.0, 0.0, 1.0)), normalize(-mv.xyz));
   float depth = -mv.z;
   vFog = exp(-uFogDensity * uFogDensity * depth * depth);
   gl_Position = projectionMatrix * mv;
@@ -533,7 +541,7 @@ varying float vFace;
 varying float vFog;
 void main() {
   vec4 c = texture2D(map, vUv);
-  float a = c.a * smoothstep(0.06, 0.42, vFace) * uFade * uOpacity;
+  float a = c.a * smoothstep(0.2, 0.6, vFace) * uFade * uOpacity;
   vec3 col = mix(c.rgb, vec3(0.85, 1.0, 1.0), uHeat * 0.35 * step(0.3, c.g));
   gl_FragColor = vec4(mix(vec3(0.0), col, vFog), a * mix(0.4, 1.0, vFog));
 }`;
@@ -562,35 +570,86 @@ function tooth(g, x, y, w, len, dir) {
   g.stroke();
 }
 
-function glowStroke(g, width, alpha, draw) {
+// Points along a cubic curve.
+function bez(p0, p1, p2, p3, n = 24) {
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const v = 1 - t;
+    out.push([v * v * v * p0[0] + 3 * v * v * t * p1[0] + 3 * v * t * t * p2[0] + t * t * t * p3[0], v * v * v * p0[1] + 3 * v * v * t * p1[1] + 3 * v * t * t * p2[1] + t * t * t * p3[1]]);
+  }
+  return out;
+}
+
+// A line drawn as the painting draws its edges: many short glowing
+// strokes laid along it, jittered and of every strength, never one clean
+// line.
+function sketch(g, pts, { n = 30, w = 4, a = 0.8, len = 16, jit = 3 } = {}) {
   g.save();
   g.lineCap = 'round';
-  g.lineJoin = 'round';
-  g.shadowColor = 'rgba(70,255,220,0.9)';
-  g.shadowBlur = 10;
-  g.strokeStyle = `rgba(170,255,238,${alpha})`;
-  g.lineWidth = width;
-  g.beginPath();
-  draw();
-  g.stroke();
+  g.shadowColor = 'rgba(70,255,220,0.8)';
+  g.shadowBlur = 6;
+  for (let k = 0; k < n; k++) {
+    const f = Math.random() * (pts.length - 1);
+    const i = Math.min(pts.length - 2, f | 0);
+    const q = f - i;
+    const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * q;
+    const y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * q;
+    let tx = pts[i + 1][0] - pts[i][0];
+    let ty = pts[i + 1][1] - pts[i][1];
+    const tl = Math.hypot(tx, ty) || 1;
+    tx /= tl;
+    ty /= tl;
+    const L = len * (0.5 + Math.random() * 0.8);
+    const ox = (Math.random() - 0.5) * 2 * jit;
+    const oy = (Math.random() - 0.5) * 2 * jit;
+    const bend = (Math.random() - 0.5) * L * 0.5;
+    g.strokeStyle = `rgba(170,255,238,${a * (0.35 + 0.65 * Math.random())})`;
+    g.lineWidth = w * (0.35 + 0.65 * Math.random());
+    g.beginPath();
+    g.moveTo(x + ox - (tx * L) / 2, y + oy - (ty * L) / 2);
+    g.quadraticCurveTo(x + ox - ty * bend, y + oy + tx * bend, x + ox + (tx * L) / 2, y + oy + (ty * L) / 2);
+    g.stroke();
+  }
+  g.restore();
+}
+
+// Faint fibres down a face, inside `clip`.
+function fibres(g, clip, x0, x1, y0, y1, n) {
+  g.save();
+  g.clip(clip);
+  g.lineCap = 'round';
+  for (let k = 0; k < n; k++) {
+    const x = x0 + Math.random() * (x1 - x0);
+    const y = y0 + Math.random() * (y1 - y0);
+    const L = 10 + Math.random() * 26;
+    g.strokeStyle = `rgba(150,240,225,${0.08 + Math.random() * 0.18})`;
+    g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.quadraticCurveTo(x + (Math.random() - 0.5) * 8, y + L * 0.5, x + (Math.random() - 0.5) * 10, y + L);
+    g.stroke();
+  }
   g.restore();
 }
 
 function skullFace() {
   const [cv, g] = canvas(256, 256);
   const cx = 128;
-  // The bone of the face, faint.
+  // The bone of the face, faint, fading out before its edge (no outline).
   const face = new Path2D();
   face.moveTo(cx - 112, 52);
   face.bezierCurveTo(cx - 120, 112, cx - 98, 150, cx - 62, 184);
   face.lineTo(cx + 62, 184);
   face.bezierCurveTo(cx + 98, 150, cx + 120, 112, cx + 112, 52);
   face.bezierCurveTo(cx + 60, 28, cx - 60, 28, cx - 112, 52);
-  const fill = g.createRadialGradient(cx, 112, 10, cx, 112, 135);
-  fill.addColorStop(0, 'rgba(80,200,186,0.42)');
-  fill.addColorStop(1, 'rgba(80,200,186,0.06)');
+  const fill = g.createRadialGradient(cx, 112, 10, cx, 112, 118);
+  fill.addColorStop(0, 'rgba(80,200,186,0.4)');
+  fill.addColorStop(0.6, 'rgba(80,200,186,0.2)');
+  fill.addColorStop(1, 'rgba(80,200,186,0)');
   g.fillStyle = fill;
   g.fill(face);
+  fibres(g, face, cx - 110, cx + 110, 30, 170, 90);
   // Hollows under the cheekbones.
   for (const s of [-1, 1]) {
     const h = g.createRadialGradient(cx + s * 70, 158, 2, cx + s * 70, 158, 30);
@@ -632,35 +691,22 @@ function skullFace() {
   g.bezierCurveTo(cx + 16, 148, cx + 6, 134, cx, 124);
   g.fillStyle = 'rgba(0,8,14,0.93)';
   g.fill();
-  // Brow, cheekbones and the line of the face.
+  // Brow, cheekbones and the line of the face, in strokes.
   for (const s of [-1, 1]) {
-    glowStroke(g, 8, 0.95, () => {
-      g.moveTo(cx + s * 96, 62);
-      g.quadraticCurveTo(cx + s * 58, 64, cx + s * 16, 88);
-    });
-    glowStroke(g, 5, 0.75, () => {
-      g.moveTo(cx + s * 70, 126);
-      g.quadraticCurveTo(cx + s * 92, 150, cx + s * 62, 180);
-    });
-    glowStroke(g, 4, 0.65, () => {
-      g.moveTo(cx + s * 112, 54);
-      g.bezierCurveTo(cx + s * 120, 112, cx + s * 98, 150, cx + s * 62, 184);
-    });
+    const X = (x) => cx + s * x;
+    sketch(g, bez([X(98), 60], [X(76), 58], [X(44), 66], [X(14), 90]), { n: 26, w: 6, a: 0.95, len: 18, jit: 2.5 });
+    sketch(g, bez([X(70), 124], [X(84), 136], [X(92), 156], [X(62), 182]), { n: 14, w: 4, a: 0.7, len: 14, jit: 3 });
+    sketch(g, bez([X(112), 54], [X(120), 112], [X(98), 150], [X(62), 184]), { n: 22, w: 4, a: 0.55, len: 18, jit: 5 });
   }
-  glowStroke(g, 3, 0.6, () => {
-    g.moveTo(cx - 62, 183);
-    g.lineTo(cx + 62, 183);
-  });
+  sketch(g, bez([cx - 62, 183], [cx - 20, 185], [cx + 20, 185], [cx + 62, 183]), { n: 12, w: 3, a: 0.5, len: 14, jit: 2 });
   // Upper teeth, the fangs long.
   for (const [x, w, len] of [
-    [0, 0, 0],
     [6, 11, 18],
     [18, 11, 17],
     [34, 15, 52],
     [46, 11, 15],
     [56, 10, 11],
   ]) {
-    if (!w) continue;
     for (const s of [-1, 1]) tooth(g, cx + s * x, 184, w, len, 1);
   }
   const tex = new THREE.CanvasTexture(cv);
@@ -676,20 +722,15 @@ function skullJaw() {
   jaw.bezierCurveTo(cx - 68, 64, cx - 42, 112, cx, 118);
   jaw.bezierCurveTo(cx + 42, 112, cx + 68, 64, cx + 64, 4);
   jaw.closePath();
-  const fill = g.createRadialGradient(cx, 60, 6, cx, 60, 80);
-  fill.addColorStop(0, 'rgba(80,200,186,0.36)');
-  fill.addColorStop(1, 'rgba(80,200,186,0.08)');
+  const fill = g.createRadialGradient(cx, 50, 6, cx, 50, 74);
+  fill.addColorStop(0, 'rgba(80,200,186,0.34)');
+  fill.addColorStop(0.6, 'rgba(80,200,186,0.16)');
+  fill.addColorStop(1, 'rgba(80,200,186,0)');
   g.fillStyle = fill;
   g.fill(jaw);
-  glowStroke(g, 4, 0.7, () => {
-    g.moveTo(cx - 64, 4);
-    g.bezierCurveTo(cx - 68, 64, cx - 42, 112, cx, 118);
-    g.bezierCurveTo(cx + 42, 112, cx + 68, 64, cx + 64, 4);
-  });
-  glowStroke(g, 3, 0.55, () => {
-    g.moveTo(cx - 56, 46);
-    g.lineTo(cx + 56, 46);
-  });
+  fibres(g, jaw, cx - 64, cx + 64, 0, 100, 40);
+  for (const s of [-1, 1]) sketch(g, bez([cx + s * 64, 4], [cx + s * 68, 64], [cx + s * 42, 112], [cx, 118]), { n: 20, w: 4, a: 0.6, len: 16, jit: 4 });
+  sketch(g, bez([cx - 56, 46], [cx - 20, 48], [cx + 20, 48], [cx + 56, 46]), { n: 10, w: 3, a: 0.5, len: 14, jit: 2 });
   for (const [x, w, len] of [
     [6, 10, 14],
     [16, 10, 15],
@@ -743,7 +784,18 @@ function card(w, h, bend, hinge) {
 // and mouth cards on it. Head space: its middle at the origin, facing +z.
 export function buildHead(mats) {
   const group = new THREE.Group();
-  const sphere = new THREE.SphereGeometry(1, 20, 14);
+  // A skull, not a ball: lumped and hollowed (by where each point is, so
+  // the seam's twin points move alike), its brow standing out.
+  const sphere = new THREE.SphereGeometry(1, 24, 16);
+  const sp = sphere.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    const x = sp.getX(i);
+    const y = sp.getY(i);
+    const z = sp.getZ(i);
+    const k = 1 + 0.07 * Math.sin(x * 9.1 + 1.3) * Math.sin(y * 7.3 + 0.4) + 0.05 * Math.sin(z * 11.7 + y * 5.1) + 0.06 * Math.max(0, z) * Math.max(0, y - 0.1) - 0.08 * Math.max(0, z - 0.3) * Math.max(0, -y);
+    sp.setXYZ(i, x * k, y * k, z * k);
+  }
+  sphere.computeVertexNormals();
   sphere.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(sphere.attributes.position.count), 1));
   // (Its skull is the shell alone: with the dark core too, seen from the
   // side it read as a helmet.)
