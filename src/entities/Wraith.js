@@ -3,7 +3,7 @@ import { Enemy } from './Enemy.js';
 import { Hurtbox } from '../physics/Hitbox.js';
 import { softDotTexture } from '../world/Textures.js';
 import { rand } from '../core/rng.js';
-import { Strands, Tubes, fleshMaterials, buildHead, TONE_TEAL, TONE_GOLD, TONE_GLOW } from './WraithBody.js';
+import { Strands, Tubes, fleshMaterials, buildHead, TONE_TEAL, TONE_GOLD, TONE_GLOW, PAINT_LIGHT, PAINT_MID, PAINT_DARK, PAINT_BRIGHT } from './WraithBody.js';
 
 // The Grave Wraith: a ghoul with no body at all, only light (WraithBody.js).
 // Its flesh is glowing tubes laid afresh every frame, bright at their edges
@@ -166,22 +166,22 @@ function strandSpecs() {
   const S = [];
   const weave = () => ({ f1: rand(3, 7), f2: rand(5, 11), p1: r() * 6.3, p2: r() * 6.3 });
   // Fibres over its body, down into the tail; some come away near its end.
-  for (let j = 0; j < 44; j++) S.push({ kind: FIBRE, n: 34, w0: rand(0.012, 0.026), w1: 0.004, a: rand(0.3, 0.7), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.92, 1.25), twist: rand(1.5, 3.2), peel: r() < 0.4 ? rand(0.1, 0.45) : 0, ...weave() });
-  for (let j = 0; j < 5; j++) S.push({ kind: FIBRE, n: 24, w0: rand(0.24, 0.32), w1: 0.06, a: 0.12, tone: TONE_GLOW, seed: r(), phi: r() * Math.PI * 2, k: rand(0.2, 0.5), twist: 2, peel: 0, ...weave() });
+  for (let j = 0; j < 16; j++) S.push({ kind: FIBRE, n: 34, w0: rand(0.01, 0.018), w1: 0.003, a: rand(0.15, 0.35), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.92, 1.25), twist: rand(1.5, 3.2), peel: r() < 0.4 ? rand(0.1, 0.45) : 0, ...weave() });
+  for (let j = 0; j < 4; j++) S.push({ kind: FIBRE, n: 24, w0: rand(0.24, 0.32), w1: 0.06, a: 0.06, tone: TONE_GLOW, seed: r(), phi: r() * Math.PI * 2, k: rand(0.2, 0.5), twist: 2, peel: 0, ...weave() });
   // Hair, off the crown and the back of the skull, streaming up and back.
-  for (let j = 0; j < 36; j++) S.push({ kind: HAIR, n: 20, w0: rand(0.016, 0.034), w1: 0.004, a: rand(0.35, 0.8), tone: r() < 0.12 ? TONE_GOLD : TONE_TEAL, seed: r(), lat: rand(-1, 1), up: rand(0.1, 0.9), back: rand(0.3, 1), len: rand(0.5, 1.15), ...weave() });
-  for (let j = 0; j < 4; j++) S.push({ kind: HAIR, n: 14, w0: 0.26, w1: 0.06, a: 0.12, tone: TONE_GLOW, seed: r(), lat: rand(-0.6, 0.6), up: 0.5, back: 0.7, len: 0.9, ...weave() });
+  for (let j = 0; j < 18; j++) S.push({ kind: HAIR, n: 20, w0: rand(0.01, 0.02), w1: 0.003, a: rand(0.2, 0.45), tone: r() < 0.12 ? TONE_GOLD : TONE_TEAL, seed: r(), lat: rand(-1, 1), up: rand(0.1, 0.9), back: rand(0.3, 1), len: rand(0.5, 1.15), ...weave() });
+  for (let j = 0; j < 2; j++) S.push({ kind: HAIR, n: 14, w0: 0.26, w1: 0.06, a: 0.06, tone: TONE_GLOW, seed: r(), lat: rand(-0.6, 0.6), up: 0.5, back: 0.7, len: 0.9, ...weave() });
   // Ribs.
-  for (const side of [1, -1]) for (let row = 0; row < 4; row++) S.push({ kind: RIB, side, row, n: 10, w0: 0.024, w1: 0.012, a: 0.6, tone: TONE_TEAL, seed: r() });
+  for (const side of [1, -1]) for (let row = 0; row < 4; row++) S.push({ kind: RIB, side, row, n: 10, w0: 0.02, w1: 0.01, a: 0.3, tone: TONE_TEAL, seed: r() });
   // Wisps fraying off it everywhere, so no edge of it is a clean line: off
   // its body and tail, its shoulders, its arms and its skull.
   const fray = (on, extra, n) => {
-    for (let j = 0; j < n; j++) S.push({ kind: FRAY, on, n: 6, w0: rand(0.014, 0.024), w1: 0.002, a: rand(0.35, 0.75), tone: r() < 0.1 ? TONE_GOLD : TONE_TEAL, seed: r(), s: 0.03 + 0.94 * r(), ang: r() * Math.PI * 2, len: rand(0.1, 0.28), ...weave(), ...extra() });
+    for (let j = 0; j < n; j++) S.push({ kind: FRAY, on, n: 6, w0: rand(0.01, 0.018), w1: 0.002, a: rand(0.2, 0.45), tone: r() < 0.1 ? TONE_GOLD : TONE_TEAL, seed: r(), s: 0.03 + 0.94 * r(), ang: r() * Math.PI * 2, len: rand(0.1, 0.28), ...weave(), ...extra() });
   };
-  fray(ON_SPINE, () => ({}), 170);
-  fray(ON_YOKE, () => ({}), 18);
-  fray(ON_ARM, () => ({ hand: 0, len: rand(0.08, 0.2) }), 40);
-  fray(ON_ARM, () => ({ hand: 1, len: rand(0.08, 0.2) }), 40);
+  fray(ON_SPINE, () => ({}), 90);
+  fray(ON_YOKE, () => ({}), 10);
+  fray(ON_ARM, () => ({ hand: 0, len: rand(0.08, 0.2) }), 18);
+  fray(ON_ARM, () => ({ hand: 1, len: rand(0.08, 0.2) }), 18);
   fray(ON_HEAD, () => {
     // (Over its crown, sides and back, not its face.)
     let x;
@@ -194,24 +194,72 @@ function strandSpecs() {
     } while (Math.hypot(x, y, z) > 1 || Math.hypot(x, y, z) < 0.3 || (z > 0.2 && y < 0.5));
     const l = Math.hypot(x, y, z);
     return { dx: x / l, dy: y / l, dz: z / l };
-  }, 40);
-  // Strands bundled along its arms and over its shoulders, weaving in and
-  // out, so they read as sinew of light, not tubes.
-  for (const hand of [0, 1]) for (let j = 0; j < 16; j++) S.push({ kind: LIMB, hand, n: 22, w0: rand(0.012, 0.022), w1: 0.006, a: rand(0.45, 0.85), tone: r() < 0.15 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.55, 1.3), twist: rand(-1.2, 1.2), ...weave() });
-  for (let j = 0; j < 14; j++) S.push({ kind: LIMB, hand: -1, n: 14, w0: rand(0.012, 0.022), w1: 0.006, a: rand(0.45, 0.85), tone: TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.5, 1.3), twist: rand(-1, 1), ...weave() });
+  }, 20);
+  // A few strands of light along its arms and over its shoulders.
+  for (const hand of [0, 1]) for (let j = 0; j < 5; j++) S.push({ kind: LIMB, hand, n: 22, w0: rand(0.008, 0.014), w1: 0.004, a: rand(0.25, 0.5), tone: r() < 0.25 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.55, 1.3), twist: rand(-1.2, 1.2), ...weave() });
   // Tendrils trailing from the arms.
   for (const hand of [0, 1]) {
     const side = hand === 0 ? 1 : -1;
-    for (let j = 0; j < 7; j++) S.push({ kind: TENDRIL, hand, side, at: 0.12 + j * 0.13, n: 16, w0: rand(0.014, 0.026), w1: 0.003, a: rand(0.35, 0.7), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), len: rand(0.6, 1.3), out: rand(0.5, 1), up: rand(0.0, 0.7), back: rand(0.4, 1), curl: rand(0.15, 0.45), ...weave() });
+    for (let j = 0; j < 4; j++) S.push({ kind: TENDRIL, hand, side, at: 0.2 + j * 0.2, n: 16, w0: rand(0.01, 0.018), w1: 0.003, a: rand(0.2, 0.45), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), len: rand(0.6, 1.3), out: rand(0.5, 1), up: rand(0.0, 0.7), back: rand(0.4, 1), curl: rand(0.15, 0.45), ...weave() });
   }
   return S;
+}
+
+// Its paint (Wraith._layBrush): wide brush strokes, the bulk of how it
+// looks. Some run along its body and swirl down its tail (dark navy ones
+// deep in it, teal ones over them, their ends peeling away), some along its
+// arms and streaming back off them, its hair sweeping back over its crown,
+// and its claws.
+const BB_BODY = 0;
+const BB_ARM = 1;
+const BB_STREAM = 2;
+const BB_HAIR = 3;
+const BB_CLAW = 4;
+const BB_YOKE = 5;
+const BB_RIB = 6;
+// About how thick its body is at `s` along its spine (for its strokes).
+const thickAt = (s) => (s < TORSO ? 0.2 + 0.12 * Math.sin((Math.PI * s) / TORSO) : 0.215 * Math.pow(1 - (s - TORSO) / (1 - TORSO), 0.85) + 0.015);
+function brushSpecs() {
+  const r = Math.random;
+  const B = [];
+  const paint = (dark) => {
+    const x = r();
+    return x < dark ? PAINT_DARK : x < dark + (1 - dark) * 0.5 ? PAINT_MID : x < 0.96 ? PAINT_LIGHT : PAINT_BRIGHT;
+  };
+  for (let j = 0; j < 110; j++) {
+    const s0 = Math.pow(r(), 0.8) * 0.9;
+    const span = rand(0.12, 0.4);
+    const k = rand(0.2, 1.15);
+    const w = Math.min(0.22, Math.max(0.04, 0.75 * thickAt(Math.min(0.99, s0 + span / 2)) + 0.025)) * rand(0.75, 1.2);
+    B.push({ kind: BB_BODY, n: 14, w0: w, w1: 0.004, a: rand(0.4, 0.75), tone: paint(k < 0.6 ? 0.55 : 0.12), seed: r(), rep: 1 + span * 4, s0, span, phi: r() * Math.PI * 2, twist: rand(-1.8, 1.8), k, peel: r() < 0.5 ? rand(0.1, 0.45) : 0 });
+  }
+  // Its neck and chest, gaunt, and its ribs across it.
+  for (let j = 0; j < 46; j++) {
+    const k = rand(0.45, 1.12);
+    B.push({ kind: BB_BODY, n: 12, w0: rand(0.05, 0.1), w1: 0.004, a: rand(0.4, 0.75), tone: paint(k < 0.7 ? 0.4 : 0.1), seed: r(), rep: 1.5, s0: r() * 0.18, span: rand(0.08, 0.22), phi: r() * Math.PI * 2, twist: rand(-1.2, 1.2), k, peel: r() < 0.3 ? rand(0.05, 0.2) : 0 });
+  }
+  for (const side of [1, -1]) for (let row = 0; row < 5; row++) B.push({ kind: BB_RIB, side, row, n: 10, w0: rand(0.03, 0.045), w1: 0.004, a: rand(0.55, 0.85), tone: r() < 0.5 ? PAINT_LIGHT : PAINT_BRIGHT, seed: r(), rep: 1, fadeIn: false });
+  for (const hand of [0, 1]) {
+    const side = hand === 0 ? 1 : -1;
+    for (let j = 0; j < 22; j++) {
+      const s0 = r() * 0.6;
+      B.push({ kind: BB_ARM, hand, n: 12, w0: rand(0.05, 0.09), w1: 0.004, a: rand(0.6, 0.9), tone: paint(0.15), seed: r(), rep: 2, s0, span: rand(0.35, 1 - s0), phi: r() * Math.PI * 2, twist: rand(-1.2, 1.2), k: rand(0.3, 1.2) });
+    }
+    for (let j = 0; j < 10; j++) B.push({ kind: BB_STREAM, hand, side, at: 0.1 + j * 0.09, n: 16, w0: rand(0.03, 0.055), w1: 0.002, a: rand(0.35, 0.65), tone: paint(0.1), seed: r(), rep: 3, len: rand(0.5, 1.3), out: rand(0.4, 1), up: rand(0.1, 0.8), back: rand(0.5, 1), curl: rand(0.1, 0.4), f1: rand(3, 6), f2: rand(4, 8), p1: r() * 6.3, p2: r() * 6.3 });
+    for (let f = 0; f < 5; f++) B.push({ kind: BB_CLAW, hand, f, n: 7, w0: 0.032, w1: 0.006, a: 0.95, tone: PAINT_BRIGHT, seed: r(), rep: 0.6, fadeIn: false });
+  }
+  for (let j = 0; j < 12; j++) B.push({ kind: BB_YOKE, n: 10, w0: rand(0.06, 0.1), w1: 0.004, a: rand(0.6, 0.9), tone: paint(0.2), seed: r(), rep: 2, s0: r() * 0.5, span: rand(0.4, 0.6), phi: r() * Math.PI * 2, twist: rand(-1, 1), k: rand(0.4, 1.2) });
+  // Hair: over the crown from above the brow and back off it, and from the
+  // sides of the skull.
+  for (let j = 0; j < 34; j++) B.push({ kind: BB_HAIR, n: 16, w0: rand(0.04, 0.075), w1: 0.003, a: rand(0.45, 0.85), tone: paint(0.12), seed: r(), rep: 2.5, lat: rand(-1, 1), th0: rand(0.35, 1.3), len: rand(0.45, 1.1), up: rand(0.15, 0.8), f1: rand(3, 6), f2: rand(4, 8), p1: r() * 6.3, p2: r() * 6.3 });
+  return B;
 }
 
 // Its tubes (see SPINE and the rest).
 function tubeSpecs() {
   // (Its shoulders and arms are mostly strands: their flesh is faint.)
   const T = [{ rings: SPINE_RINGS, sides: 14, len: 4, wob: 0.2, fur: 1 }, { rings: 11, sides: 10, len: 0.9, wob: 0.14, fur: 1, solid: 0.45 }];
-  for (let h = 0; h < 2; h++) T.push({ rings: 22, sides: 9, len: 1.2, wob: 0.26, fur: 0.8, solid: 0.5 });
+  for (let h = 0; h < 2; h++) T.push({ rings: 22, sides: 9, len: 1.2, wob: 0.26, fur: 0.8, solid: 0.4 });
   for (let h = 0; h < 2; h++) T.push({ rings: 4, sides: 8, len: 0.12 });
   for (let h = 0; h < 2; h++) for (let f = 0; f < 5; f++) T.push({ rings: 7, sides: 6, len: 0.25, tip: 0.9 });
   return T;
@@ -224,8 +272,11 @@ function buildBody() {
   const mats = fleshMaterials();
   const tubes = new Tubes(tubeSpecs(), mats);
   const strands = new Strands(strandSpecs());
+  const brush = new Strands(brushSpecs(), { brush: true, share: strands.material.uniforms });
   const head = buildHead(mats);
-  root.add(tubes.core, tubes.shell, ...tubes.fur, strands.mesh, head.group);
+  // (Its glowing shells are not drawn: they gave it glassy edges. Its paint
+  // and the dark through its middle are its body now.)
+  root.add(tubes.core, brush.mesh, strands.mesh, head.group);
   const eyes = [];
   const glows = [];
   for (const s of [1, -1]) {
@@ -244,7 +295,7 @@ function buildBody() {
   }
   const hurt = new Hurtbox(root, new THREE.Vector3(0, 1.8, 0.12), new THREE.Vector3(0.42, 0.62, 0.42), { name: 'body' });
   // (`mats` and the rest are what Enemy looks for on a model: it has none.)
-  return { root, flesh: mats, tubes, strands, head, eyes, glows, mats: [], meshes: [], fire: [], bones: [], hurtboxes: [hurt], hitRadius: 0.9, height: 2.4, canRagdoll: false, ownDeath: false, j: {}, animate() {} };
+  return { root, flesh: mats, tubes, strands, brush, head, eyes, glows, mats: [], meshes: [], fire: [], bones: [], hurtboxes: [hurt], hitRadius: 0.9, height: 2.4, canRagdoll: false, ownDeath: false, j: {}, animate() {} };
 }
 
 export class Wraith extends Enemy {
@@ -274,6 +325,7 @@ export class Wraith extends Enemy {
     this._dlz = 0;
     this.tubes = this.model.tubes;
     this.strands = this.model.strands;
+    this.brush = this.model.brush;
     this.head = this.model.head;
     // Where it has been (time, x, y, z, facing), for what trails behind.
     this.hist = new Float32Array(HIST * 5);
@@ -308,6 +360,7 @@ export class Wraith extends Enemy {
   // Taken off the field: its buffers go with it.
   dispose() {
     this.strands.dispose();
+    this.brush.dispose();
     this.tubes.dispose();
     this.head.sphere.dispose();
   }
@@ -521,8 +574,7 @@ export class Wraith extends Enemy {
     this._record(time);
     const M = this.model;
     const shown = !this.hidden && this.fade > 0.01;
-    M.tubes.shell.visible = M.tubes.core.visible = M.strands.mesh.visible = M.head.group.visible = shown;
-    for (const f of M.tubes.fur) f.visible = shown;
+    M.tubes.core.visible = M.strands.mesh.visible = M.brush.mesh.visible = M.head.group.visible = shown;
     // (It is laid out only while it can be seen: in front of you, or near
     // enough that some of it might be.)
     const pl = ctx.player;
@@ -535,8 +587,10 @@ export class Wraith extends Enemy {
       this._layHead(time);
       this._layTubes(time);
       this._layStrands(time);
+      this._layBrush(time);
       M.tubes.commit();
       M.strands.commit();
+      M.brush.commit();
     }
     // Brighter and whiter as it gathers a blow, or is struck.
     const wind = this.state === 'windup' ? Math.min(1, this.stateT / Math.max(1e-3, this.stateDur)) : 0;
@@ -1045,6 +1099,91 @@ export class Wraith extends Enemy {
 
   // ------------------------------------------------------- its strands ---
 
+  // ------------------------------------------------------- its paint ---
+
+  _layBrush(t) {
+    const loose = 1 - this.fade;
+    const B = this.brush;
+    const T = this.tubes;
+    for (const sp of B.specs) {
+      const n = sp.n;
+      if (sp.kind === BB_BODY || sp.kind === BB_ARM || sp.kind === BB_YOKE) {
+        // Along its body (or an arm, or its shoulders), twisting round it,
+        // the end of a body stroke peeling out and streaming back.
+        for (let i = 0; i < n; i++) {
+          const w = i / (n - 1);
+          const s = Math.min(0.995, sp.s0 + sp.span * w);
+          const a = sp.phi + sp.twist * w + 0.3 * Math.sin(t * 0.7 + sp.seed * 6 + w * 3);
+          const k = sp.k * (1 + loose);
+          if (sp.kind === BB_BODY) {
+            const pe = (sp.peel + loose * 0.5) * w * w;
+            this._spinePoint(s, a, k, pe * 0.6, _h);
+            B.set(sp.start + i, _h.x, _h.y + pe * 0.35, _h.z - pe * 0.6);
+          } else {
+            this._tubePoint(sp.kind === BB_ARM ? ARM + sp.hand : YOKE, s, a, Math.max(0.2, k), _h);
+            B.set(sp.start + i, _h.x, _h.y, _h.z);
+          }
+        }
+      } else if (sp.kind === BB_RIB) {
+        // Round its chest from the breastbone, dropping a little.
+        const s0 = (0.4 + 0.085 * sp.row) * TORSO;
+        for (let i = 0; i < n; i++) {
+          const w = i / (n - 1);
+          this._spinePoint(s0 + 0.015 * w, Math.PI / 2 - sp.side * (0.08 + 1.55 * w), 1.04 + loose, 0, _h);
+          B.set(sp.start + i, _h.x, _h.y, _h.z);
+        }
+      } else if (sp.kind === BB_STREAM) {
+        // Streaming back off an arm, curling up, rippling.
+        const A = this._A[sp.hand];
+        this._armPoint(A, sp.at, _f0);
+        let dx = sp.side * sp.out;
+        let dy = sp.up;
+        let dz = -sp.back;
+        const dl = Math.hypot(dx, dy, dz);
+        dx /= dl;
+        dy /= dl;
+        dz /= dl;
+        for (let i = 0; i < n; i++) {
+          const w = i / (n - 1);
+          const L = sp.len * w * (1 + loose);
+          this._lag(_f0.x + dx * L + 0.12 * w * Math.sin(w * sp.f1 - t * 3.2 + sp.p1), _f0.y + dy * L + sp.curl * sp.len * w * w + 0.2 * w * Math.sin(w * sp.f2 * 0.8 - t * 2.8 + sp.p2), _f0.z + dz * L + 0.14 * w * Math.cos(w * sp.f1 * 0.9 - t * 2.4 + sp.p2), 0.05 + 0.3 * w, _t);
+          B.set(sp.start + i, _t.x, _t.y, _t.z);
+        }
+      } else if (sp.kind === BB_HAIR) {
+        // From above its brow, over its crown, then back off it and up,
+        // rippling (head space, carried with its head).
+        const m = this.head.group.matrix;
+        const lat = sp.lat;
+        const th1 = 2.35;
+        for (let i = 0; i < n; i++) {
+          const w = i / (n - 1);
+          if (w < 0.4) {
+            const th = sp.th0 + (th1 - sp.th0) * (w / 0.4);
+            _h.set(lat * 0.135 * (0.55 + 0.45 * Math.sin(th)), 0.04 + 0.17 * Math.sin(th) * (1 - 0.25 * lat * lat), -0.07 + 0.25 * Math.cos(th));
+          } else {
+            const q = (w - 0.4) / 0.6;
+            const L = sp.len * q * (1 + loose);
+            const ex = lat * 0.135 * (0.55 + 0.45 * Math.sin(th1));
+            const ey = 0.04 + 0.17 * Math.sin(th1) * (1 - 0.25 * lat * lat);
+            const ez = -0.07 + 0.25 * Math.cos(th1);
+            _h.set(ex + lat * L * 0.45 + 0.12 * L * Math.sin(q * sp.f1 - t * 3 + sp.p1), ey + sp.up * L * 0.8 + 0.1 * L * Math.sin(q * sp.f2 - t * 2.6 + sp.p2), ez - L * 0.9 + 0.08 * L * Math.cos(q * sp.f1 - t * 2 + sp.p2));
+          }
+          _h.applyMatrix4(m);
+          this._lag(_h.x, _h.y, _h.z, 0.22 * w, _t);
+          B.set(sp.start + i, _t.x, _t.y, _t.z);
+        }
+      } else {
+        // A claw: along its finger.
+        const sp2 = T.specs[FINGER + sp.hand * 5 + sp.f];
+        const C = T.c;
+        for (let i = 0; i < n; i++) {
+          const r = sp2.ring0 + Math.min(sp2.rings - 1, i);
+          B.set(sp.start + i, C[r * 3], C[r * 3 + 1], C[r * 3 + 2]);
+        }
+      }
+    }
+  }
+
   _layStrands(t) {
     const loose = 1 - this.fade;
     // Its flight, in its own space (what trails bends away from it).
@@ -1232,11 +1371,11 @@ export class Wraith extends Enemy {
     const dvx = this.alive ? this.drift.x : 0;
     const dvz = this.alive ? this.drift.z : 0;
     // Glitter drifting off it: gold, violet and white off the tail.
-    for (let i = this._n('glit', 240 * fade, dt); i > 0; i--) {
+    for (let i = this._n('glit', 330 * fade, dt); i > 0; i--) {
       let color;
       let end;
       if (Math.random() < 0.7) {
-        const s = this._onBody(0.12, rand(0.7, 1.4), _p);
+        const s = this._onBody(0.12, rand(0.2, 1.3), _p);
         const r = Math.random();
         color = s > 0.3 && r < 0.35 ? GOLD : s > 0.3 && r < 0.5 ? VIOLET : r < 0.75 ? WHITE : TEAL_HOT;
         end = color === GOLD ? GOLD_DIM : TEAL;

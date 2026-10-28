@@ -78,6 +78,86 @@ void main() {
   gl_FragColor = vec4(col * a + fleck, 1.0);
 }`;
 
+// Its paint: wide strokes laid like a brush's, streaks of bristle running
+// along them (a dry brush: some streaks bright, gaps between), soft at
+// their sides, flowing slowly along. Drawn over one another as paint is
+// (not added up as light), so they keep their teal and do not burn white;
+// dark navy strokes among them give it the depth of the painting.
+const BRUSH_FRAG = /* glsl */ `
+uniform sampler2D map;
+uniform float uTime;
+uniform float uHeat;
+uniform float uFade;
+uniform vec3 uLight;
+uniform vec3 uMid;
+uniform vec3 uDark;
+uniform vec3 uBright;
+varying float vU;
+varying float vSide;
+varying float vSeed;
+varying float vTone;
+varying float vAlpha;
+void main() {
+  float across = vSide * 0.5 + 0.5;
+  float x = vU - uTime * (0.22 + 0.2 * vSeed) + vSeed * 13.0;
+  float s1 = texture2D(map, vec2(x, across)).a;
+  float s2 = texture2D(map, vec2(x * 0.61 + 0.37, 1.0 - across)).a;
+  float streak = max(s1, s2 * 0.85);
+  float edge = 1.0 - smoothstep(0.3, 1.0, abs(vSide));
+  float a = clamp(streak * 1.1, 0.0, 1.0) * edge * vAlpha * uFade;
+  vec3 col = vTone < 0.5 ? uLight : vTone < 1.5 ? uMid : vTone < 2.5 ? uDark : uBright;
+  // (Its bright streaks lighter still, toward white.)
+  col = mix(col, uBright, streak * streak * 0.4 * step(vTone, 1.5) + uHeat * 0.5 * step(vTone, 1.5));
+  gl_FragColor = vec4(col, a);
+}`;
+
+// Bristle streaks along a stroke (x), across it (y); white, the streaks in
+// its alpha, wrapping along x.
+let _brushTex = null;
+export function brushTexture() {
+  if (_brushTex) return _brushTex;
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 64;
+  const g = cv.getContext('2d');
+  g.lineCap = 'round';
+  // A soft wash under the bristles (smoke, not ribbon), then the bristles,
+  // blurred a little.
+  const wash = g.createLinearGradient(0, 0, 0, 64);
+  wash.addColorStop(0, 'rgba(255,255,255,0)');
+  wash.addColorStop(0.5, 'rgba(255,255,255,0.32)');
+  wash.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = wash;
+  g.fillRect(0, 0, 256, 64);
+  g.filter = 'blur(1.2px)';
+  for (let k = 0; k < 120; k++) {
+    const y = 4 + Math.random() * 56;
+    const x0 = Math.random() * 256;
+    const L = 30 + Math.random() * 220;
+    const wave = (Math.random() - 0.5) * 6;
+    g.strokeStyle = `rgba(255,255,255,${0.1 + Math.random() * 0.55})`;
+    g.lineWidth = 1 + Math.random() * 3.5;
+    for (const off of [0, -256]) {
+      g.beginPath();
+      g.moveTo(x0 + off, y);
+      g.bezierCurveTo(x0 + off + L * 0.33, y + wave, x0 + off + L * 0.66, y - wave, x0 + off + L, y + wave * 0.5);
+      g.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = 4;
+  _brushTex = tex;
+  return tex;
+}
+
+// Its paint's tones.
+export const PAINT_LIGHT = 0;
+export const PAINT_MID = 1;
+export const PAINT_DARK = 2;
+export const PAINT_BRIGHT = 3;
+
 export const TONE_TEAL = 0;
 export const TONE_GOLD = 1;
 export const TONE_HOT = 2;
@@ -89,7 +169,9 @@ export const TONE_GLOW = 3;
 // Each strand's points are written (its own space) with `set`, then
 // `commit` turns them into ribbons.
 export class Strands {
-  constructor(specs) {
+  // `brush`: wide painted strokes (BRUSH_FRAG) rather than thin lines of
+  // light; `share`: the uniforms (time, fade and the rest) of another.
+  constructor(specs, { brush = false, share = null } = {}) {
     this.specs = specs;
     let total = 0;
     for (const s of specs) {
@@ -112,12 +194,18 @@ export class Strands {
         const p = s.start + i;
         // Fading in from its root and out to its tip, thinning as it goes.
         // (`aIn`: dimmer over its first quarter, rising to full.)
-        const a = s.a * Math.min(1, u / 0.06 + (s.fadeIn === false ? 1 : 0)) * Math.min(1, (1 - u) / 0.22) * (s.aIn === undefined ? 1 : s.aIn + (1 - s.aIn) * Math.min(1, u / 0.25));
-        const w = s.w0 + (s.w1 - s.w0) * u;
+        let a = s.a * Math.min(1, u / 0.06 + (s.fadeIn === false ? 1 : 0)) * Math.min(1, (1 - u) / 0.22) * (s.aIn === undefined ? 1 : s.aIn + (1 - s.aIn) * Math.min(1, u / 0.25));
+        let w = s.w0 + (s.w1 - s.w0) * u;
+        if (brush) {
+          // A brush's stroke: swelling from where it touches down, tapering
+          // to a point, fading in and out.
+          w = s.w0 * Math.pow(Math.sin(Math.PI * (0.1 + 0.85 * u)), 0.55) * (1 - 0.55 * u) + s.w1;
+          a = s.a * Math.min(1, u / 0.15 + (s.fadeIn === false ? 1 : 0)) * Math.min(1, (1 - u) / 0.35);
+        }
         for (let k = 0; k < 2; k++) {
           const v = p * 2 + k;
           side[v] = k ? 1 : -1;
-          strand[v * 4] = u;
+          strand[v * 4] = u * (s.rep || 1);
           strand[v * 4 + 1] = w;
           strand[v * 4 + 2] = s.seed;
           strand[v * 4 + 3] = s.tone;
@@ -138,27 +226,51 @@ export class Strands {
     geo.setAttribute('strand', new THREE.BufferAttribute(strand, 4));
     geo.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1));
     geo.setIndex(index);
-    this.material = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uHeat: { value: 0 },
-        uFade: { value: 1 },
-        uPixel: { value: 0.002 },
-        uFogDensity: { value: 0 },
-        uColor: { value: new THREE.Color(0.2, 0.78, 0.68) },
-        uHot: { value: new THREE.Color(0.78, 1.0, 0.95) },
-        uGold: { value: new THREE.Color(1.4, 0.9, 0.35) },
-      },
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
+    const U = share || { uTime: { value: 0 }, uHeat: { value: 0 }, uFade: { value: 1 }, uPixel: { value: 0.002 }, uFogDensity: { value: 0 } };
+    if (brush) {
+      this.material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: U.uTime,
+          uHeat: U.uHeat,
+          uFade: U.uFade,
+          uPixel: U.uPixel,
+          uFogDensity: U.uFogDensity,
+          map: { value: brushTexture() },
+          uLight: { value: new THREE.Color(0.12, 0.42, 0.34) },
+          uMid: { value: new THREE.Color(0.035, 0.2, 0.17) },
+          uDark: { value: new THREE.Color(0.004, 0.01, 0.026) },
+          uBright: { value: new THREE.Color(0.38, 0.75, 0.66) },
+        },
+        vertexShader: VERT,
+        fragmentShader: BRUSH_FRAG,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+    } else {
+      this.material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: U.uTime,
+          uHeat: U.uHeat,
+          uFade: U.uFade,
+          uPixel: U.uPixel,
+          uFogDensity: U.uFogDensity,
+          uColor: { value: new THREE.Color(0.2, 0.78, 0.68) },
+          uHot: { value: new THREE.Color(0.78, 1.0, 0.95) },
+          uGold: { value: new THREE.Color(1.4, 0.9, 0.35) },
+        },
+        vertexShader: VERT,
+        fragmentShader: FRAG,
+        blending: THREE.AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+    }
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 10;
+    // (Paint first, the light of the thin strands over it.)
+    this.mesh.renderOrder = brush ? 10 : 11;
   }
 
   set(i, x, y, z) {
@@ -301,7 +413,7 @@ void main() {
   float ndv = abs(dot(normalize(vN), normalize(vV)));
   // Dark swirls through it, thickest through the middle.
   float n = vnoise2(vec2(vUv.y * 9.0 + sin(vUv.x * 1.7 + uTime * 0.4) * 2.0, vUv.x * 2.2 - uTime * 0.35));
-  float a = pow(ndv, 1.2) * (0.42 + 0.4 * n) * vSolid * uFade * vFog;
+  float a = pow(ndv, 1.1) * (0.5 + 0.4 * n) * vSolid * uFade * vFog;
   gl_FragColor = vec4(uDark, a);
 }`;
 
@@ -909,9 +1021,9 @@ function skullProfile() {
   g.fill();
   // Its lines, in strokes: crown and back of the skull, brow, the bridge of
   // the snout, cheekbone, the line of the upper jaw.
-  sketch(g, bez([226, 74], [214, 22], [150, 10], [104, 16]), { n: 34, w: 5, a: 0.75, len: 22, jit: 5 });
-  sketch(g, bez([104, 16], [48, 22], [12, 60], [14, 100]), { n: 26, w: 4, a: 0.55, len: 22, jit: 6 });
-  sketch(g, bez([14, 100], [16, 132], [40, 150], [70, 150]), { n: 12, w: 3, a: 0.4, len: 16, jit: 5 });
+  // (Only faintly over the crown and the back: its hair is its outline there.)
+  sketch(g, bez([226, 74], [214, 22], [150, 10], [104, 16]), { n: 14, w: 4, a: 0.35, len: 20, jit: 6 });
+  sketch(g, bez([14, 100], [16, 132], [40, 150], [70, 150]), { n: 8, w: 3, a: 0.25, len: 16, jit: 5 });
   sketch(g, bez([172, 82], [196, 76], [226, 76], [240, 92]), { n: 26, w: 6, a: 0.95, len: 16, jit: 2.5 });
   sketch(g, bez([238, 90], [246, 104], [252, 120], [250, 136]), { n: 14, w: 4, a: 0.8, len: 12, jit: 2 });
   sketch(g, bez([200, 124], [180, 122], [150, 120], [122, 124]), { n: 16, w: 4, a: 0.7, len: 16, jit: 3 });
@@ -1080,6 +1192,9 @@ export function buildHead(mats) {
   jawProfileCard.position.set(0, -0.06, 0.12);
   jawProfileCard.renderOrder = 12;
   jawSide.add(jawProfileCard);
-  group.add(skull, ...furMeshes(sphere, mats, skull), mouth, face, jaw, profile, jawSide);
+  // (No skull ball: the strokes of its hair make the crown, so seen from
+  // the side it is no smooth dome.)
+  void skull;
+  group.add(mouth, face, jaw, profile, jawSide);
   return { group, face, jaw, jawCard, mouth, sphere, profile, jawSide, jawProfileCard };
 }
