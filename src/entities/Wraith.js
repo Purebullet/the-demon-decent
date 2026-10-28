@@ -3,15 +3,18 @@ import { Enemy } from './Enemy.js';
 import { Hurtbox } from '../physics/Hitbox.js';
 import { softDotTexture } from '../world/Textures.js';
 import { rand } from '../core/rng.js';
-import { Strands, TONE_TEAL, TONE_GOLD, TONE_HOT, TONE_GLOW } from './WraithBody.js';
+import { Strands, Tubes, fleshMaterials, buildHead, TONE_TEAL, TONE_GOLD, TONE_GLOW } from './WraithBody.js';
 
-// The Grave Wraith: a ghoul with no body at all, only light. It is drawn
-// from strands (WraithBody.js) laid afresh every frame: a skull with
-// slanted white eyes and hair streaming up off it like flame, a ribbed
-// chest, long arms with hooked claws and tendrils trailing from them, and
-// a tail that flows down out of its chest into a wide whirl, trailing
-// behind it as it moves. Glitter (gold in the tail) runs along the strands
-// and drifts off them.
+// The Grave Wraith: a ghoul with no body at all, only light (WraithBody.js).
+// Its flesh is glowing tubes laid afresh every frame, bright at their edges
+// and dark and swirling through the middle: a hunched chest flowing down
+// into a tail that swings out into a wide whirl and trails behind it as it
+// moves, long bony arms bent at the elbow, and hands of five hooked claws.
+// Its skull juts forward, a face painted on it (slanted white-hot eyes in
+// dark sockets, long fangs, a jaw that drops as it roars), and strands of
+// light stream off it all: hair rising off the skull like flame, ribs,
+// fibres over its body, tendrils trailing from its arms. Glitter (gold and
+// violet in the tail) and a low mist drift off it.
 //
 // It drifts round you, closing in to strike and hanging back while its
 // blows come round again. Its blows:
@@ -41,24 +44,34 @@ const TEAL_DIM = new THREE.Color(0.03, 0.25, 0.25);
 const TEAL_DEEP = new THREE.Color(0.0, 0.08, 0.1);
 const GOLD = new THREE.Color(1.5, 1.0, 0.35);
 const GOLD_DIM = new THREE.Color(0.5, 0.22, 0.04);
+const VIOLET = new THREE.Color(0.8, 0.55, 1.3);
 const WHITE = new THREE.Color(1, 1, 1);
+const MIST = new THREE.Color(0.2, 0.4, 0.4);
 const _p = new THREE.Vector3();
 const _q = new THREE.Vector3();
 const _t = new THREE.Vector3();
+const _h = new THREE.Vector3();
 // Its right claw raised up and back for a swipe.
-const SWIPE_UP = new THREE.Vector3(-1.0, 2.55, -0.35);
+const SWIPE_UP = new THREE.Vector3(-0.95, 2.6, -0.25);
 
 // Its strands, by what they make of it.
-const BODY = 0;
+const FIBRE = 0;
 const HAIR = 1;
-const FACE = 2;
-const RIB = 3;
-const ARM = 4;
-const FINGER = 5;
-const TENDRIL = 6;
-const SKULL = 7;
-// The share of a body strand that is chest (the rest is tail).
-const TORSO = 0.2;
+const RIB = 2;
+const TENDRIL = 3;
+// Its tubes: spine and tail, its shoulders, two arms, two palms, then five
+// fingers a hand (the fifth the thumb).
+const SPINE = 0;
+const YOKE = 1;
+const ARM = 2;
+const PALM = 4;
+const FINGER = 6;
+const SPINE_RINGS = 52;
+// The share of the spine that is neck and chest (the rest is tail).
+const TORSO = 0.26;
+// Arm bones (shoulder to elbow, elbow to wrist).
+const UPPER = 0.62;
+const FORE = 0.58;
 // How far back in time its tail and hair can trail (seconds), in steps.
 const LAG_STEP = 0.05;
 const LAGS = 11;
@@ -91,6 +104,25 @@ const smooth = (a, b, x) => {
   const k = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return k * k * (3 - 2 * k);
 };
+// Piecewise-linear through knots [[x, y], ...] (x rising).
+const knots = (K, x) => {
+  if (x <= K[0][0]) return K[0][1];
+  for (let i = 1; i < K.length; i++) {
+    if (x <= K[i][0]) {
+      const f = (x - K[i - 1][0]) / (K[i][0] - K[i - 1][0]);
+      return K[i - 1][1] + (K[i][1] - K[i - 1][1]) * ease(f);
+    }
+  }
+  return K[K.length - 1][1];
+};
+// Its chest's width (side to side) and depth down the neck and chest.
+const CHEST_W = [[0, 0.1], [0.2, 0.12], [0.45, 0.36], [0.75, 0.26], [1, 0.225]];
+const CHEST_D = [[0, 0.1], [0.2, 0.12], [0.45, 0.25], [0.75, 0.19], [1, 0.21]];
+// Catmull-Rom through four values.
+const cr = (a, b, c, d, f) => {
+  const f2 = f * f;
+  return 0.5 * (2 * b + (c - a) * f + (2 * a - 5 * b + 4 * c - d) * f2 + (3 * b - a - 3 * c + d) * f2 * f);
+};
 
 export const WRAITH_TYPE = {
   name: 'Grave Wraith',
@@ -115,63 +147,66 @@ export const WRAITH_TYPE = {
   ],
 };
 
-// Each of its strands, with what shapes it (Wraith._shape). Most weave in
-// and out of one another (`f1`, `f2`, `p1`, `p2`), so none run straight
-// alongside the next; the glow strands are wide, faint and soft, its haze.
+// Each of its strands, with what shapes it (Wraith._strands). Most weave
+// (`f1`, `f2`, `p1`, `p2`), so none run straight alongside the next; the
+// glow strands are wide, faint and soft, its haze.
 function strandSpecs() {
   const r = Math.random;
   const S = [];
   const weave = () => ({ f1: rand(3, 7), f2: rand(5, 11), p1: r() * 6.3, p2: r() * 6.3 });
-  // Chest into tail: the bulk of it. Some come away from the tail near its end.
-  for (let j = 0; j < 56; j++) S.push({ kind: BODY, n: 36, w0: rand(0.012, 0.03), w1: 0.005, a: rand(0.3, 0.7), aIn: 0.5, tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), rho: Math.sqrt(r()), phi: r() * Math.PI * 2, cross: rand(-2.6, 2.6), twist: rand(2.2, 3.8), peel: r() < 0.35 ? rand(0.15, 0.5) : 0, ...weave() });
-  for (let j = 0; j < 7; j++) S.push({ kind: BODY, n: 24, w0: rand(0.22, 0.3), w1: 0.06, a: 0.15, tone: TONE_GLOW, seed: r(), rho: Math.sqrt(r()) * 0.5, phi: r() * Math.PI * 2, cross: 0, twist: 2.5, peel: 0, ...weave() });
-  // The skull: arcs over its crown from temple to temple.
-  for (let j = 0; j < 3; j++) S.push({ kind: SKULL, z: 0.07 - j * 0.08, n: 12, w0: 0.022, w1: 0.022, a: 0.55, tone: TONE_TEAL, seed: r(), fadeIn: false });
-  // Hair: off the crown and the back of the skull, streaming up like flame.
-  for (let j = 0; j < 20; j++) S.push({ kind: HAIR, n: 18, w0: rand(0.016, 0.03), w1: 0.004, a: rand(0.35, 0.8), tone: r() < 0.15 ? TONE_GOLD : TONE_TEAL, seed: r(), lat: rand(-1, 1), al: rand(1.0, 2.3), len: rand(0.5, 1.25), ...weave() });
-  for (let j = 0; j < 3; j++) S.push({ kind: HAIR, n: 14, w0: 0.2, w1: 0.05, a: 0.13, tone: TONE_GLOW, seed: r(), lat: rand(-0.6, 0.6), al: 1.6, len: 0.8, ...weave() });
-  // The face: brows, cheeks and jaw, the bone under the eyes.
-  for (const side of [1, -1]) {
-    S.push({ kind: FACE, part: 0, side, n: 7, w0: 0.03, w1: 0.016, a: 0.85, tone: TONE_HOT, seed: r(), fadeIn: false });
-    S.push({ kind: FACE, part: 1, side, n: 10, w0: 0.026, w1: 0.012, a: 0.7, tone: TONE_TEAL, seed: r(), fadeIn: false });
-    S.push({ kind: FACE, part: 2, side, n: 7, w0: 0.022, w1: 0.012, a: 0.6, tone: TONE_TEAL, seed: r() });
-  }
+  // Fibres over its body, down into the tail; some come away near its end.
+  for (let j = 0; j < 44; j++) S.push({ kind: FIBRE, n: 34, w0: rand(0.012, 0.026), w1: 0.004, a: rand(0.3, 0.7), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), phi: r() * Math.PI * 2, k: rand(0.92, 1.25), twist: rand(1.5, 3.2), peel: r() < 0.4 ? rand(0.1, 0.45) : 0, ...weave() });
+  for (let j = 0; j < 5; j++) S.push({ kind: FIBRE, n: 24, w0: rand(0.24, 0.32), w1: 0.06, a: 0.12, tone: TONE_GLOW, seed: r(), phi: r() * Math.PI * 2, k: rand(0.2, 0.5), twist: 2, peel: 0, ...weave() });
+  // Hair, off the crown and the back of the skull, streaming up and back.
+  for (let j = 0; j < 36; j++) S.push({ kind: HAIR, n: 20, w0: rand(0.016, 0.034), w1: 0.004, a: rand(0.35, 0.8), tone: r() < 0.12 ? TONE_GOLD : TONE_TEAL, seed: r(), lat: rand(-1, 1), up: rand(0.1, 0.9), back: rand(0.3, 1), len: rand(0.5, 1.15), ...weave() });
+  for (let j = 0; j < 4; j++) S.push({ kind: HAIR, n: 14, w0: 0.26, w1: 0.06, a: 0.12, tone: TONE_GLOW, seed: r(), lat: rand(-0.6, 0.6), up: 0.5, back: 0.7, len: 0.9, ...weave() });
   // Ribs.
-  for (const side of [1, -1]) for (let row = 0; row < 4; row++) S.push({ kind: RIB, side, row, n: 9, w0: 0.024, w1: 0.01, a: 0.55, tone: TONE_TEAL, seed: r() });
-  // Arms: the arm and its glow, four claws, tendrils trailing off it.
+  for (const side of [1, -1]) for (let row = 0; row < 4; row++) S.push({ kind: RIB, side, row, n: 10, w0: 0.024, w1: 0.012, a: 0.6, tone: TONE_TEAL, seed: r() });
+  // Tendrils trailing from the arms.
   for (const hand of [0, 1]) {
     const side = hand === 0 ? 1 : -1;
-    for (let j = 0; j < 8; j++) S.push({ kind: ARM, hand, side, n: 16, w0: rand(0.02, 0.034), w1: 0.012, a: rand(0.4, 0.8), tone: TONE_TEAL, seed: r(), rho: Math.sqrt(r()), phi: r() * Math.PI * 2, ...weave() });
-    S.push({ kind: ARM, hand, side, n: 12, w0: 0.2, w1: 0.1, a: 0.13, tone: TONE_GLOW, seed: r(), rho: 0, phi: 0, ...weave() });
-    for (let f = 0; f < 4; f++) S.push({ kind: FINGER, hand, side, f, n: 9, w0: 0.024, w1: 0.004, a: 0.95, tone: TONE_HOT, seed: r(), fadeIn: false });
-    for (let j = 0; j < 7; j++) S.push({ kind: TENDRIL, hand, side, at: 0.3 + j * 0.1, n: 16, w0: rand(0.014, 0.026), w1: 0.003, a: rand(0.35, 0.7), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), len: rand(0.7, 1.4), out: rand(0.7, 1), up: rand(0.0, 0.7), back: rand(0.2, 0.7), curl: rand(0.15, 0.45), ...weave() });
+    for (let j = 0; j < 7; j++) S.push({ kind: TENDRIL, hand, side, at: 0.12 + j * 0.13, n: 16, w0: rand(0.014, 0.026), w1: 0.003, a: rand(0.35, 0.7), tone: r() < 0.3 ? TONE_GOLD : TONE_TEAL, seed: r(), len: rand(0.6, 1.3), out: rand(0.5, 1), up: rand(0.0, 0.7), back: rand(0.4, 1), curl: rand(0.15, 0.45), ...weave() });
   }
   return S;
 }
 
-// Its "model": its strands, its eyes (sprites: a slanted white-hot core
-// and a blue glow each) and a hurtbox round its head and chest.
+// Its tubes (see SPINE and the rest).
+function tubeSpecs() {
+  const T = [{ rings: SPINE_RINGS, sides: 14, len: 4, wob: 0.2 }, { rings: 11, sides: 10, len: 0.9, wob: 0.14 }];
+  for (let h = 0; h < 2; h++) T.push({ rings: 18, sides: 9, len: 1.2, wob: 0.12 });
+  for (let h = 0; h < 2; h++) T.push({ rings: 4, sides: 8, len: 0.12 });
+  for (let h = 0; h < 2; h++) for (let f = 0; f < 5; f++) T.push({ rings: 7, sides: 6, len: 0.25, tip: 0.9 });
+  return T;
+}
+
+// Its "model": the flesh (tubes and skull), the strands, its eyes (a glow
+// over each painted eye) and a hurtbox round its chest and head.
 function buildBody() {
   const root = new THREE.Group();
+  const mats = fleshMaterials();
+  const tubes = new Tubes(tubeSpecs(), mats);
   const strands = new Strands(strandSpecs());
-  root.add(strands.mesh);
-  const eye = (color, scale) => new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false }));
+  const head = buildHead(mats);
+  root.add(tubes.core, tubes.shell, strands.mesh, head.group);
   const eyes = [];
   const glows = [];
   for (const s of [1, -1]) {
-    const core = eye(0xffffff);
-    core.position.set(s * 0.068, 2.29, 0.18);
-    core.scale.set(0.1, 0.055, 1);
+    const sprite = (color) => new THREE.Sprite(new THREE.SpriteMaterial({ map: softDotTexture(), color, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false }));
+    const core = sprite(0xffffff);
+    core.position.set(s * 0.054, 0.004, 0.19);
+    core.scale.set(0.07, 0.04, 1);
     core.material.rotation = -s * 0.32;
-    const glow = eye(0x2a8cb0);
-    glow.position.set(s * 0.068, 2.29, 0.17);
-    glow.scale.setScalar(0.2);
-    root.add(glow, core);
+    const glow = sprite(0x2a8cb0);
+    glow.position.set(s * 0.054, 0.004, 0.185);
+    glow.scale.setScalar(0.17);
+    for (const sp of [glow, core]) sp.renderOrder = 13;
+    head.group.add(glow, core);
     eyes.push(core);
     glows.push(glow);
   }
-  const hurt = new Hurtbox(root, new THREE.Vector3(0, 1.75, 0), new THREE.Vector3(0.45, 0.7, 0.42), { name: 'body' });
-  return { root, strands, eyes, glows, mats: [], meshes: [], fire: [], bones: [], hurtboxes: [hurt], hitRadius: 0.9, height: 2.4, canRagdoll: false, ownDeath: false, j: {}, animate() {} };
+  const hurt = new Hurtbox(root, new THREE.Vector3(0, 1.8, 0.12), new THREE.Vector3(0.42, 0.62, 0.42), { name: 'body' });
+  // (`mats` and the rest are what Enemy looks for on a model: it has none.)
+  return { root, flesh: mats, tubes, strands, head, eyes, glows, mats: [], meshes: [], fire: [], bones: [], hurtboxes: [hurt], hitRadius: 0.9, height: 2.4, canRagdoll: false, ownDeath: false, j: {}, animate() {} };
 }
 
 export class Wraith extends Enemy {
@@ -180,7 +215,14 @@ export class Wraith extends Enemy {
     this.lift = HOVER;
     this.liftTo = HOVER;
     // Where its claws are (its own space), eased toward where they should be.
-    this.hands = [new THREE.Vector3(0.85, 1.98, 0.65), new THREE.Vector3(-0.8, 1.6, 0.8)];
+    this.hands = [new THREE.Vector3(0.62, 1.55, 0.85), new THREE.Vector3(-0.66, 1.75, 0.8)];
+    // How its fingers are curled (0 open, 1 clutching) and spread.
+    this.curl = [0.5, 0.5];
+    this.spread = [1, 1];
+    // Its head: how far forward, its tilt, and its jaw.
+    this.headZ = 0;
+    this.headPitch = 0.16;
+    this.jawOpen = 0.12;
     this.acc = {};
     this.prev = new THREE.Vector3().copy(this.position);
     this.drift = new THREE.Vector3();
@@ -190,7 +232,9 @@ export class Wraith extends Enemy {
     this.t = 0;
     this._cy = 1;
     this._sy = 0;
+    this.tubes = this.model.tubes;
     this.strands = this.model.strands;
+    this.head = this.model.head;
     // Where it has been (time, x, y, z, facing), for what trails behind.
     this.hist = new Float32Array(HIST * 5);
     this.histN = 0;
@@ -202,21 +246,30 @@ export class Wraith extends Enemy {
     this.lagZ = new Float32Array(LAGS);
     this.lagC = new Float32Array(LAGS).fill(1);
     this.lagS = new Float32Array(LAGS);
-    // The ends its wisps peel off, its claw tips, and which strands carry gold.
+    // Each arm: shoulder, elbow, wrist, the way the hand points, across it
+    // and up from its back (its own space, before trailing).
+    this._A = [new Float32Array(18), new Float32Array(18)];
+    // The ends its wisps peel off, and which strands carry gold.
     this.tips = [];
-    this.clawTips = [];
     this.tones = new Uint8Array(this.strands.count);
     for (const sp of this.strands.specs) {
       const last = sp.start + sp.n - 1;
-      if (sp.kind === FINGER) this.clawTips.push(last);
-      else if ((sp.kind === HAIR || sp.kind === TENDRIL || sp.kind === BODY) && sp.tone !== TONE_GLOW) this.tips.push(last);
+      if ((sp.kind === HAIR || sp.kind === TENDRIL || sp.kind === FIBRE) && sp.tone !== TONE_GLOW) this.tips.push(last);
       this.tones.fill(sp.tone, sp.start, last + 1);
+    }
+    // The last ring of each finger: its claw tip.
+    this.clawTips = [];
+    for (let f = 0; f < 10; f++) {
+      const s = this.tubes.specs[FINGER + f];
+      this.clawTips.push(s.ring0 + s.rings - 1);
     }
   }
 
-  // Taken off the field: its strands' buffers go with it.
+  // Taken off the field: its buffers go with it.
   dispose() {
     this.strands.dispose();
+    this.tubes.dispose();
+    this.head.sphere.dispose();
   }
 
   // ---------------------------------------------------------- behaviour ---
@@ -426,95 +479,148 @@ export class Wraith extends Enemy {
     this.t = time;
     this._pose(dt, time);
     this._record(time);
-    const S = this.strands;
-    S.mesh.visible = !this.hidden && this.fade > 0.01;
-    // (Its strands are laid only while it can be seen: in front of you, or
-    // near enough that some of it might be.)
+    const M = this.model;
+    const shown = !this.hidden && this.fade > 0.01;
+    M.tubes.shell.visible = M.tubes.core.visible = M.strands.mesh.visible = M.head.group.visible = shown;
+    // (It is laid out only while it can be seen: in front of you, or near
+    // enough that some of it might be.)
     const pl = ctx.player;
     const dx = this.position.x - pl.position.x;
     const dz = this.position.z - pl.position.z;
     const d = Math.hypot(dx, dz) || 1;
     const seen = d < 6 || -(Math.sin(pl.yaw) * dx + Math.cos(pl.yaw) * dz) / d > 0.1;
-    if (S.mesh.visible && seen) {
+    if (shown && seen) {
       this._lags(time);
-      this._shape(time);
-      S.commit();
+      this._layHead(time);
+      this._layTubes(time);
+      this._layStrands(time);
+      M.tubes.commit();
+      M.strands.commit();
     }
     // Brighter and whiter as it gathers a blow, or is struck.
     const wind = this.state === 'windup' ? Math.min(1, this.stateT / Math.max(1e-3, this.stateDur)) : 0;
-    const U = S.material.uniforms;
-    U.uTime.value = time;
-    U.uFade.value = this.fade;
-    U.uHeat.value = Math.min(0.6, wind * 0.35 + this.flash * 0.6);
+    const heat = Math.min(0.6, wind * 0.35 + this.flash * 0.6);
+    const F = M.flesh.shell.uniforms;
+    const U = M.strands.material.uniforms;
+    F.uTime.value = U.uTime.value = time;
+    F.uFade.value = U.uFade.value = this.fade;
+    F.uHeat.value = U.uHeat.value = heat;
     // (Drawn to the same scale and fog as the particles.)
     const fu = ctx.fx.add.material.uniforms;
     U.uPixel.value = 1 / Math.max(1, fu.uScale.value);
-    U.uFogDensity.value = fu.uFogDensity.value;
+    F.uFogDensity.value = U.uFogDensity.value = fu.uFogDensity.value;
+    for (const m of [M.head.face, M.head.jawCard, M.head.mouth]) {
+      m.material.uniforms.uFade.value = this.fade;
+      m.material.uniforms.uHeat.value = heat;
+    }
     this._emit(dt, ctx, time);
     // Its eyes, white-hot as it winds up a blow; gone with it.
-    const eye = (1.2 + wind * 1.4 + this.flash * 1.2) * this.fade;
+    const eye = (1.1 + wind * 1.4 + this.flash * 1.2) * this.fade;
     for (let i = 0; i < 2; i++) {
-      const core = this.model.eyes[i];
-      const glow = this.model.glows[i];
-      core.visible = glow.visible = !this.hidden && this.fade > 0.05;
+      const core = M.eyes[i];
+      const glow = M.glows[i];
       core.material.color.setRGB(0.85 * eye, eye, eye);
       glow.material.color.setRGB(0.14 * eye, 0.5 * eye, 0.68 * eye);
-      glow.scale.setScalar(0.17 + 0.1 * wind);
+      glow.scale.setScalar(0.16 + 0.1 * wind);
     }
     this.root.updateMatrixWorld(true);
     if (this.alive && !this.hidden) for (const h of this.hurtboxes) h.update();
     this.gripK += ((this.state === 'latched' ? 1 : 0) - this.gripK) * Math.min(1, dt * (this.state === 'latched' ? 7 : 2.5));
   }
 
-  // Where its claws should be, by what it is doing (its own space: x to its
-  // left, y up from the ground, z ahead).
+  // Where its claws should be, how its fingers curl, and its head and jaw,
+  // by what it is doing (its own space: x to its left, y up, z ahead).
   _pose(dt, t) {
     const a = this.attack;
     const st = this.state;
     const k = this.stateDur > 0 ? Math.min(1, this.stateT / this.stateDur) : 0;
-    const sway = Math.sin(t * 2.1 + this.seed) * 0.08;
-    // At rest: arms out and forward, one higher, claws reaching for you.
-    const L = _p.set(0.85, 1.98 + sway, 0.65);
-    const R = _q.set(-0.8, 1.6 - sway, 0.8);
+    const sway = Math.sin(t * 2.1 + this.seed) * 0.06;
+    // At rest: hunched, arms reaching for you, one higher, claws twitching.
+    const L = _p.set(0.62, 1.55 + sway, 0.85);
+    const R = _q.set(-0.66, 1.75 - sway, 0.8);
     let rate = 9;
+    let cL = 0.55 + 0.15 * Math.sin(t * 1.3 + this.seed);
+    let cR = 0.55 + 0.15 * Math.sin(t * 1.1 + 2);
+    let spread = 1;
+    let headZ = 0;
+    let pitch = 0.16;
+    let jaw = 0.1 + 0.05 * Math.sin(t * 1.7);
     if (a && (st === 'windup' || st === 'strike')) {
       if (a.name === 'swipe') {
         // One arm (its right) drawn up and back, then raked across.
-        if (st === 'windup') R.lerp(SWIPE_UP, ease(k));
-        else {
+        if (st === 'windup') {
+          R.lerp(SWIPE_UP, ease(k));
+          cR = 0.3;
+          spread = 1.3;
+          headZ = -0.04;
+          pitch = 0.04;
+          jaw = 0.2 + 0.35 * k;
+        } else {
           R.set(-1.0 + 1.7 * ease(k), 2.55 - 1.25 * ease(k), -0.35 + 1.5 * Math.sin(Math.PI * Math.min(1, k * 1.2)));
+          cR = 0.95;
+          headZ = 0.1;
+          jaw = 0.45;
           rate = 30;
         }
       } else if (a.name === 'dive') {
         if (st === 'windup' || k < RISE) {
-          // Swept back as it gathers itself and climbs.
+          // Swept back as it gathers itself and climbs, roaring.
           L.set(0.8, 2.3, -0.75);
           R.set(-0.8, 2.3, -0.75);
+          cL = cR = 0.6;
+          pitch = -0.15;
+          jaw = 0.6;
         } else {
-          // Reaching ahead as it swoops.
+          // Reaching ahead as it swoops, claws open.
           L.set(0.45, 1.75, 1.25);
           R.set(-0.45, 1.75, 1.25);
+          cL = cR = 0.2;
+          spread = 1.4;
+          headZ = 0.12;
+          pitch = 0.3;
+          jaw = 0.65;
           rate = 20;
         }
       } else if (a.name === 'grab') {
         if (st === 'windup') {
-          // Arms flung wide and up.
+          // Arms flung wide and up, claws spread, a long roar.
           L.set(1.35, 2.45, 0.15);
           R.set(-1.35, 2.45, 0.15);
+          cL = cR = 0.12;
+          spread = 1.5;
+          headZ = -0.08;
+          pitch = -0.12;
+          jaw = 0.25 + 0.5 * k;
         } else {
           L.set(0.32, 1.85, 1.5);
           R.set(-0.32, 1.85, 1.5);
+          cL = cR = 1.3;
+          headZ = 0.15;
+          jaw = 0.45;
           rate = 30;
         }
       }
     } else if (st === 'stagger') {
       L.set(0.8, 2.2, -0.5);
       R.set(-0.8, 2.2, -0.5);
+      cL = cR = 0.8;
+      headZ = -0.08;
+      pitch = -0.2;
+      jaw = 0.4;
       rate = 14;
     }
     const f = Math.min(1, dt * rate);
     this.hands[0].lerp(L, f);
     this.hands[1].lerp(R, f);
+    const g = Math.min(1, dt * 10);
+    this.curl[0] += (cL - this.curl[0]) * g;
+    this.curl[1] += (cR - this.curl[1]) * g;
+    this.spread[0] += (spread - this.spread[0]) * g;
+    this.spread[1] += (spread - this.spread[1]) * g;
+    const h = Math.min(1, dt * 8);
+    this.headZ += (headZ - this.headZ) * h;
+    this.headPitch += (pitch - this.headPitch) * h;
+    this.jawOpen += (jaw - this.jawOpen) * Math.min(1, dt * 12);
   }
 
   // A point of it in the world: its own space (x left, y up, z ahead).
@@ -529,6 +635,16 @@ export class Wraith extends Enemy {
   _at(k, out) {
     const p = this.strands.pts;
     return this._w(p[k * 3], p[k * 3 + 1], p[k * 3 + 2], out);
+  }
+
+  // Somewhere on the surface of its spine and tail (`s0` and on, 0 the neck
+  // and 1 the tail's tip), `k` times out, in the world.
+  _onBody(s0, k, out) {
+    const T = this.tubes;
+    const s = s0 + (1 - s0) * Math.sqrt(Math.random());
+    T.surface(T.specs[SPINE].ring0 + Math.round(s * (SPINE_RINGS - 1)), Math.random() * Math.PI * 2, k, out);
+    this._w(out.x, out.y, out.z, out);
+    return s;
   }
 
   // ------------------------------------------------- what trails behind ---
@@ -596,244 +712,174 @@ export class Wraith extends Enemy {
     }
   }
 
-  // Lays strand point `i` at (x, y, z) of it as it was `L` seconds ago.
-  _place(i, x, y, z, L) {
+  // (x, y, z) of it as it was `L` seconds ago, where that is now, in `out`.
+  _lag(x, y, z, L, out) {
     const f = Math.min(LAGS - 1.0001, Math.max(0, L / LAG_STEP));
     const k = f | 0;
     const w = f - k;
     const c = this.lagC[k] + (this.lagC[k + 1] - this.lagC[k]) * w;
     const s = this.lagS[k] + (this.lagS[k + 1] - this.lagS[k]) * w;
-    const ox = this.lagX[k] + (this.lagX[k + 1] - this.lagX[k]) * w;
-    const oy = this.lagY[k] + (this.lagY[k + 1] - this.lagY[k]) * w;
-    const oz = this.lagZ[k] + (this.lagZ[k + 1] - this.lagZ[k]) * w;
-    this.strands.set(i, x * c + z * s + ox, y + oy, -x * s + z * c + oz);
+    return out.set(
+      x * c + z * s + this.lagX[k] + (this.lagX[k + 1] - this.lagX[k]) * w,
+      y + this.lagY[k] + (this.lagY[k + 1] - this.lagY[k]) * w,
+      -x * s + z * c + this.lagZ[k] + (this.lagZ[k + 1] - this.lagZ[k]) * w,
+    );
   }
 
-  // ------------------------------------------------------- its strands ---
+  // Lays strand point `i` at (x, y, z) of it as it was `L` seconds ago.
+  _place(i, x, y, z, L) {
+    this._lag(x, y, z, L, _t);
+    this.strands.set(i, _t.x, _t.y, _t.z);
+  }
 
-  _shape(t) {
-    const loose = 1 - this.fade;
-    // Where its chest flows into its tail.
-    this._spiral(0, t, _t);
-    const t0x = _t.x;
-    const t0y = _t.y;
-    const t0z = _t.z;
-    this._armFrame(0);
-    this._armFrame(1);
-    for (const sp of this.strands.specs) {
-      if (sp.kind === BODY) this._bodyStrand(sp, t, loose, t0x, t0y, t0z);
-      else if (sp.kind === HAIR) this._hairStrand(sp, t, loose);
-      else if (sp.kind === FACE) this._faceStrand(sp, loose);
-      else if (sp.kind === SKULL) this._skullStrand(sp, loose);
-      else if (sp.kind === RIB) this._ribStrand(sp, t, loose);
-      else if (sp.kind === ARM) this._armStrand(sp, t, loose);
-      else if (sp.kind === FINGER) this._fingerStrand(sp, loose);
-      else this._tendrilStrand(sp, t, loose);
+  // ----------------------------------------------------------- its body ---
+
+  // Its head: thrust forward, tilted to look down at you (or thrown back
+  // to roar), swaying; the jaw drops as it opens its mouth.
+  _layHead(t) {
+    const H = this.head;
+    const g = H.group;
+    g.scale.setScalar(1.3);
+    g.position.set(0.02 * Math.sin(t * 0.7), 2.17 + 0.02 * Math.sin(t * 1.9 + this.seed), 0.56 + this.headZ);
+    g.rotation.set(this.headPitch + 0.04 * Math.sin(t * 1.3), 0.06 * Math.sin(t * 0.6 + 1), 0.05 * Math.sin(t * 0.9));
+    g.updateMatrix();
+    const open = this.jawOpen + (1 - this.fade) * 0.4;
+    H.jaw.position.y = -0.082 - open * 0.085;
+    H.jaw.rotation.x = open * 0.3;
+    H.mouth.scale.y = 0.6 + open * 1.1;
+    H.mouth.material.uniforms.uOpacity.value = smooth(0.06, 0.35, open);
+  }
+
+  _layTubes(t) {
+    const T = this.tubes;
+    const swell = 1 + 1.2 * (1 - this.fade);
+    // The spine: from under the skull down the neck, through the chest and
+    // belly to the waist, then the tail.
+    _h.set(0, -0.15, -0.07).applyMatrix4(this.head.group.matrix);
+    const breathe = Math.sin(t * 2.2) * 0.03;
+    const P = this._P || (this._P = new Float32Array(21));
+    const key = (j, x, y, z) => {
+      P[j * 3] = x;
+      P[j * 3 + 1] = y;
+      P[j * 3 + 2] = z;
+    };
+    key(0, _h.x, _h.y, _h.z);
+    key(1, _h.x, _h.y, _h.z);
+    key(2, 0, 1.99, 0.33 + this.headZ * 0.5);
+    key(3, 0.015 * Math.sin(t * 0.8), 1.8 + breathe * 0.5, 0.2);
+    key(4, 0.03 * Math.sin(t * 0.9 + 1), 1.56, 0.05);
+    key(5, 0.03 * Math.sin(t * 0.9 + 2), 1.36, -0.05);
+    key(6, P[15], P[16] - 0.2, P[17] - 0.05);
+    this._spiral(0, t, _q);
+    const ox = P[15] - _q.x;
+    const oy = P[16] - _q.y;
+    const oz = P[17] - _q.z;
+    for (let i = 0; i < SPINE_RINGS; i++) {
+      const s = i / (SPINE_RINGS - 1);
+      let x;
+      let y;
+      let z;
+      let ra;
+      let rb;
+      if (s <= TORSO) {
+        const q = s / TORSO;
+        const seg = Math.min(3, (q * 4) | 0);
+        const f = q * 4 - seg;
+        const j = seg * 3;
+        x = cr(P[j], P[j + 3], P[j + 6], P[j + 9], f);
+        y = cr(P[j + 1], P[j + 4], P[j + 7], P[j + 10], f);
+        z = cr(P[j + 2], P[j + 5], P[j + 8], P[j + 11], f);
+        ra = knots(CHEST_W, q) * (1 + breathe * smooth(0.3, 0.6, q));
+        rb = knots(CHEST_D, q);
+      } else {
+        const v = (s - TORSO) / (1 - TORSO);
+        this._spiral(v, t, _q);
+        x = _q.x + ox;
+        y = _q.y + oy;
+        z = _q.z + oz;
+        ra = rb = (0.215 * Math.pow(1 - v, 0.85) + 0.012) * (1 + 0.1 * Math.sin(v * 9 - t * 2.5));
+      }
+      this._lag(x, y, z, 0.01 + 0.45 * Math.pow(s, 1.3), _t);
+      T.ring(SPINE, i, _t.x, _t.y, _t.z, ra * swell, rb * swell);
     }
+    T.build(SPINE, 1, 0, 0, t);
+    // Its shoulders: hunched, across its upper back from one to the other.
+    const yr = T.specs[YOKE].rings;
+    const sz = 0.24 + this.headZ * 0.3;
+    for (let i = 0; i < yr; i++) {
+      const u = i / (yr - 1);
+      const x = (1 - 2 * u) * 0.46;
+      const m = Math.sin(Math.PI * u);
+      this._lag(x, 1.95 + 0.11 * m, sz - 0.07 * m, 0.01, _t);
+      const r = (0.1 + 0.05 * m) * swell;
+      T.ring(YOKE, i, _t.x, _t.y, _t.z, r, r * 0.85);
+    }
+    T.build(YOKE, 0, 1, 0, t);
+    for (let hand = 0; hand < 2; hand++) this._layArm(hand, t, swell);
   }
 
-  // The line its tail follows, from where its chest ends (0) to the tip
-  // (1): down from its waist and round in a wide whirl below it, the tip
-  // curling into the middle. Returns how thick the tail is there; leaves
-  // which way round it is heading in `_th`.
+  // The line its tail follows, from its waist (0) to the tip (1): down and
+  // round in a wide whirl below it, tilted (its far side higher, so the whirl
+  // shows from in front), the tip curling into the middle.
   _spiral(v, t, out) {
     const th = 3.6 + v * 2.5 * Math.PI + 0.35 * Math.sin(t * 0.8 + v * 3);
     const R = 0.12 + 0.95 * Math.sin(Math.PI * Math.min(1, Math.pow(v, 0.85)));
     const dn = smooth(0, 0.5, v);
     const cx = R * Math.sin(th) - 0.25 * dn;
     const cz = R * Math.cos(th) * 0.85 - 0.5 * dn;
-    // (Tilted, its far side higher, so the whirl shows from in front.)
-    out.set(cx, 1.46 - 1.12 * dn + 0.12 * v * v - 0.28 * (cz + 0.5 * dn) * dn, cz);
-    this._th = th;
-    return 0.17 * Math.pow(1 - v, 0.9) + 0.015;
+    return out.set(cx, 1.46 - 1.02 * dn + 0.12 * v * v - 0.28 * (cz + 0.5 * dn) * dn, cz);
   }
 
-  // Point `i` of `n` along a body strand, if it is in the tail: the tail's
-  // line there [x, y, z, thickness, and which way out from the whirl's
-  // middle], worked out once a frame for each length of strand.
-  _spineAt(n, i, t) {
-    const C = (this._spines ||= {});
-    let c = C[n];
-    if (!c || c.t !== t) {
-      c = C[n] ||= { t: -1, a: new Float32Array(n * 6), v: new Float32Array(6) };
-      c.t = t;
-      for (let j = 0; j < n; j++) {
-        const s = j / (n - 1);
-        if (s < TORSO) continue;
-        const th = this._spiral((s - TORSO) / (1 - TORSO), t, _q);
-        const k = j * 6;
-        c.a[k] = _q.x;
-        c.a[k + 1] = _q.y;
-        c.a[k + 2] = _q.z;
-        c.a[k + 3] = th;
-        c.a[k + 4] = Math.sin(this._th);
-        c.a[k + 5] = Math.cos(this._th);
-      }
-    }
-    return c.a.subarray(i * 6, i * 6 + 6);
-  }
-
-  // Chest into tail: down through its chest (crossing one another on the
-  // way), then twisting round one another down the tail, weaving in and
-  // out; some come away near its end.
-  _bodyStrand(sp, t, loose, t0x, t0y, t0z) {
-    const n = sp.n;
-    for (let i = 0; i < n; i++) {
-      const s = i / (n - 1);
-      let x;
-      let y;
-      let z;
-      let thick;
-      let m = 0;
-      let rx = 0;
-      let rz = 0;
-      let tw;
-      let pe = 0;
-      if (s < TORSO) {
-        const q = s / TORSO;
-        const e = q * q * (3 - 2 * q);
-        // (Swaying a little, broad at the shoulders.)
-        x = t0x * e + 0.05 * Math.sin(q * Math.PI) * Math.sin(t * 0.9);
-        y = 2.08 + (t0y - 2.08) * e;
-        z = 0.02 + (t0z - 0.02) * e;
-        thick = 0.34 + (0.185 - 0.34) * e;
-        tw = sp.phi + q * sp.cross;
-        m = -0.2 * (1 - q);
-      } else {
-        const v = (s - TORSO) / (1 - TORSO);
-        // (The tail's line, worked out once a frame for every strand.)
-        const c = this._spineAt(n, i, t);
-        x = c[0];
-        y = c[1];
-        z = c[2];
-        thick = c[3];
-        rx = c[4];
-        rz = c[5];
-        m = smooth(0, 0.3, v);
-        tw = sp.phi + sp.cross + v * sp.twist * Math.PI;
-        pe = sp.peel * smooth(0.6, 1, v);
-      }
-      const rho = Math.min(1.3, Math.max(0, sp.rho + 0.4 * Math.sin(s * sp.f1 + sp.p1 + t * 0.7) + 0.16 * Math.sin(s * sp.f2 + sp.p2 - t * 1.1)));
-      const o = rho * thick * (1 + 2 * loose);
-      const ct = Math.cos(tw);
-      const st = Math.sin(tw);
-      x += (ct * 1.15 * (1 - m) + rx * ct * m) * o + rx * pe + 0.02 * Math.sin(t * 2.1 + s * 9 + sp.seed * 6);
-      y += st * 0.8 * m * o + pe * 0.6 + 0.025 * Math.sin(t * 2.7 + s * 11 + sp.seed * 9) + loose * 0.7 * s;
-      z += (st * 0.75 * (1 - m) + rz * ct * m) * o + rz * pe;
-      this._place(sp.start + i, x, y, z, 0.02 + 0.45 * Math.pow(s, 1.3));
-    }
-  }
-
-  // Hair: from the crown and the back of its skull (`lat` across it, `al`
-  // how far back), along the skull a little, then streaming up off it like
-  // flame, fanning out and rippling.
-  _hairStrand(sp, t, loose) {
-    const n = sp.n;
-    const lat = sp.lat;
-    const flare = 1 - 0.3 * lat * lat;
-    const x0 = 0.15 * lat;
-    const a1 = sp.al + (2.6 - sp.al) * 0.6;
-    for (let i = 0; i < n; i++) {
-      const u = i / (n - 1);
-      let x;
-      let y;
-      let z;
-      if (u < 0.15) {
-        const a = sp.al + (u / 0.15) * (a1 - sp.al);
-        x = x0;
-        y = 2.27 + 0.19 * Math.sin(a) * flare;
-        z = 0.17 * Math.cos(a);
-      } else {
-        const w = (u - 0.15) / 0.85;
-        x = x0 + lat * 0.45 * sp.len * w + 0.1 * w * Math.sin(w * sp.f1 - t * 3 + sp.p1);
-        y = 2.27 + 0.19 * Math.sin(a1) * flare + sp.len * 0.9 * w + 0.07 * w * Math.sin(w * sp.f2 - t * 2.6 + sp.p2);
-        z = 0.17 * Math.cos(a1) - 0.12 * w - sp.len * 0.3 * w * w + 0.06 * w * Math.cos(w * sp.f1 - t * 2 + sp.p2);
-      }
-      this._place(sp.start + i, x * (1 + loose), y + loose * 0.8 * u, z, 0.25 * u);
-    }
-  }
-
-  // Its skull: an arc over the crown from temple to temple.
-  _skullStrand(sp, loose) {
-    const back = Math.max(0, -sp.z) * 2;
-    for (let i = 0; i < sp.n; i++) {
-      const a = Math.PI * (0.1 + 0.8 * (i / (sp.n - 1)));
-      this._place(sp.start + i, 0.178 * (1 - back) * Math.cos(a) * (1 + loose), 2.27 + 0.19 * (1 - back * 0.5) * Math.sin(a) + loose * 0.5, sp.z, 0);
-    }
-  }
-
-  // Its face: a brow slanting down to the middle over each eye, cheek and
-  // jaw from the temple to the chin (its mouth the dark between), and the
-  // bone under each eye.
-  _faceStrand(sp, loose) {
-    const n = sp.n;
-    const s = sp.side * (1 + loose);
-    for (let i = 0; i < n; i++) {
-      const u = i / (n - 1);
-      const v = 1 - u;
-      let x;
-      let y;
-      let z;
-      if (sp.part === 0) {
-        x = 0.165 + (0.022 - 0.165) * u;
-        y = 2.345 + (2.3 - 2.345) * u + 0.014 * Math.sin(Math.PI * u);
-        z = 0.12 + (0.185 - 0.12) * u;
-      } else if (sp.part === 1) {
-        // (A curve through temple, cheek, jaw and chin.)
-        const b0 = v * v * v;
-        const b1 = 3 * v * v * u;
-        const b2 = 3 * v * u * u;
-        const b3 = u * u * u;
-        x = b0 * 0.168 + b1 * 0.17 + b2 * 0.11 + b3 * 0.02;
-        y = b0 * 2.34 + b1 * 2.14 + b2 * 2.0 + b3 * 1.99;
-        z = b0 * 0.07 + b1 * 0.1 + b2 * 0.12 + b3 * 0.15;
-      } else {
-        x = v * v * 0.14 + 2 * v * u * 0.09 + u * u * 0.05;
-        y = v * v * 2.265 + 2 * v * u * 2.22 + u * u * 2.14;
-        z = v * v * 0.14 + 2 * v * u * 0.19 + u * u * 0.18;
-      }
-      this._place(sp.start + i, x * s, y + loose * 0.5, z, 0);
-    }
-  }
-
-  // Ribs: curving round from its breastbone, rising and falling a little.
-  _ribStrand(sp, t, loose) {
-    const k = (1 - 0.1 * sp.row) * (1 + 0.03 * Math.sin(t * 2 + sp.row)) * (1 + loose);
-    const y0 = 1.99 - 0.11 * sp.row;
-    for (let i = 0; i < sp.n; i++) {
-      const b = 0.12 + 1.5 * (i / (sp.n - 1));
-      this._place(sp.start + i, sp.side * 0.3 * k * Math.sin(b), y0 - 0.07 * b, 0.2 * k * Math.cos(b), 0.02);
-    }
-  }
-
-  // Shoulder, elbow (bowed out, up and back) and hand of each arm, which
-  // way its forearm points, and across the hand.
+  // An arm by two bones from the shoulder to where the hand should be (the
+  // elbow out, down and back), the hand bent down at the wrist.
   _armFrame(hand) {
     const side = hand === 0 ? 1 : -1;
+    const A = this._A[hand];
     const H = this.hands[hand];
-    const A = (this._A ||= [new Float32Array(15), new Float32Array(15)])[hand];
-    A[0] = side * 0.34;
-    A[1] = 2.06;
-    A[2] = 0;
-    A[3] = (A[0] + H.x) * 0.5 + side * 0.28;
-    A[4] = (A[1] + H.y) * 0.5 + 0.16;
-    A[5] = H.z * 0.5 - 0.14;
-    A[6] = H.x;
-    A[7] = H.y;
-    A[8] = H.z;
-    let fx = H.x - A[3];
-    let fy = H.y - A[4];
-    let fz = H.z - A[5];
-    const fl = Math.hypot(fx, fy, fz) || 1;
-    fx /= fl;
-    fy /= fl;
-    fz /= fl;
-    A[9] = fx;
-    A[10] = fy;
-    A[11] = fz;
-    // (Across: the forearm crossed with up.)
-    let qx = -fz;
-    let qz = fx;
+    const sx = side * 0.44;
+    const sy = 1.97;
+    const sz = 0.24 + this.headZ * 0.3;
+    let dx = H.x - sx;
+    let dy = H.y - sy;
+    let dz = H.z - sz;
+    let d = Math.hypot(dx, dy, dz) || 1;
+    dx /= d;
+    dy /= d;
+    dz /= d;
+    d = Math.min(UPPER + FORE - 0.02, Math.max(0.3, d));
+    let px = side * 0.8;
+    let py = -0.45;
+    let pz = -0.4;
+    const dp = px * dx + py * dy + pz * dz;
+    px -= dx * dp;
+    py -= dy * dp;
+    pz -= dz * dp;
+    const pl = Math.hypot(px, py, pz) || 1;
+    const along = (UPPER * UPPER - FORE * FORE + d * d) / (2 * d);
+    const up = Math.sqrt(Math.max(0, UPPER * UPPER - along * along));
+    A[0] = sx;
+    A[1] = sy;
+    A[2] = sz;
+    A[3] = sx + dx * along + (px / pl) * up;
+    A[4] = sy + dy * along + (py / pl) * up;
+    A[5] = sz + dz * along + (pz / pl) * up;
+    A[6] = sx + dx * d;
+    A[7] = sy + dy * d;
+    A[8] = sz + dz * d;
+    let hx = A[6] - A[3];
+    let hy = A[7] - A[4];
+    let hz = A[8] - A[5];
+    let hl = Math.hypot(hx, hy, hz) || 1;
+    hx /= hl;
+    hy = hy / hl - 0.3;
+    hz /= hl;
+    hl = Math.hypot(hx, hy, hz) || 1;
+    hx /= hl;
+    hy /= hl;
+    hz /= hl;
+    // Across the hand (the hand's way crossed with up), and up from its back.
+    let qx = -hz;
+    let qz = hx;
     const ql = Math.hypot(qx, qz);
     if (ql < 0.05) {
       qx = 1;
@@ -842,56 +888,195 @@ export class Wraith extends Enemy {
       qx /= ql;
       qz /= ql;
     }
+    A[9] = hx;
+    A[10] = hy;
+    A[11] = hz;
     A[12] = qx;
     A[13] = 0;
     A[14] = qz;
+    A[15] = -qz * hy;
+    A[16] = qz * hx - qx * hz;
+    A[17] = qx * hy;
   }
 
-  // A point on an arm, `u` from shoulder (0) to hand (1).
+  // A point on an arm, `u` from shoulder (0) through elbow (0.5) to wrist.
   _armPoint(A, u, out) {
-    const a0 = (1 - u) * (1 - u);
-    const a1 = 2 * (1 - u) * u;
-    const a2 = u * u;
-    return out.set(a0 * A[0] + a1 * A[3] + a2 * A[6], a0 * A[1] + a1 * A[4] + a2 * A[7], a0 * A[2] + a1 * A[5] + a2 * A[8]);
+    const k = u < 0.5 ? 0 : 3;
+    const f = u < 0.5 ? u * 2 : u * 2 - 1;
+    return out.set(A[k] + (A[k + 3] - A[k]) * f, A[k + 1] + (A[k + 4] - A[k + 1]) * f, A[k + 2] + (A[k + 5] - A[k + 2]) * f);
   }
 
-  _armStrand(sp, t, loose) {
-    const A = this._A[sp.hand];
-    for (let i = 0; i < sp.n; i++) {
-      const u = i / (sp.n - 1);
-      this._armPoint(A, u, _q);
-      const rho = sp.rho + 0.3 * Math.sin(u * sp.f1 + sp.p1 + t * 0.9);
-      const o = (0.075 * (1 - u) + 0.028) * rho * (1 + 2 * loose);
-      const tw = sp.phi + u * 2.2;
-      this._place(sp.start + i, _q.x + 0.5 * Math.cos(tw) * o, _q.y + Math.cos(tw + 0.9) * o + 0.015 * Math.sin(t * 3 + u * 8 + sp.seed * 5), _q.z + Math.sin(tw) * o, 0.02 + 0.06 * u);
+  _layArm(hand, t, swell) {
+    const T = this.tubes;
+    const side = hand === 0 ? 1 : -1;
+    this._armFrame(hand);
+    const A = this._A[hand];
+    const arm = ARM + hand;
+    const rings = T.specs[arm].rings;
+    for (let i = 0; i < rings; i++) {
+      const u = i / (rings - 1);
+      if (u > 0.4 && u < 0.6) {
+        // (Round over the elbow.)
+        const b = (u - 0.4) / 0.2;
+        this._armPoint(A, 0.4, _p);
+        this._armPoint(A, 0.6, _q);
+        _p.multiplyScalar((1 - b) * (1 - b)).addScaledVector(_q, b * b);
+        _p.x += 2 * (1 - b) * b * A[3];
+        _p.y += 2 * (1 - b) * b * A[4];
+        _p.z += 2 * (1 - b) * b * A[5];
+      } else this._armPoint(A, u, _p);
+      const r = (u < 0.5 ? 0.1 + (0.06 - 0.1) * u * 2 : 0.06 + (0.04 - 0.06) * (u * 2 - 1)) + 0.012 * Math.exp(-(((u - 0.5) / 0.06) ** 2));
+      this._lag(_p.x, _p.y, _p.z, 0.02 + 0.05 * u, _t);
+      T.ring(arm, i, _t.x, _t.y, _t.z, r * swell, r * swell);
+    }
+    T.build(arm, 0, 1, 0, t);
+    // The palm.
+    const palm = PALM + hand;
+    const W = [0.042, 0.054, 0.055, 0.05];
+    for (let j = 0; j < 4; j++) {
+      const f = (0.115 * j) / 3;
+      this._lag(A[6] + A[9] * f, A[7] + A[10] * f, A[8] + A[11] * f, 0.07, _t);
+      T.ring(palm, j, _t.x, _t.y, _t.z, W[j] * swell, 0.022 * swell);
+    }
+    T.build(palm, A[12], A[13], A[14]);
+    // Four fingers and a thumb, fanned, hooked down toward the palm.
+    const curl = this.curl[hand] * (1 - 0.6 * (1 - this.fade));
+    const spread = this.spread[hand];
+    const qx = A[12] * side;
+    const qy = A[13] * side;
+    const qz = A[14] * side;
+    for (let f = 0; f < 5; f++) {
+      const thumb = f === 4;
+      let bx;
+      let by;
+      let bz;
+      let dx;
+      let dy;
+      let dz;
+      let len;
+      if (thumb) {
+        bx = A[6] + A[9] * 0.035 + qx * 0.05;
+        by = A[7] + A[10] * 0.035 + qy * 0.05;
+        bz = A[8] + A[11] * 0.035 + qz * 0.05;
+        dx = A[9] * 0.55 + qx * 0.8 - A[15] * 0.15;
+        dy = A[10] * 0.55 + qy * 0.8 - A[16] * 0.15;
+        dz = A[11] * 0.55 + qz * 0.8 - A[17] * 0.15;
+        len = 0.15;
+      } else {
+        const o = 0.042 - 0.028 * f;
+        bx = A[6] + A[9] * 0.105 + qx * o;
+        by = A[7] + A[10] * 0.105 + qy * o;
+        bz = A[8] + A[11] * 0.105 + qz * o;
+        const fan = (0.2 - 0.13 * f) * spread;
+        dx = A[9] + qx * fan;
+        dy = A[10] + qy * fan;
+        dz = A[11] + qz * fan;
+        len = [0.28, 0.32, 0.3, 0.24][f];
+      }
+      const dl = Math.hypot(dx, dy, dz) || 1;
+      dx /= dl;
+      dy /= dl;
+      dz /= dl;
+      const tube = FINGER + hand * 5 + f;
+      const n = T.specs[tube].rings;
+      let x = bx;
+      let y = by;
+      let z = bz;
+      for (let j = 0; j < n; j++) {
+        if (j > 0) {
+          const th = curl * (j / (n - 1)) * 1.75;
+          const c = Math.cos(th);
+          const s = Math.sin(th);
+          const step = len / (n - 1);
+          x += (dx * c - A[15] * s) * step;
+          y += (dy * c - A[16] * s) * step;
+          z += (dz * c - A[17] * s) * step;
+        }
+        const r = ((thumb ? 0.021 : 0.019) * (1 - 0.8 * (j / (n - 1))) + 0.003) * swell;
+        this._lag(x, y, z, 0.07, _t);
+        T.ring(tube, j, _t.x, _t.y, _t.z, r, r);
+      }
+      T.build(tube, A[12], A[13], A[14]);
     }
   }
 
-  // A claw: on from the hand, fanned across it, hooking down.
-  _fingerStrand(sp, loose) {
-    const A = this._A[sp.hand];
-    const fan = (sp.f - 1.5) * 0.3 * (1 + loose);
-    let dx = A[9] + A[12] * fan;
-    let dy = A[10] - 0.2;
-    let dz = A[11] + A[14] * fan;
-    const dl = Math.hypot(dx, dy, dz) || 1;
-    dx /= dl;
-    dy /= dl;
-    dz /= dl;
-    const len = sp.f === 1 || sp.f === 2 ? 0.38 : 0.3;
-    const bx = A[6] - A[9] * 0.05;
-    const by = A[7] - A[10] * 0.05;
-    const bz = A[8] - A[11] * 0.05;
+  // ------------------------------------------------------- its strands ---
+
+  _layStrands(t) {
+    const loose = 1 - this.fade;
+    for (const sp of this.strands.specs) {
+      if (sp.kind === FIBRE) this._fibre(sp, t, loose);
+      else if (sp.kind === HAIR) this._hair(sp, t, loose);
+      else if (sp.kind === RIB) this._rib(sp);
+      else this._tendril(sp, t, loose);
+    }
+  }
+
+  // A point on its spine's surface at `s` along it, `a` round it, `k`
+  // times out plus `extra` metres, into `out` (already where it trails to).
+  _spinePoint(s, a, k, extra, out) {
+    const T = this.tubes;
+    const r = s * (SPINE_RINGS - 1);
+    const i0 = Math.min(SPINE_RINGS - 2, r | 0);
+    const f = r - i0;
+    const ring = T.specs[SPINE].ring0 + i0;
+    T.surface(ring, a, k + extra / Math.max(0.03, T.ra[ring]), _p);
+    T.surface(ring + 1, a, k + extra / Math.max(0.03, T.ra[ring + 1]), _q);
+    return out.copy(_p).lerp(_q, f);
+  }
+
+  // Fibres over its body and down its tail, twisting and weaving; some come
+  // away from the tail near its end.
+  _fibre(sp, t, loose) {
+    for (let i = 0; i < sp.n; i++) {
+      const s = 0.07 + 0.93 * (i / (sp.n - 1));
+      const a = sp.phi + sp.twist * Math.PI * s + 0.4 * Math.sin(s * sp.f1 + sp.p1 + t * 0.7);
+      const k = sp.k + 0.12 * Math.sin(s * sp.f2 + sp.p2 - t * 1.1) + loose;
+      this._spinePoint(s, a, k, sp.peel * smooth(0.7, 1, s), _h);
+      this.strands.set(sp.start + i, _h.x, _h.y + loose * 0.6 * s, _h.z);
+    }
+  }
+
+  // Ribs: curving round its chest from the breastbone, dropping a little.
+  _rib(sp) {
+    const s = (0.42 + 0.1 * sp.row) * TORSO;
     for (let i = 0; i < sp.n; i++) {
       const w = i / (sp.n - 1);
-      this._place(sp.start + i, bx + dx * w * len, by + dy * w * len - 0.16 * w * w, bz + dz * w * len, 0.06);
+      this._spinePoint(s + 0.012 * w, Math.PI / 2 - sp.side * (0.05 + 1.45 * w), 1.05, 0, _h);
+      this.strands.set(sp.start + i, _h.x, _h.y, _h.z);
     }
   }
 
-  // Tendrils trailing off an arm: out, back and up or down, rippling.
-  _tendrilStrand(sp, t, loose) {
+  // Hair: from the crown and the back of its skull, streaming up and back
+  // off it like flame, rippling (in head space, carried with its head).
+  _hair(sp, t, loose) {
+    const m = this.head.group.matrix;
+    let rx = sp.lat * 0.9;
+    let ry = sp.up;
+    let rz = 0.1 - sp.back * 0.8;
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    rx = (rx / rl) * 0.135;
+    ry = 0.04 + (ry / rl) * 0.165;
+    rz = -0.07 + (rz / rl) * 0.24;
+    const L = sp.len * (1 + loose);
+    for (let i = 0; i < sp.n; i++) {
+      const w = i / (sp.n - 1);
+      _h.set(
+        rx + sp.lat * L * (0.35 * w + 0.2 * w * w) + 0.2 * L * w * Math.sin(w * sp.f1 * 1.4 - t * 3 + sp.p1),
+        ry + L * (0.35 + 0.35 * sp.up) * w + 0.16 * L * w * Math.sin(w * sp.f2 - t * 2.6 + sp.p2),
+        rz - L * (0.45 + 0.3 * sp.back) * w - L * 0.3 * w * w + 0.14 * L * w * Math.cos(w * sp.f1 - t * 2 + sp.p2),
+      ).applyMatrix4(m);
+      this._place(sp.start + i, _h.x, _h.y, _h.z, 0.25 * w);
+    }
+  }
+
+  // Tendrils trailing off an arm: out, back and up, curling and rippling.
+  _tendril(sp, t, loose) {
     const A = this._A[sp.hand];
-    this._armPoint(A, sp.at, _t);
+    this._armPoint(A, sp.at, _h);
+    const bx = _h.x;
+    const by = _h.y;
+    const bz = _h.z;
     let dx = sp.side * sp.out;
     let dy = sp.up;
     let dz = -sp.back;
@@ -904,9 +1089,9 @@ export class Wraith extends Enemy {
       const L = sp.len * w;
       this._place(
         sp.start + i,
-        _t.x + dx * L + 0.08 * w * Math.sin(w * sp.f1 - t * 3.4 + sp.p1),
-        _t.y + dy * L + sp.curl * sp.len * w * w + 0.16 * w * Math.sin(w * sp.f2 * 0.6 - t * 3 + sp.p2) + loose * 0.6 * w,
-        _t.z + dz * L + 0.12 * w * Math.cos(w * sp.f1 * 0.7 - t * 2.6 + sp.p2),
+        bx + dx * L + 0.08 * w * Math.sin(w * sp.f1 - t * 3.4 + sp.p1),
+        by + dy * L + sp.curl * sp.len * w * w + 0.16 * w * Math.sin(w * sp.f2 * 0.6 - t * 3 + sp.p2) + loose * 0.6 * w,
+        bz + dz * L + 0.12 * w * Math.cos(w * sp.f1 * 0.7 - t * 2.6 + sp.p2),
         0.05 + 0.3 * w,
       );
     }
@@ -936,18 +1121,33 @@ export class Wraith extends Enemy {
       return;
     }
     const fade = this.fade;
-    const S = this.strands;
     const dvx = this.alive ? this.drift.x : 0;
     const dvz = this.alive ? this.drift.z : 0;
-    // Glitter drifting off its strands (gold off the gold-flecked ones).
-    for (let i = this._n('glit', 260 * fade, dt); i > 0; i--) {
-      const k = (Math.random() * S.count) | 0;
-      this._at(k, _p);
-      const gold = this.tones[k] === TONE_GOLD && Math.random() < 0.7;
-      put(add, _p, dvx * 0.6 + rand(-0.25, 0.25), rand(-0.05, 0.3), dvz * 0.6 + rand(-0.25, 0.25), rand(0.35, 0.8), rand(0.02, 0.036), 0.008, gold ? GOLD : Math.random() < 0.5 ? WHITE : TEAL_HOT, gold ? GOLD_DIM : TEAL, 1, 0.8, 1.2);
+    // Glitter drifting off it: gold, violet and white off the tail.
+    for (let i = this._n('glit', 240 * fade, dt); i > 0; i--) {
+      let color;
+      let end;
+      if (Math.random() < 0.7) {
+        const s = this._onBody(0.12, rand(0.5, 1.05), _p);
+        const r = Math.random();
+        color = s > 0.3 && r < 0.35 ? GOLD : s > 0.3 && r < 0.5 ? VIOLET : r < 0.75 ? WHITE : TEAL_HOT;
+        end = color === GOLD ? GOLD_DIM : TEAL;
+      } else {
+        const k = (Math.random() * this.strands.count) | 0;
+        this._at(k, _p);
+        const gold = this.tones[k] === TONE_GOLD && Math.random() < 0.7;
+        color = gold ? GOLD : Math.random() < 0.5 ? WHITE : TEAL_HOT;
+        end = gold ? GOLD_DIM : TEAL;
+      }
+      put(add, _p, dvx * 0.6 + rand(-0.25, 0.25), rand(-0.05, 0.3), dvz * 0.6 + rand(-0.25, 0.25), rand(0.35, 0.8), rand(0.02, 0.036), 0.008, color, end, 1, 0.8, 1.2);
+    }
+    // A low mist rolling off its tail.
+    for (let i = this._n('mist', 5 * fade, dt); i > 0; i--) {
+      this._onBody(0.55, rand(0.3, 1), _p);
+      put(ctx.fx.alpha, _p, dvx * 0.3 + rand(-0.15, 0.15), rand(0.02, 0.12), dvz * 0.3 + rand(-0.15, 0.15), rand(1.8, 2.6), rand(0.5, 0.8), rand(1.2, 1.7), MIST, TEAL_DEEP, 0.13, 0.6, 0.3);
     }
     // Wisps peeling off the ends of its hair, tendrils and tail.
-    for (let i = this._n('wisp', 45 * fade, dt); i > 0; i--) {
+    for (let i = this._n('wisp', 40 * fade, dt); i > 0; i--) {
       const k = this.tips[(Math.random() * this.tips.length) | 0] - ((Math.random() * 3) | 0);
       this._at(k, _p);
       put(add, _p, dvx * 0.3 + rand(-0.3, 0.3), rand(0.15, 0.5), dvz * 0.3 + rand(-0.3, 0.3), rand(0.7, 1.2), 0.035, 0.05, TEAL, TEAL_DEEP, 0.6, 0.9, 2.5);
@@ -955,8 +1155,9 @@ export class Wraith extends Enemy {
     // Its claws leave trails as they strike.
     const a = this.attack;
     if (this.state === 'strike' && a && (a.name !== 'dive' || this.stateT / Math.max(1e-3, this.stateDur) > RISE)) {
-      for (const k of this.clawTips) {
-        this._at(k, _p);
+      const C = this.tubes.c;
+      for (const r of this.clawTips) {
+        this._w(C[r * 3], C[r * 3 + 1], C[r * 3 + 2], _p);
         put(add, _p, 0, 0, 0, 0.28, 0.05, 0.02, TEAL_HOT, TEAL, 1, 0, 0);
       }
     }
