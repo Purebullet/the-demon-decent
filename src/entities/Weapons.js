@@ -82,19 +82,24 @@ export const WEAPON_TYPES = {
 // Every weapon there is: a kind (its personality above) and a model of its
 // own (assets/manifest.js). You fall with the Rusted Shortsword; the demons
 // carry the rest, and only ever drop those.
+//
+// `rest`: how far it rests toward the bottom right of the screen (metres to
+// the right and down from the sword's place), so the big ones are no more
+// in the way than the sword: each covers about an eighth of the screen at
+// rest (they are moved off, not shrunk).
 export const WEAPON_MODELS = {
   sword: { type: 'sword', name: 'Rusted Shortsword', starter: true },
   swordBone: { type: 'sword', name: 'Bonebiter' },
   swordFlame: { type: 'sword', name: 'Flamberge' },
-  swordGreat: { type: 'sword', name: 'Runed Greatsword' },
-  axe: { type: 'axe', name: 'Bearded Axe' },
+  swordGreat: { type: 'sword', name: 'Runed Greatsword', rest: [0.2, 0.14] },
+  axe: { type: 'axe', name: 'Bearded Axe', rest: [0.22, 0.13] },
   axeTwin: { type: 'axe', name: 'Twin Crescent' },
-  axeHeadsman: { type: 'axe', name: "Headsman's Axe" },
+  axeHeadsman: { type: 'axe', name: "Headsman's Axe", rest: [0.24, 0.14] },
   axeHorn: { type: 'axe', name: 'Hornhook' },
-  mace: { type: 'mace', name: 'Flanged Mace' },
-  maceStar: { type: 'mace', name: 'Morning Star' },
-  maceHammer: { type: 'mace', name: 'Skull Maul' },
-  maceClub: { type: 'mace', name: 'Fanged Club' },
+  mace: { type: 'mace', name: 'Flanged Mace', rest: [0.19, 0.16] },
+  maceStar: { type: 'mace', name: 'Morning Star', rest: [0.13, 0.11] },
+  maceHammer: { type: 'mace', name: 'Skull Maul', rest: [0.25, 0.16] },
+  maceClub: { type: 'mace', name: 'Fanged Club', rest: [0.31, 0.2] },
 };
 
 // How good a dropped weapon is, shown by the colour it is lit in (never the
@@ -102,8 +107,8 @@ export const WEAPON_MODELS = {
 // carries an enchantment. Legendary hits twice as hard.
 export const RARITIES = [
   { name: 'Common', color: '#eeeae2', mult: 1.15, enchant: 0 },
-  { name: 'Uncommon', color: '#4c94ff', mult: 1.3, enchant: 0.15 },
-  { name: 'Rare', color: '#45e070', mult: 1.5, enchant: 0.3 },
+  { name: 'Uncommon', color: '#45e070', mult: 1.3, enchant: 0.15 },
+  { name: 'Rare', color: '#4c94ff', mult: 1.5, enchant: 0.3 },
   { name: 'Epic', color: '#bd5cff', mult: 1.72, enchant: 0.5 },
   { name: 'Legendary', color: '#ffc531', mult: 2, enchant: 0.75 },
 ];

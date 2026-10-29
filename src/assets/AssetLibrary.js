@@ -276,6 +276,12 @@ export const Assets = {
   // Where a weapon's working part is, in metres up from its grip: { tip,
   // from } - from the guard to the tip of a sword's blade, or the head of an
   // axe or a mace (null for a model not loaded).
+  // Whether a weapon's model has an edge that leads its swings (an axe's
+  // blade, by its entry in the manifest).
+  edged(id) {
+    return !!PROPS[id]?.edge;
+  },
+
   weaponShape(id) {
     return this.props.get(id)?.shape ?? null;
   },

@@ -33,7 +33,7 @@ import { Strands, Tubes, fleshMaterials, buildHead, TONE_TEAL, TONE_GOLD, TONE_G
 // must come before it notices you.
 const HOVER = 0.3;
 const DIVE_HEIGHT = 3.8;
-const WAKE = 15;
+const WAKE = 24;
 // The share of the dive's strike spent climbing (the rest is the swoop).
 const RISE = 0.32;
 
@@ -276,7 +276,7 @@ function buildBody() {
   const head = buildHead(mats);
   // (Its glowing shells are not drawn: they gave it glassy edges. Its paint
   // and the dark through its middle are its body now.)
-  root.add(tubes.core, brush.mesh, strands.mesh, head.group);
+  root.add(tubes.core, brush.mesh, brush.glow, strands.mesh, head.group);
   const eyes = [];
   const glows = [];
   for (const s of [1, -1]) {
@@ -574,7 +574,7 @@ export class Wraith extends Enemy {
     this._record(time);
     const M = this.model;
     const shown = !this.hidden && this.fade > 0.01;
-    M.tubes.core.visible = M.strands.mesh.visible = M.brush.mesh.visible = M.head.group.visible = shown;
+    M.tubes.core.visible = M.strands.mesh.visible = M.brush.mesh.visible = M.brush.glow.visible = M.head.group.visible = shown;
     // (It is laid out only while it can be seen: in front of you, or near
     // enough that some of it might be.)
     const pl = ctx.player;
@@ -582,6 +582,9 @@ export class Wraith extends Enemy {
     const dz = this.position.z - pl.position.z;
     const d = Math.hypot(dx, dz) || 1;
     const seen = d < 6 || -(Math.sin(pl.yaw) * dx + Math.cos(pl.yaw) * dz) / d > 0.1;
+    // Its glow: faint up close (it is paint there), stronger the further off
+    // it is, so it shows across the pit through the fog.
+    M.brush.glowMaterial.uniforms.uGlow.value = 0.18 + 2.2 * smooth(6, 32, d);
     if (shown && seen) {
       this._lags(time);
       this._layHead(time);

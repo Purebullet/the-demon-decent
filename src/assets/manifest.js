@@ -138,7 +138,9 @@ const LOOK =
 export const PROPS = {
   sword: { model: 'assets/models/sword.glb', size: 1.15, weapon: true, guard: true, prompt: `One-handed longsword, notched dark iron blade, cross guard, leather-wrapped grip, round pommel, ${LOOK}` },
   axe: { model: 'assets/models/axe.glb', size: 1.25, weapon: true, edge: true, prompt: `Bearded battle axe, wide crescent iron head with notches, long dark wooden haft bound with leather, ${LOOK}` },
-  mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
+  // (Its model came out with a broad axe's blade, not flanges: it is edged,
+  // so its blade leads the swing as an axe's does.)
+  mace: { model: 'assets/models/mace.glb', size: 1.0, weapon: true, edge: true, prompt: `Flanged spiked mace, iron head with spikes, dark wooden haft with leather grip, ${LOOK}` },
   // The weapons demons drop: three more of each kind, each its own shape.
   swordBone: { model: 'assets/models/sword-bone.glb', size: 1.2, weapon: true, guard: true, prompt: `Demonic straight longsword, serrated blackened steel blade with a glowing red crack down its fuller, crossguard of two curved horns, bone-wrapped grip, small skull pommel, ${LOOK}` },
   swordFlame: { model: 'assets/models/sword-flame.glb', size: 1.2, weapon: true, guard: true, prompt: `Flamberge sword with a long wavy flame-shaped dark steel blade, ornate curled crossguard, crimson leather grip, ring pommel, ${LOOK}` },

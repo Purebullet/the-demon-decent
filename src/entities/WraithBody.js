@@ -92,6 +92,7 @@ uniform vec3 uLight;
 uniform vec3 uMid;
 uniform vec3 uDark;
 uniform vec3 uBright;
+uniform float uGlow;
 varying float vU;
 varying float vSide;
 varying float vSeed;
@@ -108,7 +109,15 @@ void main() {
   vec3 col = vTone < 0.5 ? uLight : vTone < 1.5 ? uMid : vTone < 2.5 ? uDark : uBright;
   // (Its bright streaks lighter still, toward white.)
   col = mix(col, uBright, streak * streak * 0.4 * step(vTone, 1.5) + uHeat * 0.5 * step(vTone, 1.5));
+#ifdef GLOW
+  // Its light, added over the paint (not off its dark strokes): faint up
+  // close, so it keeps its painted look, stronger from afar, so it still
+  // shows across the pit through the fog.
+  float lit = vTone > 1.5 && vTone < 2.5 ? 0.0 : 1.0;
+  gl_FragColor = vec4(col * a * uGlow * lit, 1.0);
+#else
   gl_FragColor = vec4(col, a);
+#endif
 }`;
 
 // Bristle streaks along a stroke (x), across it (y); white, the streaks in
@@ -228,25 +237,23 @@ export class Strands {
     geo.setIndex(index);
     const U = share || { uTime: { value: 0 }, uHeat: { value: 0 }, uFade: { value: 1 }, uPixel: { value: 0.002 }, uFogDensity: { value: 0 } };
     if (brush) {
-      this.material = new THREE.ShaderMaterial({
-        uniforms: {
-          uTime: U.uTime,
-          uHeat: U.uHeat,
-          uFade: U.uFade,
-          uPixel: U.uPixel,
-          uFogDensity: U.uFogDensity,
-          map: { value: brushTexture() },
-          uLight: { value: new THREE.Color(0.12, 0.42, 0.34) },
-          uMid: { value: new THREE.Color(0.035, 0.2, 0.17) },
-          uDark: { value: new THREE.Color(0.004, 0.01, 0.026) },
-          uBright: { value: new THREE.Color(0.38, 0.75, 0.66) },
-        },
-        vertexShader: VERT,
-        fragmentShader: BRUSH_FRAG,
-        transparent: true,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
+      const uniforms = {
+        uTime: U.uTime,
+        uHeat: U.uHeat,
+        uFade: U.uFade,
+        uPixel: U.uPixel,
+        uFogDensity: U.uFogDensity,
+        uGlow: { value: 0.15 },
+        map: { value: brushTexture() },
+        uLight: { value: new THREE.Color(0.12, 0.42, 0.34) },
+        uMid: { value: new THREE.Color(0.035, 0.2, 0.17) },
+        uDark: { value: new THREE.Color(0.004, 0.01, 0.026) },
+        uBright: { value: new THREE.Color(0.38, 0.75, 0.66) },
+      };
+      this.material = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: BRUSH_FRAG, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+      // The same strokes again, as light (BRUSH_FRAG's GLOW): `uGlow` how
+      // much.
+      this.glowMaterial = new THREE.ShaderMaterial({ uniforms, defines: { GLOW: '' }, vertexShader: VERT, fragmentShader: BRUSH_FRAG, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     } else {
       this.material = new THREE.ShaderMaterial({
         uniforms: {
@@ -271,6 +278,11 @@ export class Strands {
     this.mesh.frustumCulled = false;
     // (Paint first, the light of the thin strands over it.)
     this.mesh.renderOrder = brush ? 10 : 11;
+    if (this.glowMaterial) {
+      this.glow = new THREE.Mesh(geo, this.glowMaterial);
+      this.glow.frustumCulled = false;
+      this.glow.renderOrder = 10.5;
+    }
   }
 
   set(i, x, y, z) {
@@ -309,6 +321,7 @@ export class Strands {
   dispose() {
     this.mesh.geometry.dispose();
     this.material.dispose();
+    this.glowMaterial?.dispose();
   }
 }
 

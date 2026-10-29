@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OBB } from '../physics/OBB.js';
 import { queryHurtboxes } from '../physics/Hitbox.js';
-import { WEAPON_TYPES, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc, weaponReach, applyRim, betterWeapon } from './Weapons.js';
+import { WEAPON_TYPES, WEAPON_MODELS, buildWeaponMesh, arcDirection, gripPose, bladeQuaternion, prepareArc, weaponReach, applyRim, betterWeapon } from './Weapons.js';
 import { SPELLS, SPELL_IDS, castSpell } from './Spells.js';
 import { C, burst } from '../world/Particles.js';
 import { TorchFire } from '../world/TorchFire.js';
@@ -41,8 +41,6 @@ const POTION_HEAL = 0.2;
 const IDLE_DIR = new THREE.Vector3(0.24, 0.94, -0.24).normalize();
 const IDLE_AXIS = new THREE.Vector3(0.15, 0.1, 1).normalize();
 const IDLE_POS = new THREE.Vector3(0.3, -0.48, -0.52);
-// Where a mace rests against the others (see setWeapon).
-const MACE_REST = new THREE.Vector3(0.07, -0.06, 0);
 // Block: the blade laid across the body, flat toward the enemy.
 const BLOCK_DIR = new THREE.Vector3(-0.93, 0.3, -0.2).normalize();
 const BLOCK_AXIS = new THREE.Vector3(0, 0.1, 1).normalize();
@@ -297,18 +295,20 @@ export class Player {
     this.weaponPivot.clear();
     this.weaponMesh = buildWeaponMesh(weapon, { own: true });
     this.weaponPivot.add(this.weaponMesh);
-    // An axe rests with its edge forward, turning to lead with it as it
-    // swings (_updateWeapon): the angle about the haft from where its edge
-    // leads a swing (-X about the grip) to straight ahead at rest.
+    // An axe (or any edged head) rests with its edge forward, turning to
+    // lead with it as it swings (_updateWeapon): the angle about the haft
+    // from where its edge leads a swing (-X about the grip) to straight
+    // ahead at rest.
     this.restTwist = 0;
-    if (weapon.type === 'axe') {
+    if (weapon.type === 'axe' || Assets.edged(weapon.model)) {
       _v.set(0, 0, -1).applyQuaternion(_quat.copy(this.idleQuat).invert());
       if (Math.hypot(_v.x, _v.z) > 0.2) this.restTwist = Math.atan2(_v.z, -_v.x);
     }
     this.weaponMesh.rotation.y = this.restTwist;
-    // A mace's big head rests a little further out to the right and down,
-    // more of it off the screen.
-    this.restOffset = weapon.type === 'mace' ? MACE_REST : null;
+    // A big weapon rests further out to the right and down, more of it off
+    // the screen (WEAPON_MODELS `rest`).
+    const rest = WEAPON_MODELS[weapon.model]?.rest;
+    this.restOffset = rest ? new THREE.Vector3(rest[0], -rest[1], 0) : null;
     this.weaponMats = [];
     const [b0, b1] = blade;
     this.weaponPivot.updateMatrixWorld(true);
